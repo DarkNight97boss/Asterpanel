@@ -262,6 +262,7 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Ed25519 job signing + canonical encoding + examples | ✅ implemented |
 | Agent: mTLS server, signature verify, nonce/TTL, executor interface, Docker executor | ✅ implemented |
 | Node enrollment (CSR/CA flow) | ✅ implemented |
+| Domains & DNS (authoritative zones + records) | ✅ API → RBAC+OPA → signed `dns.apply` job → agent renders/writes a BIND zone file on the node |
 | Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
 | Deploy executors (git / static / node / php), reverse-proxy + SSL automation | 🟡 executor contracts + Docker/Caddy wiring; per-runtime builders iterating |
 | Backups / restore / rollback | 🟡 schema + job types + executor stubs |

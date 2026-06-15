@@ -148,3 +148,26 @@ type DatabaseInstance struct {
 	SizeMB              *int64
 	CreatedAt           time.Time
 }
+
+type Domain struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	FQDN           string
+	Status         string
+	VerifiedAt     *time.Time
+	AutoRenew      bool
+	CreatedAt      time.Time
+}
+
+type DNSRecord struct {
+	ID        uuid.UUID
+	ZoneID    uuid.UUID
+	ZoneName  string // joined from dns_zones for convenience
+	Name      string
+	Type      string
+	Content   string
+	TTL       int
+	Priority  *int
+	Proxied   bool
+	CreatedAt time.Time
+}

@@ -25,6 +25,9 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
   return request<T>(path, { method: "POST", body });
 }
+export async function apiDelete<T>(path: string): Promise<T> {
+  return request<T>(path, { method: "DELETE" });
+}
 
 export class ApiError extends Error {
   code: string;
@@ -227,6 +230,24 @@ export async function listDomains(): Promise<Domain[]> {
 export async function listDnsRecords(): Promise<DnsRecord[]> {
   const { records } = await request<{ records: DnsRecord[] }>("/api/v1/dns");
   return records ?? [];
+}
+export async function createDomain(fqdn: string) {
+  return apiPost<{ domain: Domain; job?: { id: string; dispatched: boolean } }>("/api/v1/domains", {
+    fqdn,
+  });
+}
+export async function createDnsRecord(input: {
+  domain_id: string;
+  name: string;
+  type: string;
+  content: string;
+  ttl?: number;
+  priority?: number;
+}) {
+  return apiPost<{ record: DnsRecord }>("/api/v1/dns", input);
+}
+export async function deleteDnsRecord(id: string) {
+  return apiDelete<{ deleted: boolean }>(`/api/v1/dns/${id}`);
 }
 
 // --- Databases (SQL) -------------------------------------------------------

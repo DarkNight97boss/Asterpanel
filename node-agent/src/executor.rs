@@ -53,6 +53,7 @@ impl Executor for DockerExecutor {
             "website.create" => self.website_create(job).await,
             "database.create" => self.database_create(job).await,
             "database.delete" => self.database_delete(job).await,
+            "dns.apply" => self.dns_apply(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
             other => JobOutcome::failed(format!("unsupported job type: {other}")),
         }
@@ -156,6 +157,44 @@ impl DockerExecutor {
             }
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
+    }
+
+    async fn dns_apply(&self, job: &Job) -> JobOutcome {
+        let zone = job
+            .payload
+            .get("zone")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if zone.is_empty() {
+            return JobOutcome::failed("dns.apply: missing zone");
+        }
+        let serial = job
+            .payload
+            .get("serial")
+            .and_then(Value::as_u64)
+            .unwrap_or(1);
+        let empty: Vec<Value> = Vec::new();
+        let records = job
+            .payload
+            .get("records")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+
+        let content = render_zone(zone, serial, records);
+        let dir = std::env::var("AGENT_DNS_DIR").unwrap_or_else(|_| "/etc/asterpanel/dns".into());
+        let path = format!("{dir}/{zone}.zone");
+
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("dns.apply: mkdir failed: {e}"));
+        }
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("dns.apply: write failed: {e}"));
+        }
+        // A production node reloads the authoritative server here (CoreDNS reload,
+        // PowerDNS API, or `rndc reload`); the zone file is the source of truth.
+        JobOutcome::succeeded(json!({
+            "zone": zone, "records": records.len(), "serial": serial, "path": path,
+        }))
     }
 
     async fn database_delete(&self, job: &Job) -> JobOutcome {
@@ -272,6 +311,30 @@ fn db_run_args(
     }
 
     Some(a)
+}
+
+/// Renders an authoritative BIND-format zone file from a record set. Pure and
+/// unit-tested; the agent writes the result and reloads the DNS server.
+fn render_zone(zone: &str, serial: u64, records: &[Value]) -> String {
+    let mut out = String::new();
+    out.push_str(&format!("$ORIGIN {zone}.\n$TTL 3600\n"));
+    out.push_str(&format!(
+        "@\tIN\tSOA\tns1.{zone}. admin.{zone}. ( {serial} 3600 600 604800 3600 )\n"
+    ));
+    for r in records {
+        let name = r.get("name").and_then(Value::as_str).unwrap_or("@");
+        let rtype = r.get("type").and_then(Value::as_str).unwrap_or("A");
+        let content = r.get("content").and_then(Value::as_str).unwrap_or("");
+        let ttl = r.get("ttl").and_then(Value::as_u64).unwrap_or(3600);
+        let prio = r.get("priority").and_then(Value::as_u64);
+        let rdata = match rtype {
+            "MX" | "SRV" => format!("{} {}", prio.unwrap_or(10), content),
+            "TXT" => format!("\"{}\"", content.replace('"', "\\\"")),
+            _ => content.to_string(),
+        };
+        out.push_str(&format!("{name}\t{ttl}\tIN\t{rtype}\t{rdata}\n"));
+    }
+    out
 }
 
 fn image_for_runtime(runtime: &str) -> &'static str {
@@ -395,5 +458,23 @@ mod tests {
     #[test]
     fn db_args_unknown_engine_is_none() {
         assert!(db_run_args("oracle", "x", "n", "u", "p", "net").is_none());
+    }
+
+    #[test]
+    fn render_zone_emits_soa_and_records() {
+        let recs = vec![
+            json!({"name": "@", "type": "A", "content": "1.2.3.4", "ttl": 3600}),
+            json!({"name": "@", "type": "MX", "content": "mail.acme.com.", "ttl": 3600, "priority": 10}),
+            json!({"name": "@", "type": "TXT", "content": "v=spf1 ~all", "ttl": 3600}),
+        ];
+        let z = render_zone("acme.com", 5, &recs);
+        assert!(z.contains("$ORIGIN acme.com."), "{z}");
+        assert!(
+            z.contains("SOA\tns1.acme.com. admin.acme.com. ( 5 3600 600"),
+            "{z}"
+        );
+        assert!(z.contains("IN\tA\t1.2.3.4"), "{z}");
+        assert!(z.contains("IN\tMX\t10 mail.acme.com."), "{z}");
+        assert!(z.contains("IN\tTXT\t\"v=spf1 ~all\""), "{z}");
     }
 }

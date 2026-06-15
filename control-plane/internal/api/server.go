@@ -117,6 +117,13 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("deploy.create", "deploy.create", "deployment")).
 				Post("/applications/{appID}/deployments", s.handleCreateDeployment)
 
+			// Domains & DNS
+			r.With(az.Require("domain.read", "domain.list", "domain")).Get("/domains", s.handleListDomains)
+			r.With(az.Require("domain.create", "domain.create", "domain")).Post("/domains", s.handleCreateDomain)
+			r.With(az.Require("dns.read", "dns.list", "dns_record")).Get("/dns", s.handleListDNSRecords)
+			r.With(az.Require("dns.manage", "dns.create", "dns_record")).Post("/dns", s.handleCreateDNSRecord)
+			r.With(az.Require("dns.manage", "dns.delete", "dns_record")).Delete("/dns/{recordID}", s.handleDeleteDNSRecord)
+
 			// Databases (managed SQL/KV instances)
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
