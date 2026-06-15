@@ -216,6 +216,12 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("branding.read", "branding.read", "organization")).Get("/branding", s.handleGetBranding)
 			r.With(az.Require("branding.manage", "branding.update", "organization")).Put("/branding", s.handleUpdateBranding)
 
+			// Migration tooling (import from cPanel/Plesk)
+			r.With(az.Require("migration.read", "migration.list", "migration")).Get("/migrations", s.handleListMigrations)
+			r.With(az.Require("migration.read", "migration.get", "migration")).Get("/migrations/{migrationID}", s.handleGetMigration)
+			r.With(az.Require("migration.manage", "migration.plan", "migration")).Post("/migrations", s.handleCreateMigration)
+			r.With(az.Require("migration.manage", "migration.import", "migration")).Post("/migrations/{migrationID}/import", s.handleRunImport)
+
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)
 			r.With(az.Require("apitoken.create", "apitoken.create", "api_token")).Post("/api-tokens", s.handleCreateAPIToken)

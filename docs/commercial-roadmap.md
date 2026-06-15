@@ -36,7 +36,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 19. ✅ **Reseller hierarchy + packages/quotas** — org hierarchy (`parent_org_id`/`is_reseller`); a reseller provisions child **sub-accounts** (child org + owner user + membership in one tx, one-time temp password) with their own plan, and can suspend/reactivate them; Reseller UI + per-plan create quotas already enforced. *(per-reseller aggregate package limits + disk/bandwidth metering next)*
 20. 🟡 **Billing & invoicing** — invoices + line items generated from the org plan (base fee + usage), numbered `INV-YYYY-NNNN`; list/detail/pay with a `PaymentProvider` seam (manual default, Stripe-ready) + Billing UI. *(real Stripe provider + usage-based overage metering + PDF/email next)*
 21. 🟡 **White-label / branding** — per-org branding (name/logo/color/support) with reseller→sub-account inheritance, applied live to the panel (`org_branding`, `GET/PUT /branding`, settings page + preview). *(customer-facing API keys + webhooks + docs portal next)*
-22. ⬜ **Migration tooling** — import from cPanel/Plesk.
+22. 🟡 **Migration tooling** — parse a normalized cPanel/Plesk account manifest into a plan (unit-tested), then import domains + their DNS for real; databases/mailboxes are logged as manual steps. *(archive upload/extraction + DB dump + IMAP mail sync next)*
 23. ⬜ **DNS clustering / secondary DNS**, multi-region.
 
 ## Intentional divergences from cPanel (by design — not gaps)

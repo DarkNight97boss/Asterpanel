@@ -9,6 +9,7 @@ import {
   Building2,
   Clock,
   Database,
+  DownloadCloud,
   FileCode2,
   FolderTree,
   Globe,
@@ -91,6 +92,7 @@ const groups: Group[] = [
     label: "Account",
     items: [
       { href: "/reseller", label: "Reseller", icon: Building2 },
+      { href: "/migrations", label: "Migrations", icon: DownloadCloud },
       { href: "/branding", label: "Branding", icon: Palette },
       { href: "/billing", label: "Billing", icon: Receipt },
       { href: "/notifications", label: "Notifications", icon: Bell },
