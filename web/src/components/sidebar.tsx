@@ -6,6 +6,7 @@ import {
   Activity,
   Archive,
   Bell,
+  Building2,
   Clock,
   Database,
   FileCode2,
@@ -87,6 +88,7 @@ const groups: Group[] = [
   {
     label: "Account",
     items: [
+      { href: "/reseller", label: "Reseller", icon: Building2 },
       { href: "/billing", label: "Billing", icon: Receipt },
       { href: "/notifications", label: "Notifications", icon: Bell },
     ],

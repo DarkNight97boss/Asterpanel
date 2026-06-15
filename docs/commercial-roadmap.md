@@ -33,7 +33,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 18. ✅ **Antivirus/malware scan** — signed `antivirus.scan` runs `clamscan -r` on a sandboxed site path; `POST /sites/{id}/files/scan` + a File Manager Scan action surface clean/infected. *(scan-on-upload hook + quarantine next)*
 
 ## Phase 4 — Commercial layer
-19. 🟡 **Reseller hierarchy + packages/quotas** — per-plan `limits` (sites/domains/databases/nodes/mailboxes) enforced on every create (`403 quota_exceeded`); `GET /billing` exposes plan + usage. *(reseller sub-accounts + disk/bandwidth metering next)*
+19. ✅ **Reseller hierarchy + packages/quotas** — org hierarchy (`parent_org_id`/`is_reseller`); a reseller provisions child **sub-accounts** (child org + owner user + membership in one tx, one-time temp password) with their own plan, and can suspend/reactivate them; Reseller UI + per-plan create quotas already enforced. *(per-reseller aggregate package limits + disk/bandwidth metering next)*
 20. 🟡 **Billing & invoicing** — invoices + line items generated from the org plan (base fee + usage), numbered `INV-YYYY-NNNN`; list/detail/pay with a `PaymentProvider` seam (manual default, Stripe-ready) + Billing UI. *(real Stripe provider + usage-based overage metering + PDF/email next)*
 21. ⬜ **White-label / branding**, customer-facing API + webhooks, docs portal.
 22. ⬜ **Migration tooling** — import from cPanel/Plesk.
