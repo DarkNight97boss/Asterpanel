@@ -112,6 +112,7 @@ type Website struct {
 	PrimaryDomainID uuid.NullUUID
 	Name            string
 	Runtime         string
+	RuntimeVersion  *string
 	Status          string
 	SSLEnabled      bool
 	SSLStatus       string

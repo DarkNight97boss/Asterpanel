@@ -122,6 +122,10 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("files.manage", "file.mkdir", "website")).Post("/sites/{siteID}/files/dir", s.handleMkdir)
 			r.With(az.Require("files.manage", "file.delete", "website")).Delete("/sites/{siteID}/files", s.handleDeleteFile)
 
+			// Runtime (language version per site)
+			r.With(az.Require("website.read", "runtime.list", "website")).Get("/runtimes", s.handleListRuntimes)
+			r.With(az.Require("website.create", "runtime.switch", "website")).Post("/sites/{siteID}/runtime", s.handleSwitchRuntime)
+
 			// Deployments
 			r.With(az.Require("deploy.create", "deploy.create", "deployment")).
 				Post("/applications/{appID}/deployments", s.handleCreateDeployment)

@@ -18,7 +18,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 7. ✅ **File Manager** — site-scoped, sandboxed agent file API (`file.list`/`file.read`/`file.write`/`file.mkdir`/`file.delete`) with path-traversal & symlink-escape protection and read/write size caps; integrated browse/edit/upload/delete UI. *(multipart streaming upload + archive extract next)*
 8. ✅ **Env & Secrets CRUD** — org-scoped endpoints over the existing schema; secrets sealed with envelope crypto (AES-256-GCM, AAD-bound) and never returned in plaintext.
 9. ✅ **Database users** — `database.user.create` runs `CREATE USER` in the DB container (Postgres). *(Adminer/phpMyAdmin + MySQL/Mongo next)*
-10. ⬜ **Runtime manager** — multi-PHP/Node version switch (redeploys the container).
+10. ✅ **Runtime manager** — per-site Node (18/20/22) and PHP (8.1–8.4) version switch; catalog-validated endpoint → signed `runtime.switch` recreates the container from the matching base image (version sanitized before the image tag). **Phase 1 complete.** *(buildpack-style auto-detect next)*
 
 ## Phase 2 — Email stack (the biggest cPanel surface)
 11. 🟡 **Mail server** — `mail.mailbox.create` writes Dovecot/Postfix config + `mail.server.ensure` launches a docker-mailserver container that reads it. *(full DMS tuning + DKIM signing + antispam next)*

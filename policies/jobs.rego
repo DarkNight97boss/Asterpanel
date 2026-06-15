@@ -32,6 +32,7 @@ allowed_types := {
 	"file.write",
 	"file.delete",
 	"file.mkdir",
+	"runtime.switch",
 	"health.check",
 }
 

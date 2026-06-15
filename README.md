@@ -271,6 +271,7 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | FTP/SFTP accounts | ✅ CRUD → sealed password → signed `ftp.account.create` → agent writes a chrooted OpenSSH SFTP `Match` block |
 | Database users | ✅ `POST /databases/{id}/users` → signed `database.user.create` → agent runs `CREATE USER` inside the DB container (Postgres) |
 | File manager (site-scoped) | ✅ browse/read/edit/upload/mkdir/delete → signed `file.list`/`file.read`/`file.write`/`file.mkdir`/`file.delete` jobs → agent's **sandboxed** file API (path-traversal & symlink-escape proof, 1 MiB read / 5 MiB write caps) scoped to the site's document root |
+| Runtime manager | ✅ per-site language version (Node 18/20/22, PHP 8.1–8.4) → catalog-validated `POST /sites/{id}/runtime` → signed `runtime.switch` job recreates the container from the matching base image (version sanitized before it reaches an image tag) |
 | Mail server (Postfix+Dovecot) | 🟡 `mail.server.ensure` launches a docker-mailserver container reading the written config (full DMS tuning + DKIM iterating) |
 | Hardening | ✅ custom-cert upload (`cert.install`), off-site **S3 backup** upload (aws CLI), private keys redacted from persisted jobs |
 | Deploy from Git | ✅ `app.deploy` executor: git clone → docker build → hardened run (prior image retained for rollback; Dockerfile-based, buildpacks iterating) |

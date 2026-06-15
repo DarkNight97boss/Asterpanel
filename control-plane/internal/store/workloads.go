@@ -21,23 +21,23 @@ func (s *Store) CreateWebsite(ctx context.Context, p CreateWebsiteParams) (*Webs
 	const q = `
 		INSERT INTO websites (organization_id, server_node_id, name, runtime, ssl_enabled)
 		VALUES ($1, $2, $3, $4, $5)
-		RETURNING id, organization_id, server_node_id, primary_domain_id, name, runtime, status,
-		          ssl_enabled, ssl_status, created_at`
+		RETURNING id, organization_id, server_node_id, primary_domain_id, name, runtime, runtime_version,
+		          status, ssl_enabled, ssl_status, created_at`
 	return scanWebsite(s.pool.QueryRow(ctx, q, p.OrgID, p.NodeID, p.Name, p.Runtime, p.SSLEnabled))
 }
 
 func (s *Store) GetWebsite(ctx context.Context, orgID, id uuid.UUID) (*Website, error) {
 	const q = `
-		SELECT id, organization_id, server_node_id, primary_domain_id, name, runtime, status,
-		       ssl_enabled, ssl_status, created_at
+		SELECT id, organization_id, server_node_id, primary_domain_id, name, runtime, runtime_version,
+		       status, ssl_enabled, ssl_status, created_at
 		FROM websites WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`
 	return scanWebsite(s.pool.QueryRow(ctx, q, id, orgID))
 }
 
 func (s *Store) ListWebsites(ctx context.Context, orgID uuid.UUID) ([]Website, error) {
 	const q = `
-		SELECT id, organization_id, server_node_id, primary_domain_id, name, runtime, status,
-		       ssl_enabled, ssl_status, created_at
+		SELECT id, organization_id, server_node_id, primary_domain_id, name, runtime, runtime_version,
+		       status, ssl_enabled, ssl_status, created_at
 		FROM websites WHERE organization_id = $1 AND deleted_at IS NULL ORDER BY created_at DESC`
 	rows, err := s.pool.Query(ctx, q, orgID)
 	if err != nil {
@@ -58,10 +58,19 @@ func (s *Store) ListWebsites(ctx context.Context, orgID uuid.UUID) ([]Website, e
 func scanWebsite(row rowScanner) (*Website, error) {
 	var w Website
 	if err := row.Scan(&w.ID, &w.OrganizationID, &w.ServerNodeID, &w.PrimaryDomainID, &w.Name,
-		&w.Runtime, &w.Status, &w.SSLEnabled, &w.SSLStatus, &w.CreatedAt); err != nil {
+		&w.Runtime, &w.RuntimeVersion, &w.Status, &w.SSLEnabled, &w.SSLStatus, &w.CreatedAt); err != nil {
 		return nil, norows(err)
 	}
 	return &w, nil
+}
+
+// SetWebsiteRuntime switches a site's runtime/version and marks it provisioning
+// while the agent redeploys the container.
+func (s *Store) SetWebsiteRuntime(ctx context.Context, id uuid.UUID, runtime string, version *string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE websites SET runtime = $2, runtime_version = $3, status = 'provisioning' WHERE id = $1`,
+		id, runtime, version)
+	return err
 }
 
 func (s *Store) SetWebsiteStatus(ctx context.Context, id uuid.UUID, status string) error {

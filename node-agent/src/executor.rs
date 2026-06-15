@@ -72,6 +72,7 @@ impl Executor for DockerExecutor {
             "file.write" => self.file_write(job).await,
             "file.delete" => self.file_delete(job).await,
             "file.mkdir" => self.file_mkdir(job).await,
+            "runtime.switch" => self.runtime_switch(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
@@ -650,6 +651,46 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({ "deleted": container }))
     }
 
+    /// Switches a site to a new runtime/version by recreating its container from
+    /// the matching base image. The old container is removed first so the name
+    /// is free; the site's bind-mounted document root is unaffected.
+    async fn runtime_switch(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let website_id = pv("website_id").unwrap_or("unknown");
+        let runtime = pv("runtime").unwrap_or("static");
+        let version = pv("version").unwrap_or("");
+
+        let network = format!("astp_tenant_{}", job.tenant_id);
+        if let Err(e) = ensure_network(&network).await {
+            return JobOutcome::failed(format!("network setup failed: {e}"));
+        }
+        let name = format!("astp_site_{website_id}");
+        let image = image_for_runtime_version(runtime, version);
+        // Recreate: free the name, then run the new image.
+        let _ = run_docker(&["rm".into(), "-f".into(), name.clone()]).await;
+        let args = hardened_run_args(
+            &name,
+            &network,
+            &image,
+            &job.tenant_id.to_string(),
+            website_id,
+        );
+        match run_docker(&args).await {
+            Ok(out) if out.status.success() => {
+                let cid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                JobOutcome::succeeded(json!({
+                    "container_id": cid, "image": image,
+                    "runtime": runtime, "version": version, "name": name,
+                }))
+            }
+            Ok(out) => JobOutcome::failed(format!(
+                "runtime.switch run failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
     // --- File manager (site-scoped, sandboxed) ------------------------------
     // Every op resolves a client path inside `<AGENT_SITES_DIR>/<site_id>` and
     // refuses anything that climbs above it (see `resolve_within`). Symlinks on
@@ -1174,6 +1215,22 @@ fn image_for_runtime(runtime: &str) -> &'static str {
     }
 }
 
+/// Maps runtime + a language version to a base image. The version is sanitized
+/// to digits and dots only — even though it arrives in a signed job, an image
+/// tag must never carry arbitrary characters. Falls back to the default image
+/// for the runtime when no (or an unsupported) version is given.
+fn image_for_runtime_version(runtime: &str, version: &str) -> String {
+    let safe = version
+        .chars()
+        .all(|c| c.is_ascii_digit() || c == '.')
+        && !version.is_empty();
+    match (runtime, safe) {
+        ("node", true) => format!("node:{version}-alpine"),
+        ("php", true) => format!("php:{version}-fpm-alpine"),
+        _ => image_for_runtime(runtime).to_string(),
+    }
+}
+
 /// Builds a non-privileged `docker run` argument vector (explicit argv — never a
 /// shell string, so payload values can't inject commands).
 fn hardened_run_args(
@@ -1506,5 +1563,22 @@ mod tests {
     fn display_path_adds_leading_slash() {
         assert_eq!(display_path(""), "/");
         assert_eq!(display_path("a/b"), "/a/b");
+    }
+
+    #[test]
+    fn runtime_image_maps_version_and_sanitizes() {
+        assert_eq!(image_for_runtime_version("node", "20"), "node:20-alpine");
+        assert_eq!(image_for_runtime_version("php", "8.3"), "php:8.3-fpm-alpine");
+        // empty version falls back to the runtime default
+        assert_eq!(image_for_runtime_version("php", ""), "php:8.3-fpm-alpine");
+        // injection attempts are rejected -> default image, never a crafted tag
+        assert_eq!(
+            image_for_runtime_version("node", "20-alpine; rm -rf /"),
+            "node:20-alpine"
+        );
+        assert_eq!(
+            image_for_runtime_version("node", "latest' OR '1"),
+            "node:20-alpine"
+        );
     }
 }

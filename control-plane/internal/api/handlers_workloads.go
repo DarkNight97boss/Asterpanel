@@ -45,14 +45,15 @@ func websiteView(ws store.Website) map[string]any {
 		node = ws.ServerNodeID.UUID
 	}
 	return map[string]any{
-		"id":             ws.ID,
-		"name":           ws.Name,
-		"runtime":        ws.Runtime,
-		"status":         ws.Status,
-		"server_node_id": node,
-		"ssl_enabled":    ws.SSLEnabled,
-		"ssl_status":     ws.SSLStatus,
-		"created_at":     ws.CreatedAt,
+		"id":              ws.ID,
+		"name":            ws.Name,
+		"runtime":         ws.Runtime,
+		"runtime_version": ws.RuntimeVersion,
+		"status":          ws.Status,
+		"server_node_id":  node,
+		"ssl_enabled":     ws.SSLEnabled,
+		"ssl_status":      ws.SSLStatus,
+		"created_at":      ws.CreatedAt,
 	}
 }
 
