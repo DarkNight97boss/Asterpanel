@@ -12,12 +12,12 @@ import (
 )
 
 type Config struct {
-	Env        string
-	LogLevel   string
-	LogFormat  string
-	HTTPAddr   string
-	PublicURL  string
-	WebURL     string
+	Env         string
+	LogLevel    string
+	LogFormat   string
+	HTTPAddr    string
+	PublicURL   string
+	WebURL      string
 	CORSOrigins []string
 
 	DatabaseURL string
@@ -25,25 +25,25 @@ type Config struct {
 	NATSURL     string
 	OPAURL      string
 
-	JWTSecret      []byte
-	AccessTTL      time.Duration
-	RefreshTTL     time.Duration
-	JWTIssuer      string
-	JWTAudience    string
+	JWTSecret   []byte
+	AccessTTL   time.Duration
+	RefreshTTL  time.Duration
+	JWTIssuer   string
+	JWTAudience string
 
 	WebAuthnRPID     string
 	WebAuthnRPName   string
 	WebAuthnRPOrigin string
 
-	JobSigningKeyID      string
-	JobSigningPrivPath   string
-	JobSigningPubPath    string
-	JobDefaultTTL        time.Duration
+	JobSigningKeyID    string
+	JobSigningPrivPath string
+	JobSigningPubPath  string
+	JobDefaultTTL      time.Duration
 
-	MTLSCACertPath     string
-	MTLSCAKeyPath      string
-	ClientCertPath     string
-	ClientKeyPath      string
+	MTLSCACertPath string
+	MTLSCAKeyPath  string
+	ClientCertPath string
+	ClientKeyPath  string
 
 	SecretsMasterKey []byte
 }
@@ -51,29 +51,29 @@ type Config struct {
 // Load reads configuration from the environment and validates it.
 func Load() (*Config, error) {
 	c := &Config{
-		Env:              getenv("ASTERPANEL_ENV", "development"),
-		LogLevel:         getenv("LOG_LEVEL", "info"),
-		LogFormat:        getenv("LOG_FORMAT", "json"),
-		HTTPAddr:         getenv("CONTROL_PLANE_HTTP_ADDR", ":8080"),
-		PublicURL:        getenv("CONTROL_PLANE_PUBLIC_URL", "http://localhost:8080"),
-		WebURL:           getenv("WEB_PUBLIC_URL", "http://localhost:3000"),
-		CORSOrigins:      splitNonEmpty(getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
-		DatabaseURL:      os.Getenv("DATABASE_URL"),
-		RedisURL:         getenv("REDIS_URL", "redis://redis:6379/0"),
-		NATSURL:          getenv("NATS_URL", "nats://nats:4222"),
-		OPAURL:           getenv("OPA_URL", "http://opa:8181"),
-		JWTIssuer:        getenv("JWT_ISSUER", "asterpanel"),
-		JWTAudience:      getenv("JWT_AUDIENCE", "asterpanel-web"),
-		WebAuthnRPID:     getenv("WEBAUTHN_RP_ID", "localhost"),
-		WebAuthnRPName:   getenv("WEBAUTHN_RP_NAME", "AsterPanel"),
-		WebAuthnRPOrigin: getenv("WEBAUTHN_RP_ORIGIN", "http://localhost:3000"),
-		JobSigningKeyID:  getenv("JOB_SIGNING_KEY_ID", "cp-dev-1"),
+		Env:                getenv("ASTERPANEL_ENV", "development"),
+		LogLevel:           getenv("LOG_LEVEL", "info"),
+		LogFormat:          getenv("LOG_FORMAT", "json"),
+		HTTPAddr:           getenv("CONTROL_PLANE_HTTP_ADDR", ":8080"),
+		PublicURL:          getenv("CONTROL_PLANE_PUBLIC_URL", "http://localhost:8080"),
+		WebURL:             getenv("WEB_PUBLIC_URL", "http://localhost:3000"),
+		CORSOrigins:        splitNonEmpty(getenv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		RedisURL:           getenv("REDIS_URL", "redis://redis:6379/0"),
+		NATSURL:            getenv("NATS_URL", "nats://nats:4222"),
+		OPAURL:             getenv("OPA_URL", "http://opa:8181"),
+		JWTIssuer:          getenv("JWT_ISSUER", "asterpanel"),
+		JWTAudience:        getenv("JWT_AUDIENCE", "asterpanel-web"),
+		WebAuthnRPID:       getenv("WEBAUTHN_RP_ID", "localhost"),
+		WebAuthnRPName:     getenv("WEBAUTHN_RP_NAME", "AsterPanel"),
+		WebAuthnRPOrigin:   getenv("WEBAUTHN_RP_ORIGIN", "http://localhost:3000"),
+		JobSigningKeyID:    getenv("JOB_SIGNING_KEY_ID", "cp-dev-1"),
 		JobSigningPrivPath: getenv("JOB_SIGNING_PRIVATE_KEY_PATH", "/secrets/job-signing/ed25519.key"),
 		JobSigningPubPath:  getenv("JOB_SIGNING_PUBLIC_KEY_PATH", "/secrets/job-signing/ed25519.pub"),
-		MTLSCACertPath:   getenv("MTLS_CA_CERT_PATH", "/secrets/ca/ca.crt"),
-		MTLSCAKeyPath:    getenv("MTLS_CA_KEY_PATH", "/secrets/ca/ca.key"),
-		ClientCertPath:   getenv("CONTROL_PLANE_CLIENT_CERT_PATH", "/secrets/control-plane/client.crt"),
-		ClientKeyPath:    getenv("CONTROL_PLANE_CLIENT_KEY_PATH", "/secrets/control-plane/client.key"),
+		MTLSCACertPath:     getenv("MTLS_CA_CERT_PATH", "/secrets/ca/ca.crt"),
+		MTLSCAKeyPath:      getenv("MTLS_CA_KEY_PATH", "/secrets/ca/ca.key"),
+		ClientCertPath:     getenv("CONTROL_PLANE_CLIENT_CERT_PATH", "/secrets/control-plane/client.crt"),
+		ClientKeyPath:      getenv("CONTROL_PLANE_CLIENT_KEY_PATH", "/secrets/control-plane/client.key"),
 	}
 
 	var err error

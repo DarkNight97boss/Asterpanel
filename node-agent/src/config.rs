@@ -43,7 +43,10 @@ impl Config {
                 "AGENT_TRUSTED_JOB_PUBKEY_PATH",
                 "/secrets/job-signing/ed25519.pub",
             ),
-            callback_url: env_or("AGENT_CONTROL_PLANE_CALLBACK_URL", "http://control-plane:8080"),
+            callback_url: env_or(
+                "AGENT_CONTROL_PLANE_CALLBACK_URL",
+                "http://control-plane:8080",
+            ),
             clock_skew_secs: env_or("AGENT_CLOCK_SKEW_SECS", "5").parse().unwrap_or(5),
             agent_version: env!("CARGO_PKG_VERSION").to_string(),
         })

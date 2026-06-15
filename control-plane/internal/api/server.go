@@ -25,22 +25,22 @@ import (
 
 // Deps is the server's dependency container.
 type Deps struct {
-	Cfg         *config.Config
-	Log         *slog.Logger
-	Store       *store.Store
-	JWT         *auth.JWTIssuer
-	Envelope    *crypto.Envelope
-	CA          *crypto.CA
-	Signer      *jobs.Signer
-	Dispatcher  *agentcomm.Dispatcher
-	OPA         *authz.OPAClient
-	Audit       audit.Sink
-	Redis       *redis.Client
-	Auth        *middleware.Authenticator
-	Authz       *middleware.Authorizer
-	RateLimiter      *middleware.RateLimiter
-	OpenAPIPath      string
-	AgentBaseURL     string
+	Cfg               *config.Config
+	Log               *slog.Logger
+	Store             *store.Store
+	JWT               *auth.JWTIssuer
+	Envelope          *crypto.Envelope
+	CA                *crypto.CA
+	Signer            *jobs.Signer
+	Dispatcher        *agentcomm.Dispatcher
+	OPA               *authz.OPAClient
+	Audit             audit.Sink
+	Redis             *redis.Client
+	Auth              *middleware.Authenticator
+	Authz             *middleware.Authorizer
+	RateLimiter       *middleware.RateLimiter
+	OpenAPIPath       string
+	AgentBaseURL      string
 	JobSigningPubPath string
 }
 

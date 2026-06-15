@@ -43,6 +43,9 @@ mod tests {
         let store = NonceStore::new(Duration::from_secs(60));
         assert!(store.check_and_insert("abc"), "first use must be accepted");
         assert!(!store.check_and_insert("abc"), "replay must be rejected");
-        assert!(store.check_and_insert("def"), "distinct nonce must be accepted");
+        assert!(
+            store.check_and_insert("def"),
+            "distinct nonce must be accepted"
+        );
     }
 }
