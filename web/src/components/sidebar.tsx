@@ -24,6 +24,7 @@ import {
   ScrollText,
   Server,
   Shield,
+  Terminal,
   ShieldCheck,
   type LucideIcon,
 } from "lucide-react";
@@ -41,6 +42,7 @@ const groups: Group[] = [
     items: [
       { href: "/nodes", label: "Nodes", icon: Server },
       { href: "/metrics", label: "Metrics", icon: Activity },
+      { href: "/logs", label: "Logs", icon: Terminal },
     ],
   },
   {

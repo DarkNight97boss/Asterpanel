@@ -42,6 +42,7 @@ const (
 	TypeFileDelete       Type = "file.delete"
 	TypeFileMkdir        Type = "file.mkdir"
 	TypeRuntimeSwitch    Type = "runtime.switch"
+	TypeLogsTail         Type = "logs.tail"
 	TypeHealthCheck      Type = "health.check"
 )
 

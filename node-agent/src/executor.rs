@@ -73,6 +73,7 @@ impl Executor for DockerExecutor {
             "file.delete" => self.file_delete(job).await,
             "file.mkdir" => self.file_mkdir(job).await,
             "runtime.switch" => self.runtime_switch(job).await,
+            "logs.tail" => self.logs_tail(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
@@ -691,6 +692,43 @@ impl DockerExecutor {
         }
     }
 
+    /// Tails a managed container's logs. The container name must be one of ours
+    /// (`astp_*`) — this both scopes access to platform containers and, since the
+    /// name can never begin with `-`, prevents argv injection into `docker logs`.
+    async fn logs_tail(&self, job: &Job) -> JobOutcome {
+        let container = job
+            .payload
+            .get("container")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !valid_container_name(container) {
+            return JobOutcome::failed("logs.tail: invalid container name");
+        }
+        let tail = job
+            .payload
+            .get("tail")
+            .and_then(Value::as_u64)
+            .unwrap_or(200)
+            .clamp(1, 2000);
+
+        match run_docker(&docker_logs_args(container, tail)).await {
+            Ok(out) => {
+                // docker writes container stdout→our stdout, stderr→our stderr.
+                let mut text = String::from_utf8_lossy(&out.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&out.stderr);
+                if !out.status.success() && text.is_empty() {
+                    return JobOutcome::failed(format!("logs.tail: {}", stderr.trim()));
+                }
+                if !stderr.is_empty() {
+                    text.push_str(&stderr);
+                }
+                let lines: Vec<&str> = text.lines().collect();
+                JobOutcome::succeeded(json!({ "container": container, "lines": lines }))
+            }
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
     // --- File manager (site-scoped, sandboxed) ------------------------------
     // Every op resolves a client path inside `<AGENT_SITES_DIR>/<site_id>` and
     // refuses anything that climbs above it (see `resolve_within`). Symlinks on
@@ -1215,6 +1253,29 @@ fn image_for_runtime(runtime: &str) -> &'static str {
     }
 }
 
+/// Builds the `docker logs` argv for a container (timestamps + bounded tail).
+fn docker_logs_args(container: &str, tail: u64) -> Vec<String> {
+    vec![
+        "logs".into(),
+        "--tail".into(),
+        tail.to_string(),
+        "--timestamps".into(),
+        container.into(),
+    ]
+}
+
+/// True only for platform-managed container names (`astp_*`, no shell/argv
+/// metacharacters). Guards `docker logs` against reading foreign containers or
+/// having the name parsed as a flag.
+fn valid_container_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 128
+        && name.starts_with("astp_")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+}
+
 /// Maps runtime + a language version to a base image. The version is sanitized
 /// to digits and dots only — even though it arrives in a signed job, an image
 /// tag must never carry arbitrary characters. Falls back to the default image
@@ -1563,6 +1624,26 @@ mod tests {
     fn display_path_adds_leading_slash() {
         assert_eq!(display_path(""), "/");
         assert_eq!(display_path("a/b"), "/a/b");
+    }
+
+    #[test]
+    fn docker_logs_args_have_tail_and_timestamps() {
+        assert_eq!(
+            docker_logs_args("astp_site_1", 100).join(" "),
+            "logs --tail 100 --timestamps astp_site_1"
+        );
+    }
+
+    #[test]
+    fn container_name_allowlist() {
+        assert!(valid_container_name("astp_site_abc-123"));
+        assert!(valid_container_name("astp_db_1"));
+        // foreign containers and argv-injection shapes are refused
+        assert!(!valid_container_name("postgres"));
+        assert!(!valid_container_name("-rf"));
+        assert!(!valid_container_name("astp_site_1; rm -rf /"));
+        assert!(!valid_container_name("../etc"));
+        assert!(!valid_container_name(""));
     }
 
     #[test]

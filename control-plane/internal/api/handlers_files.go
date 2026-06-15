@@ -67,9 +67,11 @@ func (s *Server) siteNode(ctx context.Context, orgID uuid.UUID, siteIDStr string
 	return siteID, site.ServerNodeID.UUID, nil
 }
 
-// runFileJob signs+dispatches a file job and waits (bounded) for the agent's
+// runAwaitedJob signs+dispatches an agent job and waits (bounded) for the
 // callback to land the result in the jobs table, returning the raw outcome JSON.
-func (s *Server) runFileJob(ctx context.Context, p *middleware.Principal, typ jobs.Type, nodeID uuid.UUID, payload map[string]any) (json.RawMessage, error) {
+// Shared by the read-style features (file manager, log tailing) that need a
+// synchronous-looking result over the async job protocol.
+func (s *Server) runAwaitedJob(ctx context.Context, p *middleware.Principal, typ jobs.Type, nodeID uuid.UUID, payload map[string]any) (json.RawMessage, error) {
 	if ok, _ := s.jobPolicyAllows(ctx, p, typ, nodeID); !ok {
 		return nil, errPolicyDenied
 	}
@@ -131,7 +133,7 @@ func (s *Server) handleListFiles(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid path")
 		return
 	}
-	res, err := s.runFileJob(ctx, p, jobs.TypeFileList, nodeID, map[string]any{
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeFileList, nodeID, map[string]any{
 		"site_id": siteID.String(), "path": rel,
 	})
 	if err != nil {
@@ -154,7 +156,7 @@ func (s *Server) handleReadFile(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a file path is required")
 		return
 	}
-	res, err := s.runFileJob(ctx, p, jobs.TypeFileRead, nodeID, map[string]any{
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeFileRead, nodeID, map[string]any{
 		"site_id": siteID.String(), "path": rel,
 	})
 	if err != nil {
@@ -214,7 +216,7 @@ func (s *Server) handleWriteFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := s.runFileJob(ctx, p, jobs.TypeFileWrite, nodeID, map[string]any{
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeFileWrite, nodeID, map[string]any{
 		"site_id": siteID.String(), "path": rel, "content_b64": b64,
 	})
 	if err != nil {
@@ -249,7 +251,7 @@ func (s *Server) handleMkdir(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a directory path is required")
 		return
 	}
-	res, err := s.runFileJob(ctx, p, jobs.TypeFileMkdir, nodeID, map[string]any{
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeFileMkdir, nodeID, map[string]any{
 		"site_id": siteID.String(), "path": rel,
 	})
 	if err != nil {
@@ -275,7 +277,7 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a path is required")
 		return
 	}
-	res, err := s.runFileJob(ctx, p, jobs.TypeFileDelete, nodeID, map[string]any{
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeFileDelete, nodeID, map[string]any{
 		"site_id": siteID.String(), "path": rel,
 	})
 	if err != nil {

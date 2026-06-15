@@ -33,6 +33,7 @@ allowed_types := {
 	"file.delete",
 	"file.mkdir",
 	"runtime.switch",
+	"logs.tail",
 	"health.check",
 }
 
