@@ -250,6 +250,56 @@ export async function deleteDnsRecord(id: string) {
   return apiDelete<{ deleted: boolean }>(`/api/v1/dns/${id}`);
 }
 
+// --- Webmail (IMAP/SMTP gateway) -------------------------------------------
+export interface Mailbox {
+  id: string;
+  address: string;
+  quota_mb: number;
+  used_mb: number;
+  status: string;
+}
+export interface WebmailFolder {
+  name: string;
+}
+export interface WebmailHeader {
+  uid: number;
+  from: string;
+  subject: string;
+  date: string;
+  seen: boolean;
+}
+export interface WebmailMessage {
+  uid: number;
+  from: string;
+  subject: string;
+  date: string;
+  body_text: string;
+  body_html: string;
+}
+export async function listMailboxes(): Promise<Mailbox[]> {
+  const { mailboxes } = await apiGet<{ mailboxes: Mailbox[] }>("/api/v1/email/mailboxes");
+  return mailboxes ?? [];
+}
+export async function webmailFolders(mailboxId: string): Promise<WebmailFolder[]> {
+  const { folders } = await apiGet<{ folders: WebmailFolder[] }>(`/api/v1/webmail/${mailboxId}/folders`);
+  return folders ?? [];
+}
+export async function webmailMessages(mailboxId: string, folder: string): Promise<WebmailHeader[]> {
+  const { messages } = await apiGet<{ messages: WebmailHeader[] }>(
+    `/api/v1/webmail/${mailboxId}/messages?folder=${encodeURIComponent(folder)}`,
+  );
+  return messages ?? [];
+}
+export async function webmailMessage(mailboxId: string, folder: string, uid: number): Promise<WebmailMessage> {
+  const { message } = await apiGet<{ message: WebmailMessage }>(
+    `/api/v1/webmail/${mailboxId}/messages/${uid}?folder=${encodeURIComponent(folder)}`,
+  );
+  return message;
+}
+export async function webmailSend(mailboxId: string, input: { to: string; subject: string; body: string }) {
+  return apiPost<{ sent: boolean }>(`/api/v1/webmail/${mailboxId}/send`, input);
+}
+
 // --- Databases (SQL) -------------------------------------------------------
 export interface DatabaseInstance {
   id: string;

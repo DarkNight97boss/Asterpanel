@@ -22,7 +22,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 
 ## Phase 2 — Email stack (the biggest cPanel surface)
 11. 🟡 **Mail server** — `mailboxes` schema + `mail.mailbox.create` writes Dovecot/Postfix config. *(running Postfix+Dovecot containers + DKIM signing next)*
-12. ⬜ **Webmail** — Roundcube container wired to the mailboxes.
+12. ✅ **Webmail** — **native** integrated IMAP/SMTP client (no Roundcube): Go gateway (`go-imap`/`go-message`) + Next.js UI (folders, read, compose/send); GreenMail dev server in compose. *(running Postfix/Dovecot per node next)*
 13. ⬜ **Forwarders, aliases, autoresponders, filters.**
 14. ⬜ **Deliverability** — DKIM/SPF/DMARC management, SpamAssassin/Rspamd antispam.
 

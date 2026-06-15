@@ -32,6 +32,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/logging"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webmail"
 )
 
 var version = "0.1.0-dev"
@@ -104,6 +105,13 @@ func runServe() {
 		rl = middleware.NewRateLimiter(rdb, 60, time.Minute) // 60 auth attempts/min/IP
 	}
 
+	webmailSvc := webmail.New(webmail.Config{
+		IMAPAddr: cfg.WebmailIMAPAddr,
+		SMTPAddr: cfg.WebmailSMTPAddr,
+		IMAPTLS:  cfg.WebmailIMAPTLS,
+		SMTPTLS:  cfg.WebmailSMTPTLS,
+	})
+
 	server := api.NewServer(api.Deps{
 		Cfg:               cfg,
 		Log:               log,
@@ -119,6 +127,7 @@ func runServe() {
 		Auth:              authenticator,
 		Authz:             authorizer,
 		RateLimiter:       rl,
+		Webmail:           webmailSvc,
 		OpenAPIPath:       getenv("OPENAPI_PATH", "api/openapi.yaml"),
 		AgentBaseURL:      getenv("AGENT_DEV_BASE_URL", "https://node-agent:7443"),
 		JobSigningPubPath: cfg.JobSigningPubPath,

@@ -95,6 +95,24 @@ func scanMailbox(row rowScanner) (*Mailbox, error) {
 	return &m, nil
 }
 
+// GetMailboxAuth returns a mailbox's address and the id of the secret holding
+// its (encrypted) password, scoped to the organization.
+func (s *Store) GetMailboxAuth(ctx context.Context, orgID, id uuid.UUID) (string, uuid.NullUUID, error) {
+	var address string
+	var secretID uuid.NullUUID
+	err := s.pool.QueryRow(ctx,
+		`SELECT address, credentials_secret_id FROM mailboxes WHERE id = $1 AND organization_id = $2`,
+		id, orgID).Scan(&address, &secretID)
+	return address, secretID, norows(err)
+}
+
+// GetSecretByID returns the ciphertext/nonce/key id of a stored secret.
+func (s *Store) GetSecretByID(ctx context.Context, id uuid.UUID) (ciphertext, nonce []byte, keyID string, err error) {
+	err = s.pool.QueryRow(ctx,
+		`SELECT ciphertext, nonce, key_id FROM secrets WHERE id = $1`, id).Scan(&ciphertext, &nonce, &keyID)
+	return ciphertext, nonce, keyID, norows(err)
+}
+
 // ── Backups & restore ────────────────────────────────────────────────────────
 
 func (s *Store) CreateBackup(ctx context.Context, orgID uuid.UUID, appID uuid.NullUUID, btype, trigger, storage string) (*Backup, error) {

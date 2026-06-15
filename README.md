@@ -265,7 +265,8 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Domains & DNS (authoritative zones + records) | ✅ API → RBAC+OPA → signed `dns.apply` job → agent renders/writes a BIND zone file on the node |
 | Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
 | SSL/TLS (ACME) | ✅ API → signed `cert.issue` job → agent writes a Caddy site (automatic HTTPS) |
-| Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (full mail-server stack + webmail iterating) |
+| Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (running mail-server containers iterating) |
+| Webmail — **native** IMAP/SMTP client (modern Roundcube alternative) | ✅ Go gateway (`go-imap`/`go-message`) + integrated Next.js UI: folders, read (text + sandboxed-iframe HTML), compose/send. Dev mail server (GreenMail) wired in compose |
 | Deploy from Git | ✅ `app.deploy` executor: git clone → docker build → hardened run (prior image retained for rollback; Dockerfile-based, buildpacks iterating) |
 | Backups & restore | ✅ API → signed `backup.create`/`backup.restore` jobs → agent tars/untars the target (S3/B2 upload iterating) |
 | Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |

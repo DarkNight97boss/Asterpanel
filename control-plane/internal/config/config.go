@@ -46,6 +46,13 @@ type Config struct {
 	ClientKeyPath  string
 
 	SecretsMasterKey []byte
+
+	// Webmail gateway: the IMAP/SMTP server the panel connects to on behalf of a
+	// mailbox. Empty => webmail endpoints return 503 (not configured).
+	WebmailIMAPAddr string
+	WebmailSMTPAddr string
+	WebmailIMAPTLS  bool
+	WebmailSMTPTLS  bool
 }
 
 // Load reads configuration from the environment and validates it.
@@ -74,6 +81,10 @@ func Load() (*Config, error) {
 		MTLSCAKeyPath:      getenv("MTLS_CA_KEY_PATH", "/secrets/ca/ca.key"),
 		ClientCertPath:     getenv("CONTROL_PLANE_CLIENT_CERT_PATH", "/secrets/control-plane/client.crt"),
 		ClientKeyPath:      getenv("CONTROL_PLANE_CLIENT_KEY_PATH", "/secrets/control-plane/client.key"),
+		WebmailIMAPAddr:    os.Getenv("WEBMAIL_IMAP_ADDR"),
+		WebmailSMTPAddr:    os.Getenv("WEBMAIL_SMTP_ADDR"),
+		WebmailIMAPTLS:     getenv("WEBMAIL_IMAP_TLS", "true") == "true",
+		WebmailSMTPTLS:     getenv("WEBMAIL_SMTP_TLS", "true") == "true",
 	}
 
 	var err error

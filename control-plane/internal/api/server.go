@@ -21,6 +21,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/jobs"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webmail"
 )
 
 // Deps is the server's dependency container.
@@ -39,6 +40,7 @@ type Deps struct {
 	Auth              *middleware.Authenticator
 	Authz             *middleware.Authorizer
 	RateLimiter       *middleware.RateLimiter
+	Webmail           *webmail.Service
 	OpenAPIPath       string
 	AgentBaseURL      string
 	JobSigningPubPath string
@@ -135,6 +137,12 @@ func (s *Server) routes() http.Handler {
 			// Email mailboxes
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/mailboxes", s.handleListMailboxes)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/mailboxes", s.handleCreateMailbox)
+
+			// Native webmail client (IMAP/SMTP gateway)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/folders", s.handleWebmailFolders)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/messages", s.handleWebmailMessages)
+			r.With(az.Require("email.read", "email.read", "mailbox")).Get("/webmail/{mailboxID}/messages/{uid}", s.handleWebmailMessage)
+			r.With(az.Require("email.manage", "email.send", "mailbox")).Post("/webmail/{mailboxID}/send", s.handleWebmailSend)
 
 			// Backups & restore
 			r.With(az.Require("backup.read", "backup.list", "backup")).Get("/backups", s.handleListBackups)
