@@ -274,6 +274,9 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Hardening | ✅ custom-cert upload (`cert.install`), off-site **S3 backup** upload (aws CLI), private keys redacted from persisted jobs |
 | Deploy from Git | ✅ `app.deploy` executor: git clone → docker build → hardened run (prior image retained for rollback; Dockerfile-based, buildpacks iterating) |
 | Backups & restore | ✅ API → signed `backup.create`/`backup.restore` jobs → agent tars/untars the target (S3/B2 upload iterating) |
+| Environment variables & secrets | ✅ org-scoped CRUD; secrets sealed with envelope encryption (AES-256-GCM, AAD-bound) and never returned in plaintext |
+| Firewall | ✅ CRUD → signed `firewall.apply` → agent renders an `nft` ruleset (`table inet asterpanel`) and loads it on the node |
+| Plan quotas & billing | ✅ per-plan `limits` (sites/domains/databases/nodes/mailboxes) enforced on every create (`403 quota_exceeded`); `GET /billing` exposes plan + usage for quota bars |
 | Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |
 | Observability (OTel/Prom/Grafana/Loki) | ✅ wired in compose; app instrumentation ongoing |
 

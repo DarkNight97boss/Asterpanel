@@ -77,6 +77,12 @@ func (s *Server) handleCreateDomain(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if over, used, limit := s.overQuota(ctx, p.OrgID, "domains"); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "quota_exceeded", "plan domain limit reached",
+			map[string]any{"used": used, "limit": limit})
+		return
+	}
+
 	d, zoneID, err := s.deps.Store.CreateDomainWithZone(ctx, p.OrgID, fqdn)
 	if err != nil {
 		httpx.Error(w, http.StatusConflict, "create_failed", "could not create domain (already exists?)")

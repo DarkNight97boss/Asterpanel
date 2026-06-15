@@ -92,6 +92,26 @@ func (s *Server) firstNode(ctx context.Context, orgID uuid.UUID) *store.ServerNo
 	return &nodes[0]
 }
 
+// overQuota reports whether creating another `resource` (e.g. "sites",
+// "domains") would exceed the org's billing-plan limit. No plan or a zero/absent
+// limit means unlimited.
+func (s *Server) overQuota(ctx context.Context, orgID uuid.UUID, resource string) (over bool, used, limit int) {
+	_, limits, err := s.deps.Store.GetOrgPlanLimits(ctx, orgID)
+	if err != nil || limits == nil {
+		return false, 0, 0
+	}
+	limit = limits["max_"+resource]
+	if limit <= 0 {
+		return false, 0, 0
+	}
+	counts, err := s.deps.Store.UsageCounts(ctx, orgID)
+	if err != nil {
+		return false, 0, 0
+	}
+	used = counts[resource]
+	return used >= limit, used, limit
+}
+
 func userView(u *store.User, orgID uuid.NullUUID) map[string]any {
 	v := map[string]any{
 		"id":         u.ID,

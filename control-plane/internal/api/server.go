@@ -162,6 +162,24 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("ftp.manage", "ftp.create", "ftp_account")).Post("/ftp-accounts", s.handleCreateFtp)
 			r.With(az.Require("ftp.manage", "ftp.delete", "ftp_account")).Delete("/ftp-accounts/{ftpID}", s.handleDeleteFtp)
 
+			// Environment variables
+			r.With(az.Require("env.read", "env.list", "env_var")).Get("/env", s.handleListEnv)
+			r.With(az.Require("env.manage", "env.create", "env_var")).Post("/env", s.handleCreateEnv)
+			r.With(az.Require("env.manage", "env.delete", "env_var")).Delete("/env/{envID}", s.handleDeleteEnv)
+
+			// Secrets (org-level)
+			r.With(az.Require("secret.read", "secret.list", "secret")).Get("/secrets", s.handleListSecrets)
+			r.With(az.Require("secret.manage", "secret.create", "secret")).Post("/secrets", s.handleCreateSecret)
+			r.With(az.Require("secret.manage", "secret.delete", "secret")).Delete("/secrets/{secretID}", s.handleDeleteSecret)
+
+			// Firewall
+			r.With(az.Require("firewall.read", "firewall.list", "firewall_rule")).Get("/firewall", s.handleListFirewall)
+			r.With(az.Require("firewall.manage", "firewall.create", "firewall_rule")).Post("/firewall", s.handleCreateFirewall)
+			r.With(az.Require("firewall.manage", "firewall.delete", "firewall_rule")).Delete("/firewall/{ruleID}", s.handleDeleteFirewall)
+
+			// Billing & usage
+			r.With(az.Require("billing.read", "billing.read", "billing")).Get("/billing", s.handleBilling)
+
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)
 			r.With(az.Require("apitoken.create", "apitoken.create", "api_token")).Post("/api-tokens", s.handleCreateAPIToken)

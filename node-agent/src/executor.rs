@@ -62,6 +62,7 @@ impl Executor for DockerExecutor {
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "cert.install" => self.cert_install(job).await,
+            "firewall.apply" => self.firewall_apply(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
@@ -580,6 +581,28 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({"domain": domain, "cert": cert_path}))
     }
 
+    async fn firewall_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let rules = job
+            .payload
+            .get("rules")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_nftables(rules);
+        let dir = std::env::var("AGENT_NFTABLES_DIR")
+            .unwrap_or_else(|_| "/etc/asterpanel/firewall".into());
+        let path = format!("{dir}/asterpanel.nft");
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("firewall.apply: mkdir failed: {e}"));
+        }
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("firewall.apply: write failed: {e}"));
+        }
+        // Best-effort live load; the file is the source of truth (re-applied on boot).
+        let _ = run_cmd("nft", &["-f".into(), path.clone()]).await;
+        JobOutcome::succeeded(json!({"path": path, "rules": rules.len()}))
+    }
+
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
         let mail_dir = job
             .payload
@@ -832,6 +855,31 @@ fn s3_cp_args(file: &str, bucket: &str, key: &str) -> Vec<String> {
         file.into(),
         format!("s3://{bucket}/{key}"),
     ]
+}
+
+/// Renders an nftables ruleset from the org's firewall rules (deny => drop).
+fn render_nftables(rules: &[Value]) -> String {
+    let mut out = String::from(
+        "table inet asterpanel {\n    chain input {\n        type filter hook input priority 0; policy accept;\n",
+    );
+    for r in rules {
+        let action = r.get("action").and_then(Value::as_str).unwrap_or("allow");
+        let source = r.get("source").and_then(Value::as_str).unwrap_or("");
+        let port = r.get("port").and_then(Value::as_str).unwrap_or("*");
+        if source.is_empty() {
+            continue;
+        }
+        let verb = if action == "deny" { "drop" } else { "accept" };
+        if port == "*" {
+            out.push_str(&format!("        ip saddr {source} {verb}\n"));
+        } else {
+            out.push_str(&format!(
+                "        ip saddr {source} tcp dport {port} {verb}\n"
+            ));
+        }
+    }
+    out.push_str("    }\n}\n");
+    out
 }
 
 fn render_crontab(entries: &[Value]) -> String {
@@ -1148,5 +1196,17 @@ mod tests {
         let s = mail_server_args("/etc/mail").join(" ");
         assert!(s.contains("mailserver/docker-mailserver:latest"), "{s}");
         assert!(s.contains("143:143"), "{s}");
+    }
+
+    #[test]
+    fn nftables_renders_allow_and_deny() {
+        let rules = vec![
+            json!({"action":"deny","source":"203.0.113.66","port":"*"}),
+            json!({"action":"allow","source":"10.0.0.0/8","port":"22"}),
+        ];
+        let s = render_nftables(&rules);
+        assert!(s.contains("table inet asterpanel"), "{s}");
+        assert!(s.contains("ip saddr 203.0.113.66 drop"), "{s}");
+        assert!(s.contains("ip saddr 10.0.0.0/8 tcp dport 22 accept"), "{s}");
     }
 }

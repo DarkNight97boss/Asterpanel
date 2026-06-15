@@ -16,7 +16,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 5. ✅ **Cron jobs** — `cron_jobs` schema + CRUD + `cron.apply` writes the node crontab.
 6. ✅ **FTP/SFTP** — `ftp_accounts` schema + CRUD + `ftp.account.create` writes a chrooted OpenSSH SFTP `Match` block.
 7. ⬜ **File Manager** — agent file API (list/read/write/upload/delete) scoped to a site.
-8. ⬜ **Env & Secrets CRUD** — endpoints over the existing schema + envelope crypto.
+8. ✅ **Env & Secrets CRUD** — org-scoped endpoints over the existing schema; secrets sealed with envelope crypto (AES-256-GCM, AAD-bound) and never returned in plaintext.
 9. ✅ **Database users** — `database.user.create` runs `CREATE USER` in the DB container (Postgres). *(Adminer/phpMyAdmin + MySQL/Mongo next)*
 10. ⬜ **Runtime manager** — multi-PHP/Node version switch (redeploys the container).
 
@@ -28,12 +28,12 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 
 ## Phase 3 — Operations & security
 15. ⬜ **Metrics & logs (real)** — agent collects node/container metrics → Prometheus; log streaming to the panel via Loki.
-16. ⬜ **WAF + IP blocker + fail2ban-style** brute-force protection.
+16. 🟡 **Firewall + WAF + IP blocker** — `firewall.apply` renders/loads an `nft` ruleset (`table inet asterpanel`) per node. *(WAF rules + fail2ban-style brute-force protection next)*
 17. ⬜ **Health checks & alerting** — per-app probes, notifications, incident timeline.
 18. ⬜ **Antivirus/malware scan** (ClamAV) on uploads + on demand.
 
 ## Phase 4 — Commercial layer
-19. ⬜ **Reseller hierarchy + packages/quotas** (disk, bandwidth, mailbox, DB limits).
+19. 🟡 **Reseller hierarchy + packages/quotas** — per-plan `limits` (sites/domains/databases/nodes/mailboxes) enforced on every create (`403 quota_exceeded`); `GET /billing` exposes plan + usage. *(reseller sub-accounts + disk/bandwidth metering next)*
 20. ⬜ **Billing & invoicing** — usage metering, plans, invoices, payment-provider hooks.
 21. ⬜ **White-label / branding**, customer-facing API + webhooks, docs portal.
 22. ⬜ **Migration tooling** — import from cPanel/Plesk.

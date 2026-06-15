@@ -26,6 +26,7 @@ allowed_types := {
 	"cron.apply",
 	"ftp.account.create",
 	"cert.install",
+	"firewall.apply",
 	"health.check",
 }
 

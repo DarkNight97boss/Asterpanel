@@ -226,3 +226,30 @@ type FtpAccount struct {
 	Status         string
 	CreatedAt      time.Time
 }
+
+type EnvVar struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Key            string
+	Value          string
+	IsBuildTime    bool
+	CreatedAt      time.Time
+}
+
+type SecretMeta struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Key            string
+	Version        int
+	UpdatedAt      time.Time
+}
+
+type FirewallRule struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Action         string
+	Source         string
+	Port           string
+	Note           *string
+	CreatedAt      time.Time
+}

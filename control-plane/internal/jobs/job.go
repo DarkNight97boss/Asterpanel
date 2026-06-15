@@ -35,6 +35,7 @@ const (
 	TypeCronApply        Type = "cron.apply"
 	TypeFTPAccountCreate Type = "ftp.account.create"
 	TypeCertInstall      Type = "cert.install"
+	TypeFirewallApply    Type = "firewall.apply"
 	TypeHealthCheck      Type = "health.check"
 )
 

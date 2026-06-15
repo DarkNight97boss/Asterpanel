@@ -115,6 +115,12 @@ func (s *Server) handleCreateWebsite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if over, used, limit := s.overQuota(ctx, p.OrgID, "sites"); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "quota_exceeded", "plan site limit reached",
+			map[string]any{"used": used, "limit": limit})
+		return
+	}
+
 	ssl := true
 	if req.SSLEnabled != nil {
 		ssl = *req.SSLEnabled
