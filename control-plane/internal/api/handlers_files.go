@@ -296,6 +296,41 @@ func (s *Server) handleDeleteFile(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, rawOrEmpty(res))
 }
 
+type scanFilesRequest struct {
+	Path string `json:"path"`
+}
+
+// handleScanFiles runs a ClamAV scan over a site path via a signed
+// antivirus.scan job, returning the clean/infected verdict.
+func (s *Server) handleScanFiles(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	siteID, nodeID, err := s.siteNode(ctx, p.OrgID, chi.URLParam(r, "siteID"))
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", err.Error())
+		return
+	}
+	var req scanFilesRequest
+	// Body is optional; default to scanning the whole site root.
+	_ = httpx.Decode(w, r, &req)
+	rel, ok := cleanRelPath(req.Path)
+	if !ok {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid path")
+		return
+	}
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeAntivirusScan, nodeID, map[string]any{
+		"site_id": siteID.String(), "path": rel,
+	})
+	if err != nil {
+		fileJobError(w, err)
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "file.scan", "website", siteID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"path": rel})
+	httpx.JSON(w, http.StatusOK, rawOrEmpty(res))
+}
+
 // rawOrEmpty turns the agent's raw JSON outcome into a value httpx.JSON can
 // re-marshal, defaulting to {} when the agent returned null.
 func rawOrEmpty(res json.RawMessage) any {

@@ -1,7 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
-import { File, Folder, FolderPlus, FilePlus, Upload, Trash2, X, Save } from "lucide-react";
+import {
+  File,
+  Folder,
+  FolderPlus,
+  FilePlus,
+  Upload,
+  Trash2,
+  X,
+  Save,
+  ShieldCheck,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -22,6 +32,13 @@ interface FileContent {
   encoding: "utf8" | "base64" | "none";
   size: number;
   truncated: boolean;
+}
+
+interface ScanResult {
+  engine_available: boolean;
+  clean: boolean;
+  scanned_path: string;
+  infected: { file: string; signature: string }[];
 }
 
 function fmt(size: number | null) {
@@ -56,6 +73,8 @@ export default function FilesPage() {
   const [busy, setBusy] = useState(false);
   const [viewer, setViewer] = useState<FileContent | null>(null);
   const [draft, setDraft] = useState("");
+  const [scan, setScan] = useState<ScanResult | null>(null);
+  const [scanning, setScanning] = useState(false);
   const uploadRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -176,6 +195,20 @@ export default function FilesPage() {
     if (uploadRef.current) uploadRef.current.value = "";
   }
 
+  async function runScan() {
+    setScanning(true);
+    setError(null);
+    setScan(null);
+    try {
+      const res = await apiPost<ScanResult>(`${base}/scan`, { path });
+      setScan(res);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Scan failed");
+    } finally {
+      setScanning(false);
+    }
+  }
+
   async function remove(entry: Entry) {
     if (!window.confirm(`Delete ${entry.name}? This cannot be undone.`)) return;
     setBusy(true);
@@ -232,11 +265,43 @@ export default function FilesPage() {
             <Upload className="h-4 w-4" />
             Upload
           </Button>
+          <Button variant="outline" size="sm" disabled={!siteId || scanning} onClick={runScan}>
+            <ShieldCheck className={scanning ? "h-4 w-4 animate-pulse" : "h-4 w-4"} />
+            Scan
+          </Button>
           <input ref={uploadRef} type="file" hidden onChange={onUpload} />
         </div>
       </header>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {scan && (
+        <div
+          className={cn(
+            "rounded-md border px-4 py-2 text-sm",
+            !scan.engine_available
+              ? "border-border text-muted-foreground"
+              : scan.infected.length > 0
+                ? "border-red-500/40 text-red-400"
+                : "border-emerald-500/40 text-emerald-400",
+          )}
+        >
+          {!scan.engine_available
+            ? "Antivirus engine (ClamAV) is not installed on this node."
+            : scan.infected.length === 0
+              ? `✓ No threats found in ${scan.scanned_path}.`
+              : `⚠ ${scan.infected.length} infected file(s) in ${scan.scanned_path}:`}
+          {scan.infected.length > 0 && (
+            <ul className="mt-1 list-disc pl-5 font-mono text-xs">
+              {scan.infected.map((i, idx) => (
+                <li key={idx}>
+                  {i.file} — {i.signature}
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
 
       <div className="flex items-center gap-1 text-sm text-muted-foreground">
         <button className="hover:text-foreground" onClick={() => setPath("/")}>

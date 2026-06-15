@@ -43,6 +43,7 @@ const (
 	TypeFileMkdir        Type = "file.mkdir"
 	TypeRuntimeSwitch    Type = "runtime.switch"
 	TypeLogsTail         Type = "logs.tail"
+	TypeAntivirusScan    Type = "antivirus.scan"
 	TypeHealthCheck      Type = "health.check"
 )
 

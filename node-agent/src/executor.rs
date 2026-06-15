@@ -74,6 +74,7 @@ impl Executor for DockerExecutor {
             "file.mkdir" => self.file_mkdir(job).await,
             "runtime.switch" => self.runtime_switch(job).await,
             "logs.tail" => self.logs_tail(job).await,
+            "antivirus.scan" => self.antivirus_scan(job).await,
             "health.check" => self.health_check(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
@@ -774,6 +775,45 @@ impl DockerExecutor {
         }))
     }
 
+    /// Scans a sandboxed site path with ClamAV. Reuses the file-manager sandbox
+    /// (`site_and_rel` + `resolve_within`) so a scan can never escape the site
+    /// root. Gracefully reports `engine_available: false` when clamscan is absent
+    /// rather than failing the job.
+    async fn antivirus_scan(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("antivirus.scan: invalid site or path"),
+        };
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("antivirus.scan: path escapes site root"),
+        };
+        let target_str = target.to_string_lossy().to_string();
+
+        match run_cmd("clamscan", &clamscan_args(&target_str)).await {
+            Ok(out) => {
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                let infected = parse_clamscan(&stdout);
+                JobOutcome::succeeded(json!({
+                    "engine_available": true,
+                    "scanned_path": display_path(&rel),
+                    "clean": infected.is_empty(),
+                    "infected": infected
+                        .into_iter()
+                        .map(|(file, signature)| json!({"file": file, "signature": signature}))
+                        .collect::<Vec<_>>(),
+                }))
+            }
+            // clamscan not installed on the node — report instead of failing.
+            Err(_) => JobOutcome::succeeded(json!({
+                "engine_available": false,
+                "scanned_path": display_path(&rel),
+                "clean": true,
+                "infected": [],
+            })),
+        }
+    }
+
     // --- File manager (site-scoped, sandboxed) ------------------------------
     // Every op resolves a client path inside `<AGENT_SITES_DIR>/<site_id>` and
     // refuses anything that climbs above it (see `resolve_within`). Symlinks on
@@ -1321,6 +1361,31 @@ fn valid_container_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// Builds the `clamscan` argv: recursive, summary suppressed (we parse the
+/// per-file lines ourselves).
+fn clamscan_args(target: &str) -> Vec<String> {
+    vec![
+        "-r".into(),
+        "--no-summary".into(),
+        "--stdout".into(),
+        target.into(),
+    ]
+}
+
+/// Parses clamscan output, returning (file, signature) for each infected line
+/// (`<path>: <Signature> FOUND`). Clean (`: OK`) lines are ignored.
+fn parse_clamscan(output: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in output.lines() {
+        if let Some(rest) = line.strip_suffix(" FOUND") {
+            if let Some(idx) = rest.rfind(": ") {
+                out.push((rest[..idx].to_string(), rest[idx + 2..].to_string()));
+            }
+        }
+    }
+    out
+}
+
 /// Health verdict from container liveness and an optional HTTP status code.
 /// A stopped container is always down; a running one is up unless its probe
 /// returned a server error (5xx).
@@ -1708,6 +1773,21 @@ mod tests {
             docker_logs_args("astp_site_1", 100).join(" "),
             "logs --tail 100 --timestamps astp_site_1"
         );
+    }
+
+    #[test]
+    fn clamscan_parsing_and_args() {
+        assert_eq!(
+            clamscan_args("/srv/sites/abc").join(" "),
+            "-r --no-summary --stdout /srv/sites/abc"
+        );
+        let out = "/srv/a.txt: OK\n/srv/up/evil.exe: Win.Test.EICAR_HDB-1 FOUND\n/srv/b: OK\n";
+        let found = parse_clamscan(out);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].0, "/srv/up/evil.exe");
+        assert_eq!(found[0].1, "Win.Test.EICAR_HDB-1");
+        // a fully clean scan yields nothing
+        assert!(parse_clamscan("/x: OK\n/y: OK\n").is_empty());
     }
 
     #[test]

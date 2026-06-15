@@ -34,6 +34,7 @@ allowed_types := {
 	"file.mkdir",
 	"runtime.switch",
 	"logs.tail",
+	"antivirus.scan",
 	"health.check",
 }
 

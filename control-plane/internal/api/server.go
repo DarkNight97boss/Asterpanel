@@ -124,6 +124,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("files.manage", "file.write", "website")).Put("/sites/{siteID}/files/content", s.handleWriteFile)
 			r.With(az.Require("files.manage", "file.mkdir", "website")).Post("/sites/{siteID}/files/dir", s.handleMkdir)
 			r.With(az.Require("files.manage", "file.delete", "website")).Delete("/sites/{siteID}/files", s.handleDeleteFile)
+			r.With(az.Require("files.read", "antivirus.scan", "website")).Post("/sites/{siteID}/files/scan", s.handleScanFiles)
 
 			// Container logs (site-scoped tail)
 			r.With(az.Require("website.read", "logs.tail", "website")).Get("/sites/{siteID}/logs", s.handleSiteLogs)
