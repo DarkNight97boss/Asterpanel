@@ -18,6 +18,14 @@ export function getAccessToken() {
   return accessToken;
 }
 
+// Generic helpers for read-mostly resource pages (typed at the call site).
+export async function apiGet<T>(path: string): Promise<T> {
+  return request<T>(path);
+}
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+  return request<T>(path, { method: "POST", body });
+}
+
 export class ApiError extends Error {
   code: string;
   status: number;
@@ -191,4 +199,121 @@ export async function createWebsite(input: {
     "/api/v1/websites",
     { method: "POST", body: input },
   );
+}
+
+// --- Domains & DNS ---------------------------------------------------------
+export interface Domain {
+  id: string;
+  fqdn: string;
+  status: string;
+  verified_at: string | null;
+  auto_renew: boolean;
+  created_at: string;
+}
+export interface DnsRecord {
+  id: string;
+  zone: string;
+  name: string;
+  type: string;
+  content: string;
+  ttl: number;
+  priority: number | null;
+  proxied: boolean;
+}
+export async function listDomains(): Promise<Domain[]> {
+  const { domains } = await request<{ domains: Domain[] }>("/api/v1/domains");
+  return domains ?? [];
+}
+export async function listDnsRecords(): Promise<DnsRecord[]> {
+  const { records } = await request<{ records: DnsRecord[] }>("/api/v1/dns");
+  return records ?? [];
+}
+
+// --- Databases (SQL) -------------------------------------------------------
+export interface DatabaseInstance {
+  id: string;
+  engine: string;
+  version: string | null;
+  name: string;
+  db_user: string | null;
+  host: string | null;
+  port: number | null;
+  status: string;
+  size_mb: number | null;
+  created_at: string;
+}
+export async function listDatabases(): Promise<DatabaseInstance[]> {
+  const { databases } = await request<{ databases: DatabaseInstance[] }>("/api/v1/databases");
+  return databases ?? [];
+}
+export async function createDatabase(input: { engine: string; name: string }) {
+  return request<{ database: DatabaseInstance; credentials?: { user: string; password: string } }>(
+    "/api/v1/databases",
+    { method: "POST", body: input },
+  );
+}
+
+// --- FTP / SFTP accounts ---------------------------------------------------
+export interface FtpAccount {
+  id: string;
+  username: string;
+  protocol: string;
+  home_directory: string;
+  website: string | null;
+  status: string;
+  created_at: string;
+}
+export async function listFtpAccounts(): Promise<FtpAccount[]> {
+  const { accounts } = await request<{ accounts: FtpAccount[] }>("/api/v1/ftp-accounts");
+  return accounts ?? [];
+}
+export async function createFtpAccount(input: {
+  username: string;
+  protocol: string;
+  home_directory: string;
+}) {
+  return request<{ account: FtpAccount; password?: string }>("/api/v1/ftp-accounts", {
+    method: "POST",
+    body: input,
+  });
+}
+
+// --- Env & Secrets ---------------------------------------------------------
+export interface EnvVar {
+  id: string;
+  key: string;
+  value: string;
+  is_build_time: boolean;
+}
+export interface SecretMeta {
+  id: string;
+  key: string;
+  version: number;
+  updated_at: string;
+}
+export async function listEnv(): Promise<EnvVar[]> {
+  const { variables } = await request<{ variables: EnvVar[] }>("/api/v1/env");
+  return variables ?? [];
+}
+export async function listSecrets(): Promise<SecretMeta[]> {
+  const { secrets } = await request<{ secrets: SecretMeta[] }>("/api/v1/secrets");
+  return secrets ?? [];
+}
+
+// --- Backups ---------------------------------------------------------------
+export interface Backup {
+  id: string;
+  type: string;
+  trigger: string;
+  status: string;
+  size_bytes: number | null;
+  storage_backend: string;
+  created_at: string;
+}
+export async function listBackups(): Promise<Backup[]> {
+  const { backups } = await request<{ backups: Backup[] }>("/api/v1/backups");
+  return backups ?? [];
+}
+export async function createBackup(input: { type: string }) {
+  return request<{ backup: Backup }>("/api/v1/backups", { method: "POST", body: input });
 }

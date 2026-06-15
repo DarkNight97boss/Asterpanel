@@ -131,3 +131,20 @@ type Job struct {
 	ExpiresAt      time.Time
 	CreatedAt      time.Time
 }
+
+type DatabaseInstance struct {
+	ID                  uuid.UUID
+	OrganizationID      uuid.UUID
+	ApplicationID       uuid.NullUUID
+	ServerNodeID        uuid.NullUUID
+	Engine              string
+	Version             *string
+	Name                string
+	DBUser              *string
+	CredentialsSecretID uuid.NullUUID
+	Host                *string
+	Port                *int
+	Status              string
+	SizeMB              *int64
+	CreatedAt           time.Time
+}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"time"
@@ -15,6 +16,27 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
 )
+
+// redactSensitivePayload returns a copy of a job payload with secret-bearing
+// keys masked, so plaintext credentials are never persisted in the jobs table.
+// The agent still receives the real values inside the signed body over mTLS.
+func redactSensitivePayload(raw []byte) []byte {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	for k := range m {
+		lk := strings.ToLower(k)
+		if lk == "secret" || lk == "token" || strings.Contains(lk, "password") {
+			m[k] = "[redacted]"
+		}
+	}
+	out, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return out
+}
 
 func websiteView(ws store.Website) map[string]any {
 	var node any
@@ -248,7 +270,7 @@ func (s *Server) signPersistDispatch(ctx context.Context, p *middleware.Principa
 		OrgID:        uuid.NullUUID{UUID: p.OrgID, Valid: true},
 		NodeID:       uuid.NullUUID{UUID: nodeID, Valid: true},
 		Type:         string(typ),
-		Payload:      job.Payload,
+		Payload:      redactSensitivePayload(job.Payload),
 		Nonce:        job.Nonce,
 		Signature:    sig,
 		SigningKeyID: s.deps.Signer.KeyID(),

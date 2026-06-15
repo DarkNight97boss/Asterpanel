@@ -27,6 +27,10 @@ node_modules/
 # Data volumes (dev)
 /.data/
 
+# Local-only demo helpers and editor tooling (not part of the product)
+/demo/
+/.claude/
+
 # OS / editor
 .DS_Store
 .idea/

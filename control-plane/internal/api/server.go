@@ -117,6 +117,10 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("deploy.create", "deploy.create", "deployment")).
 				Post("/applications/{appID}/deployments", s.handleCreateDeployment)
 
+			// Databases (managed SQL/KV instances)
+			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
+			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
+
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)
 			r.With(az.Require("apitoken.create", "apitoken.create", "api_token")).Post("/api-tokens", s.handleCreateAPIToken)

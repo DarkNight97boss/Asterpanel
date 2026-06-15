@@ -18,6 +18,8 @@ allowed_types := {
 	"dns.apply",
 	"backup.create",
 	"backup.restore",
+	"database.create",
+	"database.delete",
 	"health.check",
 }
 

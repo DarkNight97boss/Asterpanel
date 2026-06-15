@@ -262,9 +262,10 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Ed25519 job signing + canonical encoding + examples | ✅ implemented |
 | Agent: mTLS server, signature verify, nonce/TTL, executor interface, Docker executor | ✅ implemented |
 | Node enrollment (CSR/CA flow) | ✅ implemented |
+| Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
 | Deploy executors (git / static / node / php), reverse-proxy + SSL automation | 🟡 executor contracts + Docker/Caddy wiring; per-runtime builders iterating |
 | Backups / restore / rollback | 🟡 schema + job types + executor stubs |
-| Web Panel: auth flow, dashboard, nodes, sites, deploys, audit views | 🟡 core screens + typed API client |
+| Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |
 | Observability (OTel/Prom/Grafana/Loki) | ✅ wired in compose; app instrumentation ongoing |
 
 The 🟡 items have their contracts, schema, job types, and tests in place so they extend

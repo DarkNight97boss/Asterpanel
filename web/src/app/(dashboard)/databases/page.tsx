@@ -1,0 +1,152 @@
+"use client";
+
+import { useEffect, useState, type FormEvent } from "react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { StatusBadge } from "@/components/ui/badge";
+import { createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
+
+const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
+
+function fmtSize(mb: number | null) {
+  if (mb == null) return "—";
+  return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${mb} MB`;
+}
+
+export default function DatabasesPage() {
+  const [dbs, setDbs] = useState<DatabaseInstance[]>([]);
+  const [engine, setEngine] = useState("postgres");
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [creds, setCreds] = useState<{ user: string; password: string } | null>(null);
+
+  async function refresh() {
+    try {
+      setDbs(await listDatabases());
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    }
+  }
+  useEffect(() => {
+    refresh();
+  }, []);
+
+  async function onCreate(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await createDatabase({ engine, name });
+      if (res.credentials) setCreds(res.credentials);
+      setName("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Create failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-2xl font-semibold">Databases</h1>
+        <p className="text-sm text-muted-foreground">
+          Provision managed database instances on your nodes (Postgres, MySQL, Redis…).
+        </p>
+      </header>
+
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      {creds && (
+        <Card className="border-primary/40">
+          <CardHeader>
+            <CardTitle className="text-base">Credentials (shown once)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <pre className="overflow-x-auto rounded-md bg-muted p-3 text-xs">
+              user: {creds.user}
+              {"\n"}password: {creds.password}
+            </pre>
+            <Button variant="outline" size="sm" onClick={() => setCreds(null)}>
+              Dismiss
+            </Button>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">New database</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={onCreate} className="grid gap-4 sm:grid-cols-4 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="engine">Engine</Label>
+              <select
+                id="engine"
+                value={engine}
+                onChange={(e) => setEngine(e.target.value)}
+                className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              >
+                {ENGINES.map((en) => (
+                  <option key={en} value={en} className="bg-card">
+                    {en}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="dbname">Database name</Label>
+              <Input id="dbname" value={name} onChange={(e) => setName(e.target.value)} required />
+            </div>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Creating…" : "Create"}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Instances ({dbs.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Name</th>
+                <th className="px-6 py-3 font-medium">Engine</th>
+                <th className="px-6 py-3 font-medium">Host</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Size</th>
+              </tr>
+            </thead>
+            <tbody>
+              {dbs.map((d) => (
+                <tr key={d.id} className="border-b border-border/60 last:border-0">
+                  <td className="px-6 py-3 font-medium">{d.name}</td>
+                  <td className="px-6 py-3 text-muted-foreground">
+                    {d.engine}
+                    {d.version ? ` ${d.version}` : ""}
+                  </td>
+                  <td className="px-6 py-3 font-mono text-xs text-muted-foreground">
+                    {d.host}:{d.port}
+                  </td>
+                  <td className="px-6 py-3">
+                    <StatusBadge status={d.status} />
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">{fmtSize(d.size_mb)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -16,18 +16,20 @@ import (
 type Type string
 
 const (
-	TypeWebsiteCreate Type = "website.create"
-	TypeWebsiteDelete Type = "website.delete"
-	TypeAppDeploy     Type = "app.deploy"
-	TypeAppRollback   Type = "app.rollback"
-	TypeAppStart      Type = "app.start"
-	TypeAppStop       Type = "app.stop"
-	TypeProxyApply    Type = "proxy.apply"
-	TypeCertIssue     Type = "cert.issue"
-	TypeDNSApply      Type = "dns.apply"
-	TypeBackupCreate  Type = "backup.create"
-	TypeBackupRestore Type = "backup.restore"
-	TypeHealthCheck   Type = "health.check"
+	TypeWebsiteCreate  Type = "website.create"
+	TypeWebsiteDelete  Type = "website.delete"
+	TypeAppDeploy      Type = "app.deploy"
+	TypeAppRollback    Type = "app.rollback"
+	TypeAppStart       Type = "app.start"
+	TypeAppStop        Type = "app.stop"
+	TypeProxyApply     Type = "proxy.apply"
+	TypeCertIssue      Type = "cert.issue"
+	TypeDNSApply       Type = "dns.apply"
+	TypeBackupCreate   Type = "backup.create"
+	TypeBackupRestore  Type = "backup.restore"
+	TypeDatabaseCreate Type = "database.create"
+	TypeDatabaseDelete Type = "database.delete"
+	TypeHealthCheck    Type = "health.check"
 )
 
 // Job is the signed instruction envelope. Field order is irrelevant — the
