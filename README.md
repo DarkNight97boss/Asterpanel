@@ -280,6 +280,7 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Firewall | ✅ CRUD → signed `firewall.apply` → agent renders an `nft` ruleset (`table inet asterpanel`) and loads it on the node |
 | Plan quotas & billing | ✅ per-plan `limits` (sites/domains/databases/nodes/mailboxes) enforced on every create (`403 quota_exceeded`); `GET /billing` exposes plan + usage for quota bars |
 | Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |
+| Node metrics (real) | ✅ agent samples CPU (`/proc/stat`), memory (`/proc/meminfo`), disk (`df`) and load every 15s → pushes to the CP metrics-ingest endpoint → `node_metrics` time series → `GET /metrics` aggregates the fleet (latest per node + CPU sparkline) for the panel (parsers unit-tested; traffic metrics need proxy integration) |
 | Observability (OTel/Prom/Grafana/Loki) | ✅ wired in compose; app instrumentation ongoing |
 
 The 🟡 items have their contracts, schema, job types, and tests in place so they extend

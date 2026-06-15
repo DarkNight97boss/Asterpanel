@@ -8,6 +8,7 @@ mod callback;
 mod config;
 mod executor;
 mod job;
+mod metrics;
 mod nonce;
 mod tls;
 mod verify;
@@ -84,6 +85,41 @@ async fn main() -> anyhow::Result<()> {
         .route("/healthz", get(|| async { "ok" }))
         .route("/v1/jobs", post(handle_job))
         .with_state(state);
+
+    // Background metrics loop: sample CPU/mem/disk every 15s and push to the
+    // control plane. Only runs when this agent has a node id (skipped in the
+    // allow-any-node dev mode without one).
+    if let Some(node_id) = config.node_id {
+        let reporter = metrics::MetricsReporter::new(config.callback_url.clone(), node_id);
+        tokio::spawn(async move {
+            let mut prev = metrics::read_cpu_times().await;
+            let mut tick = tokio::time::interval(Duration::from_secs(15));
+            tick.tick().await; // consume the immediate first tick
+            loop {
+                tick.tick().await;
+                let cur = metrics::read_cpu_times().await;
+                let pct = match (prev, cur) {
+                    (Some(p), Some(c)) => metrics::cpu_pct(p, c),
+                    _ => 0.0,
+                };
+                prev = cur;
+                let (mem_used_mb, mem_total_mb) = metrics::read_mem().await;
+                let (disk_used_gb, disk_total_gb) = metrics::read_disk().await;
+                let load1 = metrics::read_loadavg().await;
+                reporter
+                    .report(&metrics::Snapshot {
+                        cpu_pct: pct,
+                        mem_used_mb,
+                        mem_total_mb,
+                        disk_used_gb,
+                        disk_total_gb,
+                        load1,
+                        containers: 0,
+                    })
+                    .await;
+            }
+        });
+    }
 
     let addr: std::net::SocketAddr = config.listen_addr.parse()?;
     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(tls_config);

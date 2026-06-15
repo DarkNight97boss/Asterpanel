@@ -27,7 +27,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 14. ⬜ **Deliverability** — DKIM/SPF/DMARC management, SpamAssassin/Rspamd antispam.
 
 ## Phase 3 — Operations & security
-15. ⬜ **Metrics & logs (real)** — agent collects node/container metrics → Prometheus; log streaming to the panel via Loki.
+15. 🟡 **Metrics & logs (real)** — agent samples CPU/mem/disk/load every 15s and pushes to the CP (`node_metrics` time series); `GET /metrics` aggregates the fleet for the panel. *(container-level metrics + log streaming via Loki next)*
 16. 🟡 **Firewall + WAF + IP blocker** — `firewall.apply` renders/loads an `nft` ruleset (`table inet asterpanel`) per node. *(WAF rules + fail2ban-style brute-force protection next)*
 17. ⬜ **Health checks & alerting** — per-app probes, notifications, incident timeline.
 18. ⬜ **Antivirus/malware scan** (ClamAV) on uploads + on demand.

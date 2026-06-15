@@ -111,6 +111,9 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("node.create", "node.create", "server_node")).Post("/nodes", s.handleCreateNode)
 			r.With(az.Require("node.enroll", "node.enroll", "server_node")).Post("/nodes/{nodeID}/enroll", s.handleCreateEnrollment)
 
+			// Metrics (fleet resource usage)
+			r.With(az.Require("metrics.read", "metrics.read", "server_node")).Get("/metrics", s.handleMetrics)
+
 			// Websites
 			r.With(az.Require("website.read", "website.list", "website")).Get("/websites", s.handleListWebsites)
 			r.With(az.Require("website.create", "website.create", "website")).Post("/websites", s.handleCreateWebsite)
@@ -201,6 +204,8 @@ func (s *Server) routes() http.Handler {
 	// Agent → control-plane job status callback. In production this listener is
 	// terminated behind mTLS (client cert = the enrolled agent); see deploy docs.
 	r.Post("/internal/agent/jobs/{jobID}/status", s.handleAgentJobStatus)
+	// Agent → control-plane metrics ingest (same mTLS guard as above).
+	r.Post("/internal/agent/nodes/{nodeID}/metrics", s.handleAgentMetrics)
 
 	return r
 }
