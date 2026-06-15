@@ -23,6 +23,7 @@ import {
   Mail,
   Network,
   Package,
+  Palette,
   Receipt,
   ScrollText,
   Server,
@@ -33,6 +34,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth";
+import { useBranding } from "@/lib/branding";
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: LucideIcon };
@@ -89,6 +91,7 @@ const groups: Group[] = [
     label: "Account",
     items: [
       { href: "/reseller", label: "Reseller", icon: Building2 },
+      { href: "/branding", label: "Branding", icon: Palette },
       { href: "/billing", label: "Billing", icon: Receipt },
       { href: "/notifications", label: "Notifications", icon: Bell },
     ],
@@ -98,12 +101,18 @@ const groups: Group[] = [
 export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
+  const { branding } = useBranding();
 
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-card/40">
       <div className="flex items-center gap-2 px-6 py-5">
-        <ShieldCheck className="h-5 w-5 text-primary" />
-        <span className="font-semibold">AsterPanel</span>
+        {branding.logo_url ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={branding.logo_url} alt="" className="h-5 w-5 rounded object-contain" />
+        ) : (
+          <ShieldCheck className="h-5 w-5 text-primary" />
+        )}
+        <span className="truncate font-semibold">{branding.panel_name}</span>
       </div>
 
       <nav className="flex-1 space-y-4 overflow-y-auto px-4 pb-4">

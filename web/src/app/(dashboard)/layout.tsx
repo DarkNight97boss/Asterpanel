@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import type { ReactNode } from "react";
 
 import { useAuth } from "@/lib/auth";
+import { BrandingProvider } from "@/lib/branding";
 import { Sidebar } from "@/components/sidebar";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
@@ -24,9 +25,11 @@ export default function DashboardLayout({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <Sidebar />
-      <main className="flex-1 overflow-y-auto px-8 py-8">{children}</main>
-    </div>
+    <BrandingProvider>
+      <div className="flex h-screen overflow-hidden">
+        <Sidebar />
+        <main className="flex-1 overflow-y-auto px-8 py-8">{children}</main>
+      </div>
+    </BrandingProvider>
   );
 }

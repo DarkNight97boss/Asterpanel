@@ -212,6 +212,10 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
 			r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
 
+			// White-label branding
+			r.With(az.Require("branding.read", "branding.read", "organization")).Get("/branding", s.handleGetBranding)
+			r.With(az.Require("branding.manage", "branding.update", "organization")).Put("/branding", s.handleUpdateBranding)
+
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)
 			r.With(az.Require("apitoken.create", "apitoken.create", "api_token")).Post("/api-tokens", s.handleCreateAPIToken)
