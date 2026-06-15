@@ -20,7 +20,12 @@ allowed_types := {
 	"backup.restore",
 	"database.create",
 	"database.delete",
+	"database.user.create",
 	"mail.mailbox.create",
+	"mail.server.ensure",
+	"cron.apply",
+	"ftp.account.create",
+	"cert.install",
 	"health.check",
 }
 

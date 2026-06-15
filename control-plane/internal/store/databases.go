@@ -43,6 +43,14 @@ func (s *Store) CreateDatabaseInstance(ctx context.Context, p CreateDatabasePara
 		p.CredentialsSecretID, p.Host, p.Port))
 }
 
+func (s *Store) GetDatabaseInstance(ctx context.Context, orgID, id uuid.UUID) (*DatabaseInstance, error) {
+	const q = `
+		SELECT id, organization_id, application_id, server_node_id, engine, version, name,
+		       db_user, credentials_secret_id, host, port, status, size_mb, created_at
+		FROM database_instances WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`
+	return scanDatabase(s.pool.QueryRow(ctx, q, id, orgID))
+}
+
 func (s *Store) ListDatabaseInstances(ctx context.Context, orgID uuid.UUID) ([]DatabaseInstance, error) {
 	const q = `
 		SELECT id, organization_id, application_id, server_node_id, engine, version, name,

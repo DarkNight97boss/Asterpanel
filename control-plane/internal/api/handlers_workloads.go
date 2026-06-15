@@ -27,7 +27,8 @@ func redactSensitivePayload(raw []byte) []byte {
 	}
 	for k := range m {
 		lk := strings.ToLower(k)
-		if lk == "secret" || lk == "token" || strings.Contains(lk, "password") {
+		if lk == "secret" || lk == "token" || strings.Contains(lk, "password") ||
+			strings.Contains(lk, "pem") || strings.Contains(lk, "private") {
 			m[k] = "[redacted]"
 		}
 	}

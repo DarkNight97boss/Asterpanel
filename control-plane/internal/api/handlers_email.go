@@ -110,3 +110,25 @@ func (s *Server) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
 	})
 }
+
+// handleEnsureMailServer dispatches a mail.server.ensure job so the node runs a
+// Postfix+Dovecot container reading the config the mailbox executor writes.
+func (s *Server) handleEnsureMailServer(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	node := s.firstNode(ctx, p.OrgID)
+	if node == nil {
+		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")
+		return
+	}
+	if ok, reason := s.jobPolicyAllows(ctx, p, jobs.TypeMailServerEnsure, node.ID); !ok {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "job denied by policy: "+reason)
+		return
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeMailServerEnsure, node.ID,
+		map[string]any{"mail_dir": "/etc/asterpanel/mail"})
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "email.server.ensure", "node", node.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"job_id": jobID.String()})
+	httpx.JSON(w, http.StatusAccepted, map[string]any{"job": map[string]any{"id": jobID, "dispatched": dispatched}})
+}

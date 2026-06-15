@@ -57,6 +57,11 @@ impl Executor for DockerExecutor {
             "cert.issue" => self.cert_issue(job).await,
             "app.deploy" => self.app_deploy(job).await,
             "mail.mailbox.create" => self.mailbox_create(job).await,
+            "mail.server.ensure" => self.mail_server_ensure(job).await,
+            "cron.apply" => self.cron_apply(job).await,
+            "ftp.account.create" => self.ftp_account_create(job).await,
+            "database.user.create" => self.database_user_create(job).await,
+            "cert.install" => self.cert_install(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
@@ -390,7 +395,19 @@ impl DockerExecutor {
                     .await
                     .map(|m| m.len())
                     .unwrap_or(0);
-                JobOutcome::succeeded(json!({"path": file, "size_bytes": size}))
+                // Off-site upload when an S3 bucket is configured (uses the aws CLI).
+                if let Ok(bucket) = std::env::var("AGENT_S3_BUCKET") {
+                    let key = format!("backups/{backup_id}.tar.gz");
+                    if let Ok(u) = run_cmd("aws", &s3_cp_args(&file, &bucket, &key)).await {
+                        if u.status.success() {
+                            return JobOutcome::succeeded(json!({
+                                "path": file, "size_bytes": size, "storage": "s3",
+                                "s3": format!("s3://{bucket}/{key}"),
+                            }));
+                        }
+                    }
+                }
+                JobOutcome::succeeded(json!({"path": file, "size_bytes": size, "storage": "local"}))
             }
             Ok(o) => JobOutcome::failed(format!(
                 "tar failed: {}",
@@ -424,6 +441,167 @@ impl DockerExecutor {
                 String::from_utf8_lossy(&o.stderr).trim()
             )),
             Err(e) => JobOutcome::failed(format!("tar not available: {e}")),
+        }
+    }
+
+    async fn cron_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let entries = job
+            .payload
+            .get("jobs")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_crontab(entries);
+        let dir = std::env::var("AGENT_CRON_DIR").unwrap_or_else(|_| "/etc/asterpanel/cron".into());
+        let path = format!("{dir}/asterpanel.cron");
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("cron.apply: mkdir failed: {e}"));
+        }
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("cron.apply: write failed: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": path, "jobs": entries.len()}))
+    }
+
+    async fn ftp_account_create(&self, job: &Job) -> JobOutcome {
+        use tokio::io::AsyncWriteExt;
+        let username = job
+            .payload
+            .get("username")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let home = job
+            .payload
+            .get("home_directory")
+            .and_then(Value::as_str)
+            .unwrap_or("/sites");
+        if username.is_empty() {
+            return JobOutcome::failed("ftp.account.create: missing username");
+        }
+        let dir = std::env::var("AGENT_SFTP_DIR").unwrap_or_else(|_| "/etc/asterpanel/ssh".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/sftp.conf");
+        match tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+        {
+            Ok(mut f) => {
+                if let Err(e) = f
+                    .write_all(render_sftp_match(username, home).as_bytes())
+                    .await
+                {
+                    return JobOutcome::failed(format!("write failed: {e}"));
+                }
+            }
+            Err(e) => return JobOutcome::failed(format!("open failed: {e}")),
+        }
+        JobOutcome::succeeded(json!({"username": username, "chroot": home}))
+    }
+
+    async fn database_user_create(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let db_id = pv("database_id").unwrap_or("unknown");
+        let engine = pv("engine").unwrap_or("postgres");
+        let database = pv("database").unwrap_or("app");
+        let owner = pv("owner").unwrap_or(database);
+        let username = pv("username").unwrap_or("");
+        let password = pv("password").unwrap_or("");
+        if username.is_empty() {
+            return JobOutcome::failed("database.user.create: missing username");
+        }
+        let container = format!("astp_db_{db_id}");
+        let args = match db_user_exec_args(engine, &container, database, owner, username, password)
+        {
+            Some(a) => a,
+            None => {
+                return JobOutcome::failed(format!(
+                    "database.user.create: unsupported engine {engine}"
+                ))
+            }
+        };
+        match run_docker(&args).await {
+            Ok(o) if o.status.success() => {
+                JobOutcome::succeeded(json!({"username": username, "database": database}))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "create user failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    async fn cert_install(&self, job: &Job) -> JobOutcome {
+        let domain = job
+            .payload
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let cert = job
+            .payload
+            .get("cert_pem")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let key = job
+            .payload
+            .get("key_pem")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if domain.is_empty() || cert.is_empty() || key.is_empty() {
+            return JobOutcome::failed("cert.install: domain, cert_pem and key_pem are required");
+        }
+        let certs_dir = std::env::var("AGENT_CERT_DIR")
+            .unwrap_or_else(|_| "/etc/asterpanel/caddy/certs".into());
+        let sites_dir = std::env::var("AGENT_CADDY_SITES_DIR")
+            .unwrap_or_else(|_| "/etc/asterpanel/caddy/sites".into());
+        if tokio::fs::create_dir_all(&certs_dir).await.is_err()
+            || tokio::fs::create_dir_all(&sites_dir).await.is_err()
+        {
+            return JobOutcome::failed("cert.install: mkdir failed");
+        }
+        let cert_path = format!("{certs_dir}/{domain}.crt");
+        let key_path = format!("{certs_dir}/{domain}.key");
+        if tokio::fs::write(&cert_path, cert.as_bytes()).await.is_err()
+            || tokio::fs::write(&key_path, key.as_bytes()).await.is_err()
+        {
+            return JobOutcome::failed("cert.install: write failed");
+        }
+        let site = render_caddy_site_tls(domain, &cert_path, &key_path);
+        if tokio::fs::write(format!("{sites_dir}/{domain}.caddy"), site.as_bytes())
+            .await
+            .is_err()
+        {
+            return JobOutcome::failed("cert.install: write site failed");
+        }
+        JobOutcome::succeeded(json!({"domain": domain, "cert": cert_path}))
+    }
+
+    async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
+        let mail_dir = job
+            .payload
+            .get("mail_dir")
+            .and_then(Value::as_str)
+            .unwrap_or("/etc/asterpanel/mail");
+        let _ = tokio::fs::create_dir_all(mail_dir).await;
+        let _ = run_docker(&["rm".into(), "-f".into(), "astp_mailserver".into()]).await;
+        match run_docker(&mail_server_args(mail_dir)).await {
+            Ok(o) if o.status.success() => {
+                let cid = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                JobOutcome::succeeded(json!({"container_id": cid, "mail_dir": mail_dir}))
+            }
+            Ok(o) => {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                if stderr.contains("already in use") || stderr.contains("Conflict") {
+                    JobOutcome::succeeded(json!({"idempotent": true}))
+                } else {
+                    JobOutcome::failed(format!("mail server run failed: {}", stderr.trim()))
+                }
+            }
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
     }
 
@@ -647,6 +825,95 @@ fn backup_untar_args(file: &str, target: &str) -> Vec<String> {
     vec!["-xzf".into(), file.into(), "-C".into(), target.into()]
 }
 
+fn s3_cp_args(file: &str, bucket: &str, key: &str) -> Vec<String> {
+    vec![
+        "s3".into(),
+        "cp".into(),
+        file.into(),
+        format!("s3://{bucket}/{key}"),
+    ]
+}
+
+fn render_crontab(entries: &[Value]) -> String {
+    let mut out = String::from("# Managed by AsterPanel — do not edit\n");
+    for e in entries {
+        let sched = e.get("schedule").and_then(Value::as_str).unwrap_or("");
+        let cmd = e.get("command").and_then(Value::as_str).unwrap_or("");
+        if !sched.is_empty() && !cmd.is_empty() {
+            out.push_str(&format!("{sched}\t{cmd}\n"));
+        }
+    }
+    out
+}
+
+/// OpenSSH `Match` block chrooting an SFTP-only user to its site directory.
+fn render_sftp_match(username: &str, home: &str) -> String {
+    format!(
+        "Match User {username}\n    ChrootDirectory {home}\n    ForceCommand internal-sftp\n    AllowTcpForwarding no\n    X11Forwarding no\n\n"
+    )
+}
+
+/// docker exec argv that creates a database user. Postgres only for the MVP.
+fn db_user_exec_args(
+    engine: &str,
+    container: &str,
+    database: &str,
+    owner: &str,
+    user: &str,
+    pass: &str,
+) -> Option<Vec<String>> {
+    match engine {
+        "postgres" => {
+            let sql = format!(
+                "CREATE USER \"{user}\" WITH PASSWORD '{pass}'; GRANT ALL PRIVILEGES ON DATABASE \"{database}\" TO \"{user}\";"
+            );
+            Some(vec![
+                "exec".into(),
+                container.into(),
+                "psql".into(),
+                "-U".into(),
+                owner.into(),
+                "-d".into(),
+                database.into(),
+                "-c".into(),
+                sql,
+            ])
+        }
+        _ => None,
+    }
+}
+
+/// Caddy site serving a manually-installed certificate (no ACME).
+fn render_caddy_site_tls(domain: &str, cert: &str, key: &str) -> String {
+    format!("{domain} {{\n\ttls {cert} {key}\n\trespond \"AsterPanel\" 200\n}}\n")
+}
+
+fn mail_server_args(mail_dir: &str) -> Vec<String> {
+    vec![
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        "astp_mailserver".into(),
+        "--restart".into(),
+        "unless-stopped".into(),
+        "--hostname".into(),
+        "mail".into(),
+        "-p".into(),
+        "25:25".into(),
+        "-p".into(),
+        "143:143".into(),
+        "-p".into(),
+        "587:587".into(),
+        "-p".into(),
+        "993:993".into(),
+        "-v".into(),
+        format!("{mail_dir}:/tmp/docker-mailserver"),
+        "-e".into(),
+        "ONE_DIR=1".into(),
+        "mailserver/docker-mailserver:latest".into(),
+    ]
+}
+
 async fn run_cmd(program: &str, args: &[String]) -> std::io::Result<std::process::Output> {
     tokio::process::Command::new(program)
         .args(args)
@@ -837,5 +1104,49 @@ mod tests {
             backup_untar_args("/b/x.tar.gz", "/sites").join(" "),
             "-xzf /b/x.tar.gz -C /sites"
         );
+    }
+
+    #[test]
+    fn crontab_renders_entries() {
+        let e = vec![json!({"schedule":"0 3 * * *","command":"backup.sh"})];
+        assert!(render_crontab(&e).contains("0 3 * * *\tbackup.sh"));
+    }
+
+    #[test]
+    fn sftp_match_is_chrooted() {
+        let s = render_sftp_match("acme", "/sites/acme");
+        assert!(s.contains("Match User acme"));
+        assert!(s.contains("ChrootDirectory /sites/acme"));
+        assert!(s.contains("internal-sftp"));
+    }
+
+    #[test]
+    fn db_user_exec_postgres_only() {
+        let a = db_user_exec_args("postgres", "astp_db_1", "app", "app", "u", "pw").unwrap();
+        let s = a.join(" ");
+        assert!(s.contains("exec astp_db_1 psql -U app -d app -c"), "{s}");
+        assert!(s.contains("CREATE USER \"u\""), "{s}");
+        assert!(db_user_exec_args("mysql", "c", "d", "o", "u", "p").is_none());
+    }
+
+    #[test]
+    fn caddy_tls_site_uses_cert_and_key() {
+        assert!(render_caddy_site_tls("acme.com", "/c/a.crt", "/c/a.key")
+            .contains("tls /c/a.crt /c/a.key"));
+    }
+
+    #[test]
+    fn s3_cp_builds_uri() {
+        assert_eq!(
+            s3_cp_args("/b/x.tar.gz", "mybucket", "backups/x.tar.gz").join(" "),
+            "s3 cp /b/x.tar.gz s3://mybucket/backups/x.tar.gz"
+        );
+    }
+
+    #[test]
+    fn mail_server_args_have_image_and_ports() {
+        let s = mail_server_args("/etc/mail").join(" ");
+        assert!(s.contains("mailserver/docker-mailserver:latest"), "{s}");
+        assert!(s.contains("143:143"), "{s}");
     }
 }

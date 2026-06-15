@@ -205,3 +205,24 @@ type Backup struct {
 	SizeBytes      *int64
 	CreatedAt      time.Time
 }
+
+type CronJob struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Schedule       string
+	Command        string
+	Enabled        bool
+	LastRunAt      *time.Time
+	LastStatus     *string
+	CreatedAt      time.Time
+}
+
+type FtpAccount struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Username       string
+	Protocol       string
+	HomeDirectory  string
+	Status         string
+	CreatedAt      time.Time
+}

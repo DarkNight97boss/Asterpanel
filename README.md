@@ -267,6 +267,11 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | SSL/TLS (ACME) | ✅ API → signed `cert.issue` job → agent writes a Caddy site (automatic HTTPS) |
 | Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (running mail-server containers iterating) |
 | Webmail — **native** IMAP/SMTP client (modern Roundcube alternative) | ✅ Go gateway (`go-imap`/`go-message`) + integrated Next.js UI: folders, read (text + sandboxed-iframe HTML), compose/send. Dev mail server (GreenMail) wired in compose |
+| Cron jobs | ✅ CRUD → signed `cron.apply` → agent writes the node crontab |
+| FTP/SFTP accounts | ✅ CRUD → sealed password → signed `ftp.account.create` → agent writes a chrooted OpenSSH SFTP `Match` block |
+| Database users | ✅ `POST /databases/{id}/users` → signed `database.user.create` → agent runs `CREATE USER` inside the DB container (Postgres) |
+| Mail server (Postfix+Dovecot) | 🟡 `mail.server.ensure` launches a docker-mailserver container reading the written config (full DMS tuning + DKIM iterating) |
+| Hardening | ✅ custom-cert upload (`cert.install`), off-site **S3 backup** upload (aws CLI), private keys redacted from persisted jobs |
 | Deploy from Git | ✅ `app.deploy` executor: git clone → docker build → hardened run (prior image retained for rollback; Dockerfile-based, buildpacks iterating) |
 | Backups & restore | ✅ API → signed `backup.create`/`backup.restore` jobs → agent tars/untars the target (S3/B2 upload iterating) |
 | Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |

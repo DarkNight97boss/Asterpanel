@@ -129,10 +129,12 @@ func (s *Server) routes() http.Handler {
 			// Databases (managed SQL/KV instances)
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
+			r.With(az.Require("database.create", "database.user.create", "database_instance")).Post("/databases/{dbID}/users", s.handleCreateDBUser)
 
 			// SSL / TLS certificates
 			r.With(az.Require("ssl.read", "ssl.list", "ssl_certificate")).Get("/ssl-certificates", s.handleListCertificates)
 			r.With(az.Require("ssl.manage", "ssl.issue", "ssl_certificate")).Post("/ssl-certificates", s.handleIssueCertificate)
+			r.With(az.Require("ssl.manage", "ssl.upload", "ssl_certificate")).Post("/ssl-certificates/upload", s.handleUploadCert)
 
 			// Email mailboxes
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/mailboxes", s.handleListMailboxes)
@@ -143,11 +145,22 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/messages", s.handleWebmailMessages)
 			r.With(az.Require("email.read", "email.read", "mailbox")).Get("/webmail/{mailboxID}/messages/{uid}", s.handleWebmailMessage)
 			r.With(az.Require("email.manage", "email.send", "mailbox")).Post("/webmail/{mailboxID}/send", s.handleWebmailSend)
+			r.With(az.Require("email.manage", "email.server", "mailbox")).Post("/email/server/ensure", s.handleEnsureMailServer)
 
 			// Backups & restore
 			r.With(az.Require("backup.read", "backup.list", "backup")).Get("/backups", s.handleListBackups)
 			r.With(az.Require("backup.create", "backup.create", "backup")).Post("/backups", s.handleCreateBackup)
 			r.With(az.Require("backup.restore", "backup.restore", "backup")).Post("/backups/{backupID}/restore", s.handleRestoreBackup)
+
+			// Cron jobs
+			r.With(az.Require("cron.read", "cron.list", "cron_job")).Get("/cron", s.handleListCron)
+			r.With(az.Require("cron.manage", "cron.create", "cron_job")).Post("/cron", s.handleCreateCron)
+			r.With(az.Require("cron.manage", "cron.delete", "cron_job")).Delete("/cron/{cronID}", s.handleDeleteCron)
+
+			// FTP / SFTP accounts
+			r.With(az.Require("ftp.read", "ftp.list", "ftp_account")).Get("/ftp-accounts", s.handleListFtp)
+			r.With(az.Require("ftp.manage", "ftp.create", "ftp_account")).Post("/ftp-accounts", s.handleCreateFtp)
+			r.With(az.Require("ftp.manage", "ftp.delete", "ftp_account")).Delete("/ftp-accounts/{ftpID}", s.handleDeleteFtp)
 
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)

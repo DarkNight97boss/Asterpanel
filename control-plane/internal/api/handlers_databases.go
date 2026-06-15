@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/audit"
@@ -187,5 +188,63 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		"database":    databaseView(*db),
 		"credentials": map[string]any{"user": dbUser, "password": password},
 		"job":         map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
+type createDBUserRequest struct {
+	Username string `json:"username"`
+}
+
+// handleCreateDBUser provisions an additional user/role on a database instance
+// by dispatching a database.user.create job (the agent runs the engine's CREATE
+// USER inside the DB container).
+func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	var req createDBUserRequest
+	if e := httpx.Decode(w, r, &req); e != nil || strings.TrimSpace(req.Username) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "username is required")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	nodeID := uuid.Nil
+	if db.ServerNodeID.Valid {
+		nodeID = db.ServerNodeID.UUID
+	} else if n := s.firstNode(ctx, p.OrgID); n != nil {
+		nodeID = n.ID
+	}
+	if nodeID == uuid.Nil {
+		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")
+		return
+	}
+	if ok, reason := s.jobPolicyAllows(ctx, p, jobs.TypeDatabaseUser, nodeID); !ok {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "job denied by policy: "+reason)
+		return
+	}
+
+	password, _ := crypto.RandomHex(16)
+	payload := map[string]any{
+		"database_id": dbID, "engine": db.Engine, "database": db.Name,
+		"username": req.Username, "password": password,
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseUser, nodeID, payload)
+
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.user.create", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"username": req.Username, "job_id": jobID.String()})
+
+	httpx.JSON(w, http.StatusCreated, map[string]any{
+		"user":     map[string]any{"username": req.Username, "host": db.Host, "port": db.Port, "database": db.Name},
+		"password": password,
+		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
 	})
 }

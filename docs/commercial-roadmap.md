@@ -13,15 +13,15 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 2. ✅ **SSL/TLS** — `cert.issue` writes a Caddy site (automatic HTTPS via ACME). *(custom cert upload + renewal tracking next)*
 3. ✅ **Deploy from Git** — `app.deploy`: git clone → docker build → hardened run, prior image retained for rollback. *(buildpacks for static/node/php + atomic proxy swap next)*
 4. ✅ **Backups & Restore** — `backup.create`/`backup.restore` tar/untar the target. *(S3/B2 upload + checksums + scheduling next)*
-5. ⬜ **Cron jobs** — schema + executor running inside the site container with limits.
-6. ⬜ **FTP/SFTP** — `ftp_accounts` schema + executor provisioning chrooted SFTP users.
+5. ✅ **Cron jobs** — `cron_jobs` schema + CRUD + `cron.apply` writes the node crontab.
+6. ✅ **FTP/SFTP** — `ftp_accounts` schema + CRUD + `ftp.account.create` writes a chrooted OpenSSH SFTP `Match` block.
 7. ⬜ **File Manager** — agent file API (list/read/write/upload/delete) scoped to a site.
 8. ⬜ **Env & Secrets CRUD** — endpoints over the existing schema + envelope crypto.
-9. ⬜ **Database users & admin** — separate DB users/grants, Adminer/phpMyAdmin per instance.
+9. ✅ **Database users** — `database.user.create` runs `CREATE USER` in the DB container (Postgres). *(Adminer/phpMyAdmin + MySQL/Mongo next)*
 10. ⬜ **Runtime manager** — multi-PHP/Node version switch (redeploys the container).
 
 ## Phase 2 — Email stack (the biggest cPanel surface)
-11. 🟡 **Mail server** — `mailboxes` schema + `mail.mailbox.create` writes Dovecot/Postfix config. *(running Postfix+Dovecot containers + DKIM signing next)*
+11. 🟡 **Mail server** — `mail.mailbox.create` writes Dovecot/Postfix config + `mail.server.ensure` launches a docker-mailserver container that reads it. *(full DMS tuning + DKIM signing + antispam next)*
 12. ✅ **Webmail** — **native** integrated IMAP/SMTP client (no Roundcube): Go gateway (`go-imap`/`go-message`) + Next.js UI (folders, read, compose/send); GreenMail dev server in compose. *(running Postfix/Dovecot per node next)*
 13. ⬜ **Forwarders, aliases, autoresponders, filters.**
 14. ⬜ **Deliverability** — DKIM/SPF/DMARC management, SpamAssassin/Rspamd antispam.
