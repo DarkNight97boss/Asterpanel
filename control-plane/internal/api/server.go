@@ -128,6 +128,10 @@ func (s *Server) routes() http.Handler {
 			// Container logs (site-scoped tail)
 			r.With(az.Require("website.read", "logs.tail", "website")).Get("/sites/{siteID}/logs", s.handleSiteLogs)
 
+			// Health checks (per-site probes + status)
+			r.With(az.Require("website.read", "health.list", "website")).Get("/health", s.handleListHealth)
+			r.With(az.Require("website.create", "health.check", "website")).Post("/sites/{siteID}/health/check", s.handleCheckHealth)
+
 			// Runtime (language version per site)
 			r.With(az.Require("website.read", "runtime.list", "website")).Get("/runtimes", s.handleListRuntimes)
 			r.With(az.Require("website.create", "runtime.switch", "website")).Post("/sites/{siteID}/runtime", s.handleSwitchRuntime)

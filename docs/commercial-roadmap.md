@@ -29,7 +29,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 ## Phase 3 — Operations & security
 15. ✅ **Metrics & logs (real)** — agent samples CPU/mem/disk/load every 15s → CP (`node_metrics` time series), `GET /metrics` aggregates the fleet; signed `logs.tail` → `docker logs` powers a per-site log viewer (site picker, tail size, auto-refresh). *(container-level metrics + Loki streaming next)*
 16. 🟡 **Firewall + WAF + IP blocker** — `firewall.apply` renders/loads an `nft` ruleset (`table inet asterpanel`) per node. *(WAF rules + fail2ban-style brute-force protection next)*
-17. ⬜ **Health checks & alerting** — per-app probes, notifications, incident timeline.
+17. 🟡 **Health checks & alerting** — signed `health.check` probes container liveness (+ optional HTTP); per-site status (`GET /health`, on-demand check) with a notification on the transition into down. *(periodic sweep scheduler + incident timeline next)*
 18. ⬜ **Antivirus/malware scan** (ClamAV) on uploads + on demand.
 
 ## Phase 4 — Commercial layer

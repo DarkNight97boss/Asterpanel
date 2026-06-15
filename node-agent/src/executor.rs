@@ -9,7 +9,7 @@
 //! effect already exists is treated as success.
 
 use std::path::{Component, Path, PathBuf};
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, Instant, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use base64::Engine;
@@ -74,9 +74,9 @@ impl Executor for DockerExecutor {
             "file.mkdir" => self.file_mkdir(job).await,
             "runtime.switch" => self.runtime_switch(job).await,
             "logs.tail" => self.logs_tail(job).await,
+            "health.check" => self.health_check(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
-            "health.check" => JobOutcome::succeeded(json!({"checked": true})),
             other => JobOutcome::failed(format!("unsupported job type: {other}")),
         }
     }
@@ -729,6 +729,51 @@ impl DockerExecutor {
         }
     }
 
+    /// Health-probes a site: container liveness (`docker inspect`) plus an
+    /// optional HTTP GET. Always succeeds as a job — the health verdict is in the
+    /// result, so the control plane records "down" rather than a failed job.
+    async fn health_check(&self, job: &Job) -> JobOutcome {
+        let container = job
+            .payload
+            .get("container")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let running = if valid_container_name(container) {
+            matches!(
+                run_docker(&[
+                    "inspect".into(),
+                    "-f".into(),
+                    "{{.State.Running}}".into(),
+                    container.into(),
+                ])
+                .await,
+                Ok(o) if o.status.success()
+                    && String::from_utf8_lossy(&o.stdout).trim() == "true"
+            )
+        } else {
+            false
+        };
+
+        let target = job
+            .payload
+            .get("target_url")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let (http_code, latency_ms) = if target.is_empty() {
+            (None, 0u64)
+        } else {
+            probe_http(target).await
+        };
+
+        let status = classify_health(running, http_code);
+        JobOutcome::succeeded(json!({
+            "status": status,
+            "running": running,
+            "http_code": http_code,
+            "latency_ms": latency_ms,
+        }))
+    }
+
     // --- File manager (site-scoped, sandboxed) ------------------------------
     // Every op resolves a client path inside `<AGENT_SITES_DIR>/<site_id>` and
     // refuses anything that climbs above it (see `resolve_within`). Symlinks on
@@ -1276,6 +1321,37 @@ fn valid_container_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
+/// Health verdict from container liveness and an optional HTTP status code.
+/// A stopped container is always down; a running one is up unless its probe
+/// returned a server error (5xx).
+fn classify_health(running: bool, http_code: Option<u16>) -> &'static str {
+    if !running {
+        return "down";
+    }
+    match http_code {
+        Some(c) if c >= 500 => "down",
+        _ => "up",
+    }
+}
+
+/// HTTP GET probe returning (status_code, latency_ms). Self-signed certs are
+/// accepted — health is about reachability, not trust.
+async fn probe_http(url: &str) -> (Option<u16>, u64) {
+    let client = match reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .danger_accept_invalid_certs(true)
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return (None, 0),
+    };
+    let start = Instant::now();
+    match client.get(url).send().await {
+        Ok(resp) => (Some(resp.status().as_u16()), start.elapsed().as_millis() as u64),
+        Err(_) => (None, start.elapsed().as_millis() as u64),
+    }
+}
+
 /// Maps runtime + a language version to a base image. The version is sanitized
 /// to digits and dots only — even though it arrives in a signed job, an image
 /// tag must never carry arbitrary characters. Falls back to the default image
@@ -1632,6 +1708,16 @@ mod tests {
             docker_logs_args("astp_site_1", 100).join(" "),
             "logs --tail 100 --timestamps astp_site_1"
         );
+    }
+
+    #[test]
+    fn health_classification() {
+        assert_eq!(classify_health(false, None), "down"); // stopped
+        assert_eq!(classify_health(false, Some(200)), "down"); // stopped wins
+        assert_eq!(classify_health(true, None), "up"); // running, no probe
+        assert_eq!(classify_health(true, Some(200)), "up");
+        assert_eq!(classify_health(true, Some(404)), "up"); // 4xx is still "up"
+        assert_eq!(classify_health(true, Some(503)), "down"); // 5xx is down
     }
 
     #[test]

@@ -12,6 +12,7 @@ import {
   FolderTree,
   Globe,
   HardDrive,
+  HeartPulse,
   Inbox,
   Key,
   KeyRound,
@@ -42,6 +43,7 @@ const groups: Group[] = [
     items: [
       { href: "/nodes", label: "Nodes", icon: Server },
       { href: "/metrics", label: "Metrics", icon: Activity },
+      { href: "/health", label: "Health", icon: HeartPulse },
       { href: "/logs", label: "Logs", icon: Terminal },
     ],
   },

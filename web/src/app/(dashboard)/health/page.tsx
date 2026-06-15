@@ -1,0 +1,144 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { RefreshCw } from "lucide-react";
+
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
+import { apiGet, apiPost } from "@/lib/api";
+
+interface Health {
+  website_id: string;
+  site: string;
+  status: "up" | "down" | "unknown";
+  http_code: number | null;
+  latency_ms: number | null;
+  consecutive_failures: number;
+  checked_at: string | null;
+}
+
+const badge: Record<Health["status"], string> = {
+  up: "bg-emerald-500/15 text-emerald-400",
+  down: "bg-red-500/15 text-red-400",
+  unknown: "bg-muted text-muted-foreground",
+};
+
+export default function HealthPage() {
+  const [sites, setSites] = useState<Health[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [checking, setChecking] = useState<Record<string, boolean>>({});
+
+  async function load() {
+    try {
+      const res = await apiGet<{ sites: Health[] }>("/api/v1/health");
+      setSites(res.sites ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load health");
+    }
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  async function check(id: string) {
+    setChecking((c) => ({ ...c, [id]: true }));
+    setError(null);
+    try {
+      const { health } = await apiPost<{ health: Health }>(`/api/v1/sites/${id}/health/check`);
+      setSites((prev) => prev.map((s) => (s.website_id === id ? { ...s, ...health } : s)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Health check failed");
+    } finally {
+      setChecking((c) => ({ ...c, [id]: false }));
+    }
+  }
+
+  async function checkAll() {
+    await Promise.all(sites.map((s) => check(s.website_id)));
+  }
+
+  const down = sites.filter((s) => s.status === "down").length;
+
+  return (
+    <div className="space-y-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Health</h1>
+          <p className="text-sm text-muted-foreground">
+            Per-site liveness probes. {down > 0 ? `${down} site(s) down.` : "All monitored sites are up."}
+          </p>
+        </div>
+        <Button variant="outline" size="sm" disabled={sites.length === 0} onClick={checkAll}>
+          <RefreshCw className="h-4 w-4" />
+          Check all
+        </Button>
+      </header>
+
+      {error && <p className="text-sm text-red-400">{error}</p>}
+
+      <Card>
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Site</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Latency</th>
+                <th className="px-6 py-3 font-medium">Last checked</th>
+                <th className="px-6 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {sites.map((s) => (
+                <tr key={s.website_id} className="border-b border-border/60 last:border-0">
+                  <td className="px-6 py-3 font-medium">{s.site}</td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+                        badge[s.status],
+                      )}
+                    >
+                      {s.status}
+                      {s.status === "down" && s.consecutive_failures > 1
+                        ? ` ×${s.consecutive_failures}`
+                        : ""}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">
+                    {s.latency_ms != null && s.latency_ms > 0 ? `${s.latency_ms} ms` : "—"}
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">
+                    {s.checked_at ? new Date(s.checked_at).toLocaleString() : "never"}
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={checking[s.website_id]}
+                      onClick={() => check(s.website_id)}
+                    >
+                      <RefreshCw
+                        className={checking[s.website_id] ? "h-4 w-4 animate-spin" : "h-4 w-4"}
+                      />
+                      Check
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {sites.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                    No sites to monitor yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
