@@ -130,6 +130,7 @@ func (s *Server) routes() http.Handler {
 
 			// Health checks (per-site probes + status)
 			r.With(az.Require("website.read", "health.list", "website")).Get("/health", s.handleListHealth)
+			r.With(az.Require("website.read", "health.incidents", "website")).Get("/health/incidents", s.handleListIncidents)
 			r.With(az.Require("website.create", "health.check", "website")).Post("/sites/{siteID}/health/check", s.handleCheckHealth)
 
 			// Runtime (language version per site)

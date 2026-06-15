@@ -18,6 +18,22 @@ interface Health {
   checked_at: string | null;
 }
 
+interface Incident {
+  id: number;
+  site: string;
+  opened_at: string;
+  closed_at: string | null;
+  http_code: number | null;
+  ongoing: boolean;
+}
+
+function duration(from: string, to: string | null) {
+  const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
+  const m = Math.max(0, Math.round(ms / 60000));
+  if (m < 60) return `${m}m`;
+  return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
 const badge: Record<Health["status"], string> = {
   up: "bg-emerald-500/15 text-emerald-400",
   down: "bg-red-500/15 text-red-400",
@@ -26,13 +42,18 @@ const badge: Record<Health["status"], string> = {
 
 export default function HealthPage() {
   const [sites, setSites] = useState<Health[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState<Record<string, boolean>>({});
 
   async function load() {
     try {
-      const res = await apiGet<{ sites: Health[] }>("/api/v1/health");
-      setSites(res.sites ?? []);
+      const [h, inc] = await Promise.all([
+        apiGet<{ sites: Health[] }>("/api/v1/health"),
+        apiGet<{ incidents: Incident[] }>("/api/v1/health/incidents"),
+      ]);
+      setSites(h.sites ?? []);
+      setIncidents(inc.incidents ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load health");
     }
@@ -48,6 +69,8 @@ export default function HealthPage() {
     try {
       const { health } = await apiPost<{ health: Health }>(`/api/v1/sites/${id}/health/check`);
       setSites((prev) => prev.map((s) => (s.website_id === id ? { ...s, ...health } : s)));
+      const inc = await apiGet<{ incidents: Incident[] }>("/api/v1/health/incidents");
+      setIncidents(inc.incidents ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Health check failed");
     } finally {
@@ -139,6 +162,42 @@ export default function HealthPage() {
           </table>
         </CardContent>
       </Card>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-semibold text-muted-foreground">Incident timeline</h2>
+        {incidents.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No incidents recorded.</p>
+        ) : (
+          <ol className="space-y-2">
+            {incidents.map((i) => (
+              <li
+                key={i.id}
+                className="flex items-center gap-3 rounded-md border border-border/60 px-4 py-2 text-sm"
+              >
+                <span
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-full",
+                    i.ongoing ? "bg-red-400 animate-pulse" : "bg-emerald-400",
+                  )}
+                />
+                <span className="font-medium">{i.site}</span>
+                <span className="text-muted-foreground">
+                  {new Date(i.opened_at).toLocaleString()}
+                  {i.http_code ? ` · HTTP ${i.http_code}` : ""}
+                </span>
+                <span
+                  className={cn(
+                    "ml-auto rounded-full px-2 py-0.5 text-xs",
+                    i.ongoing ? "bg-red-500/15 text-red-400" : "bg-muted text-muted-foreground",
+                  )}
+                >
+                  {i.ongoing ? `ongoing · ${duration(i.opened_at, null)}` : `resolved · ${duration(i.opened_at, i.closed_at)}`}
+                </span>
+              </li>
+            ))}
+          </ol>
+        )}
+      </section>
     </div>
   );
 }

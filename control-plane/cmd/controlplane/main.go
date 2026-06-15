@@ -142,6 +142,12 @@ func runServe() {
 		IdleTimeout:       60 * time.Second,
 	}
 
+	// Periodic background schedulers (health sweep, brute-force watch). Cancelled
+	// on shutdown via the deferred bgCancel.
+	bgCtx, bgCancel := context.WithCancel(context.Background())
+	defer bgCancel()
+	server.StartBackground(bgCtx)
+
 	go func() {
 		log.Info("control-plane listening", "addr", cfg.HTTPAddr, "env", cfg.Env, "version", version)
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

@@ -82,12 +82,18 @@ func (s *Server) runAwaitedJob(ctx context.Context, p *middleware.Principal, typ
 	if !dispatched {
 		return nil, errAgentUnavailable
 	}
+	return s.awaitJobResult(ctx, p.OrgID, jobID)
+}
 
+// awaitJobResult bounded-waits for a dispatched job's callback to land its
+// result in the jobs table, returning the raw outcome JSON. Shared by the
+// OPA-gated runAwaitedJob and the system health sweep.
+func (s *Server) awaitJobResult(ctx context.Context, orgID, jobID uuid.UUID) (json.RawMessage, error) {
 	ticker := time.NewTicker(jobWaitTick)
 	defer ticker.Stop()
 	timeout := time.After(jobWaitBudget)
 	for {
-		if jr, gerr := s.deps.Store.GetJobResult(ctx, p.OrgID, jobID); gerr == nil {
+		if jr, gerr := s.deps.Store.GetJobResult(ctx, orgID, jobID); gerr == nil {
 			switch jr.Status {
 			case "succeeded":
 				return json.RawMessage(jr.Result), nil
@@ -95,7 +101,7 @@ func (s *Server) runAwaitedJob(ctx context.Context, p *middleware.Principal, typ
 				if jr.Error != nil && *jr.Error != "" {
 					return nil, errors.New(*jr.Error)
 				}
-				return nil, errors.New("file operation failed on the node")
+				return nil, errors.New("job failed on the node")
 			}
 		}
 		select {

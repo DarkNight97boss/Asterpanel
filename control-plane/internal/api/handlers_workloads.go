@@ -298,7 +298,8 @@ func (s *Server) signPersistDispatch(ctx context.Context, p *middleware.Principa
 		SigningKeyID: s.deps.Signer.KeyID(),
 		IssuedAt:     job.IssuedAt,
 		ExpiresAt:    job.ExpiresAt,
-		CreatedBy:    uuid.NullUUID{UUID: p.UserID, Valid: true},
+		// System-issued jobs (e.g. the health sweep) carry no user; leave NULL.
+		CreatedBy: uuid.NullUUID{UUID: p.UserID, Valid: p.UserID != uuid.Nil},
 	}); err != nil {
 		return job.ID, false, err
 	}
