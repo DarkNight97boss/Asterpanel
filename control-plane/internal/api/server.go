@@ -202,6 +202,10 @@ func (s *Server) routes() http.Handler {
 
 			// Billing & usage
 			r.With(az.Require("billing.read", "billing.read", "billing")).Get("/billing", s.handleBilling)
+			r.With(az.Require("billing.read", "billing.invoices.list", "invoice")).Get("/billing/invoices", s.handleListInvoices)
+			r.With(az.Require("billing.read", "billing.invoices.get", "invoice")).Get("/billing/invoices/{invoiceID}", s.handleGetInvoice)
+			r.With(az.Require("billing.manage", "invoice.create", "invoice")).Post("/billing/invoices", s.handleGenerateInvoice)
+			r.With(az.Require("billing.manage", "invoice.pay", "invoice")).Post("/billing/invoices/{invoiceID}/pay", s.handlePayInvoice)
 
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)

@@ -34,7 +34,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 
 ## Phase 4 — Commercial layer
 19. 🟡 **Reseller hierarchy + packages/quotas** — per-plan `limits` (sites/domains/databases/nodes/mailboxes) enforced on every create (`403 quota_exceeded`); `GET /billing` exposes plan + usage. *(reseller sub-accounts + disk/bandwidth metering next)*
-20. ⬜ **Billing & invoicing** — usage metering, plans, invoices, payment-provider hooks.
+20. 🟡 **Billing & invoicing** — invoices + line items generated from the org plan (base fee + usage), numbered `INV-YYYY-NNNN`; list/detail/pay with a `PaymentProvider` seam (manual default, Stripe-ready) + Billing UI. *(real Stripe provider + usage-based overage metering + PDF/email next)*
 21. ⬜ **White-label / branding**, customer-facing API + webhooks, docs portal.
 22. ⬜ **Migration tooling** — import from cPanel/Plesk.
 23. ⬜ **DNS clustering / secondary DNS**, multi-region.

@@ -22,6 +22,7 @@ import {
   Mail,
   Network,
   Package,
+  Receipt,
   ScrollText,
   Server,
   Shield,
@@ -83,7 +84,13 @@ const groups: Group[] = [
       { href: "/tokens", label: "API Tokens", icon: Key },
     ],
   },
-  { label: "Account", items: [{ href: "/notifications", label: "Notifications", icon: Bell }] },
+  {
+    label: "Account",
+    items: [
+      { href: "/billing", label: "Billing", icon: Receipt },
+      { href: "/notifications", label: "Notifications", icon: Bell },
+    ],
+  },
 ];
 
 export function Sidebar() {
