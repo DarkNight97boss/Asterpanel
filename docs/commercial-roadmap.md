@@ -15,7 +15,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 4. ✅ **Backups & Restore** — `backup.create`/`backup.restore` tar/untar the target. *(S3/B2 upload + checksums + scheduling next)*
 5. ✅ **Cron jobs** — `cron_jobs` schema + CRUD + `cron.apply` writes the node crontab.
 6. ✅ **FTP/SFTP** — `ftp_accounts` schema + CRUD + `ftp.account.create` writes a chrooted OpenSSH SFTP `Match` block.
-7. ⬜ **File Manager** — agent file API (list/read/write/upload/delete) scoped to a site.
+7. ✅ **File Manager** — site-scoped, sandboxed agent file API (`file.list`/`file.read`/`file.write`/`file.mkdir`/`file.delete`) with path-traversal & symlink-escape protection and read/write size caps; integrated browse/edit/upload/delete UI. *(multipart streaming upload + archive extract next)*
 8. ✅ **Env & Secrets CRUD** — org-scoped endpoints over the existing schema; secrets sealed with envelope crypto (AES-256-GCM, AAD-bound) and never returned in plaintext.
 9. ✅ **Database users** — `database.user.create` runs `CREATE USER` in the DB container (Postgres). *(Adminer/phpMyAdmin + MySQL/Mongo next)*
 10. ⬜ **Runtime manager** — multi-PHP/Node version switch (redeploys the container).

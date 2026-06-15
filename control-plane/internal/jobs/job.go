@@ -36,6 +36,11 @@ const (
 	TypeFTPAccountCreate Type = "ftp.account.create"
 	TypeCertInstall      Type = "cert.install"
 	TypeFirewallApply    Type = "firewall.apply"
+	TypeFileList         Type = "file.list"
+	TypeFileRead         Type = "file.read"
+	TypeFileWrite        Type = "file.write"
+	TypeFileDelete       Type = "file.delete"
+	TypeFileMkdir        Type = "file.mkdir"
 	TypeHealthCheck      Type = "health.check"
 )
 

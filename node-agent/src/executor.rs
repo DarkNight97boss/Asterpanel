@@ -8,7 +8,11 @@
 //! and a per-tenant network. Executors are idempotent — re-running a job whose
 //! effect already exists is treated as success.
 
+use std::path::{Component, Path, PathBuf};
+use std::time::UNIX_EPOCH;
+
 use async_trait::async_trait;
+use base64::Engine;
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -63,6 +67,11 @@ impl Executor for DockerExecutor {
             "database.user.create" => self.database_user_create(job).await,
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
+            "file.list" => self.file_list(job).await,
+            "file.read" => self.file_read(job).await,
+            "file.write" => self.file_write(job).await,
+            "file.delete" => self.file_delete(job).await,
+            "file.mkdir" => self.file_mkdir(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
@@ -640,6 +649,192 @@ impl DockerExecutor {
         let _ = run_docker(&["volume".into(), "rm".into(), volume]).await;
         JobOutcome::succeeded(json!({ "deleted": container }))
     }
+
+    // --- File manager (site-scoped, sandboxed) ------------------------------
+    // Every op resolves a client path inside `<AGENT_SITES_DIR>/<site_id>` and
+    // refuses anything that climbs above it (see `resolve_within`). Symlinks on
+    // an existing target are refused so a tenant cannot link out of their root.
+
+    async fn file_list(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("file.list: invalid site or path"),
+        };
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("file.list: path escapes site root"),
+        };
+        // Listing the site root for the first time should succeed, not 404.
+        if rel.is_empty() {
+            let _ = tokio::fs::create_dir_all(&target).await;
+        }
+        let mut rd = match tokio::fs::read_dir(&target).await {
+            Ok(r) => r,
+            Err(e) => return JobOutcome::failed(format!("file.list: {e}")),
+        };
+        let mut entries: Vec<Value> = Vec::new();
+        while let Ok(Some(ent)) = rd.next_entry().await {
+            let md = match ent.metadata().await {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let is_dir = md.is_dir();
+            entries.push(json!({
+                "name": ent.file_name().to_string_lossy(),
+                "type": if is_dir { "dir" } else { "file" },
+                "size": if is_dir { Value::Null } else { json!(md.len()) },
+                "modified": mtime_millis(&md),
+            }));
+        }
+        // Directories first, then alphabetical — a predictable browsing order.
+        entries.sort_by(|a, b| {
+            let ad = a["type"] == json!("dir");
+            let bd = b["type"] == json!("dir");
+            bd.cmp(&ad).then_with(|| {
+                a["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["name"].as_str().unwrap_or(""))
+            })
+        });
+        JobOutcome::succeeded(json!({"path": display_path(&rel), "entries": entries}))
+    }
+
+    async fn file_read(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("file.read: invalid site or path"),
+        };
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("file.read: path escapes site root"),
+        };
+        match tokio::fs::symlink_metadata(&target).await {
+            Ok(md) if md.file_type().is_symlink() => {
+                return JobOutcome::failed("file.read: refusing to follow a symlink")
+            }
+            Ok(md) if md.is_dir() => return JobOutcome::failed("file.read: path is a directory"),
+            Ok(md) if md.len() > MAX_READ_BYTES => {
+                return JobOutcome::succeeded(json!({
+                    "path": display_path(&rel), "size": md.len(),
+                    "truncated": true, "encoding": "none", "content": "",
+                }))
+            }
+            Ok(_) => {}
+            Err(e) => return JobOutcome::failed(format!("file.read: {e}")),
+        }
+        let bytes = match tokio::fs::read(&target).await {
+            Ok(b) => b,
+            Err(e) => return JobOutcome::failed(format!("file.read: {e}")),
+        };
+        let size = bytes.len() as u64;
+        // Serve clean UTF-8 as text; anything else (or with NULs) as base64.
+        match String::from_utf8(bytes) {
+            Ok(s) if !s.contains('\0') => JobOutcome::succeeded(json!({
+                "path": display_path(&rel), "size": size,
+                "truncated": false, "encoding": "utf8", "content": s,
+            })),
+            Ok(s) => JobOutcome::succeeded(json!({
+                "path": display_path(&rel), "size": size, "truncated": false,
+                "encoding": "base64",
+                "content": base64::engine::general_purpose::STANDARD.encode(s.as_bytes()),
+            })),
+            Err(e) => JobOutcome::succeeded(json!({
+                "path": display_path(&rel), "size": size, "truncated": false,
+                "encoding": "base64",
+                "content": base64::engine::general_purpose::STANDARD.encode(e.as_bytes()),
+            })),
+        }
+    }
+
+    async fn file_write(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("file.write: invalid site or path"),
+        };
+        if rel.is_empty() {
+            return JobOutcome::failed("file.write: a file path is required");
+        }
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("file.write: path escapes site root"),
+        };
+        let b64 = job
+            .payload
+            .get("content_b64")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
+            Ok(b) => b,
+            Err(_) => return JobOutcome::failed("file.write: invalid base64 content"),
+        };
+        if bytes.len() as u64 > MAX_WRITE_BYTES {
+            return JobOutcome::failed("file.write: content exceeds 5 MiB limit");
+        }
+        if let Ok(md) = tokio::fs::symlink_metadata(&target).await {
+            if md.file_type().is_symlink() {
+                return JobOutcome::failed("file.write: refusing to overwrite a symlink");
+            }
+            if md.is_dir() {
+                return JobOutcome::failed("file.write: path is a directory");
+            }
+        }
+        if let Some(parent) = target.parent() {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                return JobOutcome::failed(format!("file.write: mkdir failed: {e}"));
+            }
+        }
+        if let Err(e) = tokio::fs::write(&target, &bytes).await {
+            return JobOutcome::failed(format!("file.write: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": display_path(&rel), "written": bytes.len()}))
+    }
+
+    async fn file_mkdir(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("file.mkdir: invalid site or path"),
+        };
+        if rel.is_empty() {
+            return JobOutcome::failed("file.mkdir: a directory path is required");
+        }
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("file.mkdir: path escapes site root"),
+        };
+        if let Err(e) = tokio::fs::create_dir_all(&target).await {
+            return JobOutcome::failed(format!("file.mkdir: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": display_path(&rel), "created": true}))
+    }
+
+    async fn file_delete(&self, job: &Job) -> JobOutcome {
+        let (root, rel) = match site_and_rel(&job.payload) {
+            Some(v) => v,
+            None => return JobOutcome::failed("file.delete: invalid site or path"),
+        };
+        if rel.is_empty() {
+            return JobOutcome::failed("file.delete: refusing to delete the site root");
+        }
+        let target = match resolve_within(&root, &rel) {
+            Some(t) => t,
+            None => return JobOutcome::failed("file.delete: path escapes site root"),
+        };
+        // symlink_metadata so we remove the link itself, never its target.
+        let md = match tokio::fs::symlink_metadata(&target).await {
+            Ok(m) => m,
+            Err(e) => return JobOutcome::failed(format!("file.delete: {e}")),
+        };
+        let res = if md.is_dir() {
+            tokio::fs::remove_dir_all(&target).await
+        } else {
+            tokio::fs::remove_file(&target).await
+        };
+        if let Err(e) = res {
+            return JobOutcome::failed(format!("file.delete: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": display_path(&rel), "deleted": true}))
+    }
 }
 
 /// Builds the hardened `docker run` argv for a managed database container.
@@ -1052,6 +1247,69 @@ async fn run_docker(args: &[String]) -> std::io::Result<std::process::Output> {
         .await
 }
 
+// --- File-manager helpers (pure, sandbox-critical) --------------------------
+
+const MAX_READ_BYTES: u64 = 1 << 20; // 1 MiB inline read cap
+const MAX_WRITE_BYTES: u64 = 5 << 20; // 5 MiB write cap
+
+/// Root directory for a site's managed files on the node.
+fn site_root(site_id: &str) -> PathBuf {
+    let base = std::env::var("AGENT_SITES_DIR").unwrap_or_else(|_| "/srv/asterpanel/sites".into());
+    Path::new(&base).join(site_id)
+}
+
+/// Extracts (site_root, relative_path) from a file job payload, rejecting a
+/// malformed site id — the only safe shape is a bare UUID-like segment.
+fn site_and_rel(payload: &Value) -> Option<(PathBuf, String)> {
+    let site_id = payload.get("site_id").and_then(Value::as_str)?;
+    if site_id.is_empty() || site_id.contains('/') || site_id.contains("..") {
+        return None;
+    }
+    let rel = payload
+        .get("path")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim_start_matches('/')
+        .to_string();
+    Some((site_root(site_id), rel))
+}
+
+/// Joins `rel` onto `root`, allowing only normal path components. Any attempt to
+/// climb out (`..`), use an absolute path, or a Windows prefix yields None; a
+/// final lexical `starts_with` is belt-and-braces.
+fn resolve_within(root: &Path, rel: &str) -> Option<PathBuf> {
+    let mut out = root.to_path_buf();
+    for comp in Path::new(rel).components() {
+        match comp {
+            Component::Normal(c) => out.push(c),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    if !out.starts_with(root) {
+        return None;
+    }
+    Some(out)
+}
+
+/// Modification time as Unix epoch milliseconds (0 when unavailable).
+fn mtime_millis(md: &std::fs::Metadata) -> u64 {
+    md.modified()
+        .ok()
+        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+/// Normalizes a relative path back to a leading-slash display form for the UI.
+fn display_path(rel: &str) -> String {
+    if rel.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{rel}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1208,5 +1466,45 @@ mod tests {
         assert!(s.contains("table inet asterpanel"), "{s}");
         assert!(s.contains("ip saddr 203.0.113.66 drop"), "{s}");
         assert!(s.contains("ip saddr 10.0.0.0/8 tcp dport 22 accept"), "{s}");
+    }
+
+    #[test]
+    fn resolve_within_allows_normal_and_blocks_escape() {
+        let root = Path::new("/srv/sites/abc");
+        assert_eq!(
+            resolve_within(root, "public/index.html"),
+            Some(PathBuf::from("/srv/sites/abc/public/index.html"))
+        );
+        assert_eq!(resolve_within(root, ""), Some(root.to_path_buf()));
+        // current-dir segments are harmless
+        assert_eq!(
+            resolve_within(root, "a/./b"),
+            Some(PathBuf::from("/srv/sites/abc/a/b"))
+        );
+        // every way of climbing out is refused
+        assert!(resolve_within(root, "../etc/passwd").is_none());
+        assert!(resolve_within(root, "a/../../x").is_none());
+        assert!(resolve_within(root, "/etc/passwd").is_none());
+    }
+
+    #[test]
+    fn site_and_rel_parses_and_rejects() {
+        let (root, rel) =
+            site_and_rel(&json!({"site_id": "abc-123", "path": "/public/app.js"})).unwrap();
+        assert!(root.ends_with("abc-123"));
+        assert_eq!(rel, "public/app.js");
+        // missing path means the site root
+        let (_, rel0) = site_and_rel(&json!({"site_id": "abc-123"})).unwrap();
+        assert_eq!(rel0, "");
+        // a site id is mandatory and must be a bare segment
+        assert!(site_and_rel(&json!({"path": "/x"})).is_none());
+        assert!(site_and_rel(&json!({"site_id": "../../etc"})).is_none());
+        assert!(site_and_rel(&json!({"site_id": "a/b"})).is_none());
+    }
+
+    #[test]
+    fn display_path_adds_leading_slash() {
+        assert_eq!(display_path(""), "/");
+        assert_eq!(display_path("a/b"), "/a/b");
     }
 }

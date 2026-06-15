@@ -115,6 +115,13 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("website.read", "website.list", "website")).Get("/websites", s.handleListWebsites)
 			r.With(az.Require("website.create", "website.create", "website")).Post("/websites", s.handleCreateWebsite)
 
+			// File manager (site-scoped, signed agent file API)
+			r.With(az.Require("files.read", "file.list", "website")).Get("/sites/{siteID}/files", s.handleListFiles)
+			r.With(az.Require("files.read", "file.read", "website")).Get("/sites/{siteID}/files/content", s.handleReadFile)
+			r.With(az.Require("files.manage", "file.write", "website")).Put("/sites/{siteID}/files/content", s.handleWriteFile)
+			r.With(az.Require("files.manage", "file.mkdir", "website")).Post("/sites/{siteID}/files/dir", s.handleMkdir)
+			r.With(az.Require("files.manage", "file.delete", "website")).Delete("/sites/{siteID}/files", s.handleDeleteFile)
+
 			// Deployments
 			r.With(az.Require("deploy.create", "deploy.create", "deployment")).
 				Post("/applications/{appID}/deployments", s.handleCreateDeployment)

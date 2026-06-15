@@ -56,3 +56,26 @@ func (s *Store) UpdateJobStatus(ctx context.Context, id uuid.UUID, status string
 		WHERE id = $1`, id, status, res, errMsg, terminal)
 	return err
 }
+
+// JobResult is the subset of a job needed to await and read an async outcome.
+type JobResult struct {
+	Status string
+	Result []byte // raw JSON (may be "null")
+	Error  *string
+}
+
+// GetJobResult returns the current status/result of a job, scoped to the
+// organization that issued it (defends against cross-tenant job probing).
+func (s *Store) GetJobResult(ctx context.Context, orgID, id uuid.UUID) (*JobResult, error) {
+	var jr JobResult
+	var result []byte
+	err := s.pool.QueryRow(ctx, `
+		SELECT status, COALESCE(result, 'null')::text, error
+		FROM jobs WHERE id = $1 AND organization_id = $2`, id, orgID).
+		Scan(&jr.Status, &result, &jr.Error)
+	if err != nil {
+		return nil, err
+	}
+	jr.Result = result
+	return &jr, nil
+}
