@@ -133,7 +133,18 @@ export default function FirewallPage() {
                   </td>
                   <td className="px-6 py-3 font-mono text-xs">{r.source}</td>
                   <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{r.port}</td>
-                  <td className="px-6 py-3 text-muted-foreground">{r.note}</td>
+                  <td className="px-6 py-3 text-muted-foreground">
+                    {r.note?.startsWith("auto-ban") ? (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400">
+                          auto
+                        </span>
+                        {r.note}
+                      </span>
+                    ) : (
+                      r.note
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
