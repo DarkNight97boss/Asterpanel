@@ -1,0 +1,194 @@
+// Typed client for the AsterPanel control-plane API.
+//
+// Auth model: the short-lived access token lives in memory (never localStorage),
+// the rotating refresh token is an HttpOnly cookie the browser sends automatically.
+// On a 401 we transparently rotate once and retry.
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+
+let accessToken: string | null = null;
+let csrfToken: string | null = null;
+
+export function setTokens(at: string | null, csrf?: string | null) {
+  accessToken = at;
+  if (csrf !== undefined) csrfToken = csrf;
+}
+
+export function getAccessToken() {
+  return accessToken;
+}
+
+export class ApiError extends Error {
+  code: string;
+  status: number;
+  constructor(status: number, code: string, message: string) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+}
+
+type RequestOptions = Omit<RequestInit, "body"> & { body?: unknown };
+
+async function request<T>(path: string, opts: RequestOptions = {}, retry = true): Promise<T> {
+  const headers = new Headers(opts.headers);
+  headers.set("Content-Type", "application/json");
+  if (accessToken) headers.set("Authorization", `Bearer ${accessToken}`);
+  if (csrfToken && path.startsWith("/api/v1/auth/refresh")) {
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+
+  const res = await fetch(`${API_URL}${path}`, {
+    ...opts,
+    headers,
+    credentials: "include",
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+  });
+
+  if (res.status === 401 && retry && !path.startsWith("/api/v1/auth/")) {
+    if (await tryRefresh()) return request<T>(path, opts, false);
+  }
+
+  const text = await res.text();
+  const data = text ? JSON.parse(text) : null;
+  if (!res.ok) {
+    const err = data?.error ?? {};
+    throw new ApiError(res.status, err.code ?? "error", err.message ?? res.statusText);
+  }
+  return data as T;
+}
+
+// --- Auth ---------------------------------------------------------------------
+
+export interface User {
+  id: string;
+  email: string;
+  full_name: string | null;
+  superadmin: boolean;
+  status: string;
+  organization_id?: string;
+}
+
+export type LoginResult =
+  | { mfaRequired: true; mfaToken: string; methods: string[] }
+  | { mfaRequired: false; user: User };
+
+interface LoginResponse {
+  mfa_required?: boolean;
+  mfa_token?: string;
+  methods?: string[];
+  access_token?: string;
+  csrf_token?: string;
+  user?: User;
+}
+
+export async function login(email: string, password: string): Promise<LoginResult> {
+  const data = await request<LoginResponse>(
+    "/api/v1/auth/login",
+    { method: "POST", body: { email, password } },
+    false,
+  );
+  if (data.mfa_required) {
+    return { mfaRequired: true, mfaToken: data.mfa_token!, methods: data.methods ?? [] };
+  }
+  setTokens(data.access_token!, data.csrf_token);
+  return { mfaRequired: false, user: data.user! };
+}
+
+export async function verifyMfa(mfaToken: string, code: string): Promise<User> {
+  const data = await request<LoginResponse>(
+    "/api/v1/auth/mfa/verify",
+    { method: "POST", body: { mfa_token: mfaToken, code } },
+    false,
+  );
+  setTokens(data.access_token!, data.csrf_token);
+  return data.user!;
+}
+
+async function tryRefresh(): Promise<boolean> {
+  try {
+    const data = await request<LoginResponse>("/api/v1/auth/refresh", { method: "POST" }, false);
+    setTokens(data.access_token!, data.csrf_token);
+    return true;
+  } catch {
+    setTokens(null, null);
+    return false;
+  }
+}
+
+/** Restore a session on app load using the refresh cookie. */
+export async function bootstrap(): Promise<User | null> {
+  if (!(await tryRefresh())) return null;
+  try {
+    const { user } = await request<{ user: User }>("/api/v1/me");
+    return user;
+  } catch {
+    return null;
+  }
+}
+
+export async function logout(): Promise<void> {
+  try {
+    await request("/api/v1/auth/logout", { method: "POST" }, false);
+  } finally {
+    setTokens(null, null);
+  }
+}
+
+// --- Resources ----------------------------------------------------------------
+
+export interface ServerNode {
+  id: string;
+  name: string;
+  hostname: string;
+  region: string | null;
+  status: string;
+  agent_version: string | null;
+  last_heartbeat_at: string | null;
+  created_at: string;
+}
+
+export async function listNodes(): Promise<ServerNode[]> {
+  const { nodes } = await request<{ nodes: ServerNode[] }>("/api/v1/nodes");
+  return nodes ?? [];
+}
+
+export async function createNode(input: { name: string; hostname: string; region?: string }) {
+  return request<{ node: ServerNode }>("/api/v1/nodes", { method: "POST", body: input });
+}
+
+export async function createEnrollment(nodeId: string) {
+  return request<{ enrollment_token: string; expires_at: string; node_id: string }>(
+    `/api/v1/nodes/${nodeId}/enroll`,
+    { method: "POST" },
+  );
+}
+
+export interface Website {
+  id: string;
+  name: string;
+  runtime: string;
+  status: string;
+  server_node_id: string | null;
+  ssl_enabled: boolean;
+  ssl_status: string;
+  created_at: string;
+}
+
+export async function listWebsites(): Promise<Website[]> {
+  const { websites } = await request<{ websites: Website[] }>("/api/v1/websites");
+  return websites ?? [];
+}
+
+export async function createWebsite(input: {
+  name: string;
+  domain: string;
+  runtime: string;
+  node_id: string;
+  ssl_enabled?: boolean;
+}) {
+  return request<{ website: Website; job: { id: string; dispatched: boolean } }>(
+    "/api/v1/websites",
+    { method: "POST", body: input },
+  );
+}

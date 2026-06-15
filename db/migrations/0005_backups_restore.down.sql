@@ -1,0 +1,4 @@
+BEGIN;
+DROP TABLE IF EXISTS restore_jobs;
+DROP TABLE IF EXISTS backups;
+COMMIT;

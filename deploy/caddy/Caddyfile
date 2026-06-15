@@ -1,0 +1,44 @@
+# AsterPanel API gateway (dev). A single entrypoint on :80 routing the panel and
+# the API. In production, remove `auto_https off` and Caddy obtains/renews certs
+# automatically; per-site routes are injected dynamically via the admin API.
+
+{
+	admin 0.0.0.0:2019
+	auto_https off
+}
+
+:80 {
+	encode gzip zstd
+
+	# API + docs → control plane
+	@api path /api/* /swagger* /openapi.yaml
+	handle @api {
+		reverse_proxy control-plane:8080
+	}
+
+	# Everything else → web panel
+	handle {
+		reverse_proxy web:3000
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		X-Frame-Options DENY
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+# Per-tenant sites are served on their own hostnames. The agent registers routes
+# at runtime through the Caddy Admin API (:2019). Example static block for
+# reference (see deploy/caddy/sites/example.caddy):
+#
+#   example.com {
+#       reverse_proxy astp_site_<id>:80
+#       tls you@example.com   # ACME in production
+#   }

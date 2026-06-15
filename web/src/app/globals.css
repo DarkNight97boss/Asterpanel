@@ -1,0 +1,23 @@
+@import "tailwindcss";
+
+/* Dark, indigo-accented theme. Tailwind v4 turns these into utilities:
+   --color-card -> bg-card/text-card/border-card, etc. */
+@theme {
+  --color-background: #09090b;
+  --color-foreground: #e4e4e7;
+  --color-card: #111114;
+  --color-border: #27272a;
+  --color-muted: #18181b;
+  --color-muted-foreground: #a1a1aa;
+  --color-primary: #6366f1;
+  --color-primary-foreground: #ffffff;
+}
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+}

@@ -1,0 +1,161 @@
+# AsterPanel — full development stack.
+#   make secrets   # generate CA, mTLS certs, Ed25519 job keys into ./secrets
+#   make up        # build + start everything
+#   make migrate   # apply DB migrations
+#   make seed      # reference data + admin user
+name: asterpanel
+
+x-dev-keys: &dev-keys
+  # Dev-only symmetric keys (valid 32-byte base64). Production injects real
+  # secrets from Vault/SOPS — never commit real values.
+  JWT_SIGNING_SECRET: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+  SECRETS_MASTER_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: asterpanel
+      POSTGRES_PASSWORD: asterpanel_dev_pw
+      POSTGRES_DB: asterpanel
+    ports: ["5432:5432"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U asterpanel -d asterpanel"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "no", "--save", ""]
+    ports: ["6379:6379"]
+
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-m", "8222"]
+    ports: ["4222:4222", "8222:8222"]
+
+  opa:
+    image: openpolicyagent/opa:0.69.0-rootless
+    command: ["run", "--server", "--addr=0.0.0.0:8181", "--log-level=info", "/policies"]
+    ports: ["8181:8181"]
+    volumes:
+      - ./policies:/policies:ro
+
+  control-plane:
+    build:
+      context: .
+      dockerfile: control-plane/Dockerfile
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+      opa: { condition: service_started }
+    environment:
+      <<: *dev-keys
+      ASTERPANEL_ENV: development
+      LOG_LEVEL: debug
+      CONTROL_PLANE_HTTP_ADDR: ":8080"
+      CONTROL_PLANE_PUBLIC_URL: http://localhost:8080
+      WEB_PUBLIC_URL: http://localhost:3000
+      CORS_ALLOWED_ORIGINS: "http://localhost:3000,http://localhost"
+      DATABASE_URL: postgres://asterpanel:asterpanel_dev_pw@postgres:5432/asterpanel?sslmode=disable
+      REDIS_URL: redis://redis:6379/0
+      NATS_URL: nats://nats:4222
+      OPA_URL: http://opa:8181
+      JOB_SIGNING_KEY_ID: cp-dev-1
+      JOB_SIGNING_PRIVATE_KEY_PATH: /secrets/job-signing/ed25519.key
+      JOB_SIGNING_PUBLIC_KEY_PATH: /secrets/job-signing/ed25519.pub
+      MTLS_CA_CERT_PATH: /secrets/ca/ca.crt
+      MTLS_CA_KEY_PATH: /secrets/ca/ca.key
+      CONTROL_PLANE_CLIENT_CERT_PATH: /secrets/control-plane/client.crt
+      CONTROL_PLANE_CLIENT_KEY_PATH: /secrets/control-plane/client.key
+      AGENT_DEV_BASE_URL: https://node-agent:7443
+    ports: ["8080:8080"]
+    volumes:
+      - ./secrets:/secrets:ro
+
+  node-agent:
+    build:
+      context: .
+      dockerfile: node-agent/Dockerfile
+    depends_on:
+      control-plane: { condition: service_started }
+    environment:
+      RUST_LOG: info
+      # Dev: accept jobs for any node id (no enrollment performed in compose).
+      AGENT_ALLOW_ANY_NODE: "true"
+      AGENT_LISTEN_ADDR: 0.0.0.0:7443
+      AGENT_TLS_CERT_PATH: /secrets/agent/agent.crt
+      AGENT_TLS_KEY_PATH: /secrets/agent/agent.key
+      AGENT_CA_CERT_PATH: /secrets/ca/ca.crt
+      AGENT_TRUSTED_JOB_PUBKEY_PATH: /secrets/job-signing/ed25519.pub
+      AGENT_CONTROL_PLANE_CALLBACK_URL: http://control-plane:8080
+    ports: ["7443:7443"]
+    volumes:
+      - ./secrets:/secrets:ro
+      # Dev convenience: the agent drives the host Docker daemon. Production uses
+      # a socket proxy / rootless / containerd — never raw socket exposure.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    depends_on:
+      control-plane: { condition: service_started }
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8080
+    ports: ["3000:3000"]
+
+  caddy:
+    image: caddy:2-alpine
+    depends_on: [web, control-plane]
+    ports: ["80:80", "2019:2019"]
+    volumes:
+      - ./deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports: ["9090:9090"]
+    volumes:
+      - ./deploy/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+
+  loki:
+    image: grafana/loki:3.2.0
+    command: ["-config.file=/etc/loki/local-config.yaml"]
+    ports: ["3100:3100"]
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    depends_on: [prometheus, loki]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    ports: ["3001:3000"]
+    volumes:
+      - ./deploy/observability/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+
+  # One-shot migration runner (profile "tools"): `make migrate`.
+  migrate:
+    image: migrate/migrate:v4.18.1
+    profiles: ["tools"]
+    depends_on:
+      postgres: { condition: service_healthy }
+    volumes:
+      - ./db/migrations:/migrations:ro
+    command:
+      [
+        "-path=/migrations",
+        "-database=postgres://asterpanel:asterpanel_dev_pw@postgres:5432/asterpanel?sslmode=disable",
+        "up",
+      ]
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

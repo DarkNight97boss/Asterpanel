@@ -1,0 +1,35 @@
+# Secrets & local config
+.env
+.env.local
+/secrets/
+*.pem
+*.key
+*.crt
+!deploy/**/example*.crt
+
+# Go
+/control-plane/bin/
+*.test
+*.out
+
+# Rust
+/node-agent/target/
+**/*.rs.bk
+
+# Node / Next.js
+node_modules/
+/web/.next/
+/web/out/
+/web/dist/
+*.tsbuildinfo
+.pnpm-store/
+
+# Data volumes (dev)
+/.data/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp

@@ -1,0 +1,29 @@
+# Traefik dynamic configuration: routes the panel and the API. Per-tenant site
+# routers are added here (or via the Docker provider labels) by the agent.
+http:
+  routers:
+    api:
+      rule: "PathPrefix(`/api`) || PathPrefix(`/swagger`) || Path(`/openapi.yaml`)"
+      service: control-plane
+      entryPoints: [web]
+    panel:
+      rule: "PathPrefix(`/`)"
+      service: web
+      entryPoints: [web]
+
+  services:
+    control-plane:
+      loadBalancer:
+        servers:
+          - url: "http://control-plane:8080"
+    web:
+      loadBalancer:
+        servers:
+          - url: "http://web:3000"
+
+  middlewares:
+    security-headers:
+      headers:
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: no-referrer

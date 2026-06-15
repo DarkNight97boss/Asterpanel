@@ -1,0 +1,15 @@
+# Reference per-tenant site block. In production the node agent generates one of
+# these per website (or injects the equivalent route via the Caddy Admin API),
+# pointing at the tenant's hardened container. ACME issues/renews TLS automatically.
+
+example.com {
+	reverse_proxy astp_site_00000000-0000-0000-0000-000000000000:80
+
+	encode gzip
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# tls you@example.com   # uncomment in production for automatic HTTPS
+}

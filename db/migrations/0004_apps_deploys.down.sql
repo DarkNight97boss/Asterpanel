@@ -1,0 +1,10 @@
+BEGIN;
+DROP TABLE IF EXISTS health_checks;
+DROP TABLE IF EXISTS database_instances;
+DROP TABLE IF EXISTS secrets;
+DROP TABLE IF EXISTS environment_variables;
+DROP TABLE IF EXISTS deployment_logs;
+DROP TABLE IF EXISTS deployments;
+DROP TABLE IF EXISTS applications;
+DROP TABLE IF EXISTS websites;
+COMMIT;

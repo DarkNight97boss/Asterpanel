@@ -1,0 +1,6 @@
+BEGIN;
+DROP TABLE IF EXISTS jobs;
+DROP TABLE IF EXISTS node_metrics;
+DROP TABLE IF EXISTS agent_registrations;
+DROP TABLE IF EXISTS server_nodes;
+COMMIT;

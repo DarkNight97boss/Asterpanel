@@ -1,0 +1,36 @@
+[package]
+name = "asterpanel-node-agent"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.79"
+description = "AsterPanel node agent: verifies and executes signed control-plane jobs on a hosting node."
+license = "Apache-2.0"
+
+[[bin]]
+name = "asterpanel-agent"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { version = "1.38", features = ["full"] }
+axum = "0.7"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", features = ["ring"] }
+rustls-pemfile = "2.1"
+ed25519-dalek = { version = "2.1", features = ["pem", "pkcs8"] }
+sha2 = "0.10"
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+async-trait = "0.1"
+anyhow = "1"
+thiserror = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde", "clock"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+[profile.release]
+strip = true
+lto = "thin"
+codegen-units = 1

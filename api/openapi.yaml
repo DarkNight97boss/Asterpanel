@@ -1,0 +1,401 @@
+openapi: 3.1.0
+info:
+  title: AsterPanel Control Plane API
+  version: 0.1.0
+  description: |
+    Control-plane REST API for AsterPanel. Every mutating endpoint runs through
+    authentication + RBAC + OPA authorization and is audit-logged. Browser flows
+    use a short-lived access JWT (Authorization header) plus an HttpOnly rotating
+    refresh cookie; machine clients use scoped API tokens (`astp_<prefix>_<secret>`).
+  license:
+    name: Apache-2.0
+servers:
+  - url: http://localhost:8080
+    description: Local dev (direct)
+  - url: http://localhost/api/../
+    description: Behind the gateway (/api)
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: auth
+  - name: nodes
+  - name: websites
+  - name: deployments
+  - name: agents
+
+paths:
+  /healthz:
+    get:
+      tags: [auth]
+      summary: Liveness probe
+      security: []
+      responses:
+        "200": { description: OK }
+
+  /readyz:
+    get:
+      tags: [auth]
+      summary: Readiness probe (checks the database)
+      security: []
+      responses:
+        "200": { description: Ready }
+        "503": { description: Dependencies unavailable }
+
+  /api/v1/auth/login:
+    post:
+      tags: [auth]
+      summary: Password login (step 1)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+      responses:
+        "200":
+          description: Authenticated, or an MFA challenge is required.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: "#/components/schemas/Session"
+                  - $ref: "#/components/schemas/MfaChallenge"
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/mfa/verify:
+    post:
+      tags: [auth]
+      summary: Complete login with a TOTP code (step 2)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mfa_token, code]
+              properties:
+                mfa_token: { type: string }
+                code: { type: string }
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [auth]
+      summary: Rotate the refresh token and mint a new access token
+      description: Requires the refresh cookie and a matching `X-CSRF-Token` header.
+      security: []
+      parameters:
+        - in: header
+          name: X-CSRF-Token
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: New tokens
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Session" }
+        "401":
+          description: Invalid/expired token, or reuse detected (sessions revoked).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/auth/logout:
+    post:
+      tags: [auth]
+      summary: Revoke the current session
+      responses:
+        "200": { description: Logged out }
+
+  /api/v1/auth/totp/enroll:
+    post:
+      tags: [auth]
+      summary: Begin TOTP enrollment (returns provisioning URI)
+      responses:
+        "200":
+          description: otpauth URI + secret (shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  otpauth_url: { type: string }
+                  secret: { type: string }
+
+  /api/v1/auth/totp/confirm:
+    post:
+      tags: [auth]
+      summary: Confirm TOTP enrollment with a code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties: { code: { type: string } }
+      responses:
+        "200": { description: Confirmed }
+        "400": { $ref: "#/components/responses/Error" }
+
+  /api/v1/me:
+    get:
+      tags: [auth]
+      summary: Current principal, permissions and org
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  user: { $ref: "#/components/schemas/User" }
+                  permissions: { type: array, items: { type: string } }
+                  superadmin: { type: boolean }
+
+  /api/v1/nodes:
+    get:
+      tags: [nodes]
+      summary: List server nodes
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nodes: { type: array, items: { $ref: "#/components/schemas/Node" } }
+    post:
+      tags: [nodes]
+      summary: Register a server node
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, hostname]
+              properties:
+                name: { type: string }
+                hostname: { type: string }
+                region: { type: string }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties: { node: { $ref: "#/components/schemas/Node" } }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/nodes/{nodeID}/enroll:
+    post:
+      tags: [nodes]
+      summary: Issue a one-time agent enrollment token
+      parameters:
+        - in: path
+          name: nodeID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        "201":
+          description: Enrollment token (shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  registration_id: { type: string, format: uuid }
+                  node_id: { type: string, format: uuid }
+                  enrollment_token: { type: string }
+                  expires_at: { type: string, format: date-time }
+
+  /api/v1/agents/enroll:
+    post:
+      tags: [agents]
+      summary: Exchange a bootstrap token + CSR for a signed mTLS certificate
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enrollment_token, csr_pem]
+              properties:
+                enrollment_token: { type: string }
+                csr_pem: { type: string }
+      responses:
+        "200":
+          description: Signed certificate + CA
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  node_id: { type: string, format: uuid }
+                  certificate: { type: string }
+                  ca_certificate: { type: string }
+                  cert_fingerprint: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+
+  /api/v1/websites:
+    get:
+      tags: [websites]
+      summary: List websites
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  websites: { type: array, items: { $ref: "#/components/schemas/Website" } }
+    post:
+      tags: [websites]
+      summary: Create a website (signs and dispatches a job to the node)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, runtime, node_id]
+              properties:
+                name: { type: string }
+                domain: { type: string }
+                runtime: { type: string, enum: [static, node, php, docker, proxy] }
+                node_id: { type: string, format: uuid }
+                ssl_enabled: { type: boolean }
+      responses:
+        "202":
+          description: Accepted; job dispatched
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  website: { $ref: "#/components/schemas/Website" }
+                  job:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      dispatched: { type: boolean }
+        "403": { $ref: "#/components/responses/Error" }
+
+  /api/v1/applications/{appID}/deployments:
+    post:
+      tags: [deployments]
+      summary: Trigger a deployment (signs and dispatches a job)
+      parameters:
+        - in: path
+          name: appID
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [node_id]
+              properties:
+                ref: { type: string }
+                trigger: { type: string, enum: [manual, git_push, api, rollback, schedule] }
+                node_id: { type: string, format: uuid }
+      responses:
+        "202": { description: Accepted; deployment queued }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    apiToken:
+      type: http
+      scheme: bearer
+      description: Scoped API token, format `astp_<prefix>_<secret>`.
+
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: { type: string }
+            message: { type: string }
+            details: {}
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        email: { type: string, format: email }
+        full_name: { type: [string, "null"] }
+        superadmin: { type: boolean }
+        status: { type: string }
+        organization_id: { type: string, format: uuid }
+    Session:
+      type: object
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer }
+        csrf_token: { type: string }
+        user: { $ref: "#/components/schemas/User" }
+    MfaChallenge:
+      type: object
+      properties:
+        mfa_required: { type: boolean, example: true }
+        methods: { type: array, items: { type: string } }
+        mfa_token: { type: string }
+    Node:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        hostname: { type: string }
+        region: { type: [string, "null"] }
+        status: { type: string, enum: [pending, online, offline, draining, decommissioned] }
+        agent_version: { type: [string, "null"] }
+        last_heartbeat_at: { type: [string, "null"], format: date-time }
+        created_at: { type: string, format: date-time }
+    Website:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        runtime: { type: string }
+        status: { type: string }
+        server_node_id: { type: [string, "null"], format: uuid }
+        ssl_enabled: { type: boolean }
+        ssl_status: { type: string }
+        created_at: { type: string, format: date-time }
