@@ -29,6 +29,7 @@ const (
 	TypeBackupRestore  Type = "backup.restore"
 	TypeDatabaseCreate Type = "database.create"
 	TypeDatabaseDelete Type = "database.delete"
+	TypeMailboxCreate  Type = "mail.mailbox.create"
 	TypeHealthCheck    Type = "health.check"
 )
 

@@ -171,3 +171,37 @@ type DNSRecord struct {
 	Proxied   bool
 	CreatedAt time.Time
 }
+
+type Certificate struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	DomainID       uuid.NullUUID
+	Domain         string
+	Issuer         string
+	Status         string
+	AutoRenew      bool
+	ExpiresAt      *time.Time
+	CreatedAt      time.Time
+}
+
+type Mailbox struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Address        string
+	QuotaMB        int
+	UsedMB         int
+	Status         string
+	CreatedAt      time.Time
+}
+
+type Backup struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	ApplicationID  uuid.NullUUID
+	Type           string
+	Trigger        string
+	Status         string
+	StorageBackend string
+	SizeBytes      *int64
+	CreatedAt      time.Time
+}

@@ -54,6 +54,11 @@ impl Executor for DockerExecutor {
             "database.create" => self.database_create(job).await,
             "database.delete" => self.database_delete(job).await,
             "dns.apply" => self.dns_apply(job).await,
+            "cert.issue" => self.cert_issue(job).await,
+            "app.deploy" => self.app_deploy(job).await,
+            "mail.mailbox.create" => self.mailbox_create(job).await,
+            "backup.create" => self.backup_create(job).await,
+            "backup.restore" => self.backup_restore(job).await,
             "health.check" => JobOutcome::succeeded(json!({"checked": true})),
             other => JobOutcome::failed(format!("unsupported job type: {other}")),
         }
@@ -197,6 +202,231 @@ impl DockerExecutor {
         }))
     }
 
+    async fn cert_issue(&self, job: &Job) -> JobOutcome {
+        let domain = job
+            .payload
+            .get("domain")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if domain.is_empty() {
+            return JobOutcome::failed("cert.issue: missing domain");
+        }
+        let upstream = job
+            .payload
+            .get("upstream")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let content = render_caddy_site(domain, upstream);
+        let dir = std::env::var("AGENT_CADDY_SITES_DIR")
+            .unwrap_or_else(|_| "/etc/asterpanel/caddy/sites".into());
+        let path = format!("{dir}/{domain}.caddy");
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("cert.issue: mkdir failed: {e}"));
+        }
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("cert.issue: write failed: {e}"));
+        }
+        // Caddy (automatic_https) obtains/renews the cert from the ACME CA on load.
+        JobOutcome::succeeded(json!({"domain": domain, "path": path, "tls": "acme"}))
+    }
+
+    async fn app_deploy(&self, job: &Job) -> JobOutcome {
+        let dep_id = job
+            .payload
+            .get("deployment_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let app_id = job
+            .payload
+            .get("application_id")
+            .and_then(Value::as_str)
+            .unwrap_or(dep_id);
+        let git_url = job
+            .payload
+            .get("git_url")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if git_url.is_empty() {
+            return JobOutcome::failed("app.deploy: git_url is required");
+        }
+        let git_ref = job
+            .payload
+            .get("ref")
+            .and_then(Value::as_str)
+            .unwrap_or("main");
+
+        let workdir = format!("/tmp/astp_build_{dep_id}");
+        let _ = run_cmd("rm", &["-rf".into(), workdir.clone()]).await;
+        match run_cmd("git", &git_clone_args(git_url, git_ref, &workdir)).await {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                return JobOutcome::failed(format!(
+                    "git clone failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ))
+            }
+            Err(e) => return JobOutcome::failed(format!("git not available: {e}")),
+        }
+
+        let image = format!("astp_app_{dep_id}");
+        match run_docker(&["build".into(), "-t".into(), image.clone(), workdir.clone()]).await {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                return JobOutcome::failed(format!(
+                    "docker build failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ))
+            }
+            Err(e) => return JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+
+        let network = format!("astp_tenant_{}", job.tenant_id);
+        if let Err(e) = ensure_network(&network).await {
+            return JobOutcome::failed(format!("network setup failed: {e}"));
+        }
+        let container = format!("astp_app_{app_id}");
+        // Replace the previous container; the prior image is retained for rollback.
+        let _ = run_docker(&["rm".into(), "-f".into(), container.clone()]).await;
+        match run_docker(&app_run_args(
+            &container,
+            &network,
+            &image,
+            &job.tenant_id.to_string(),
+            dep_id,
+        ))
+        .await
+        {
+            Ok(o) if o.status.success() => {
+                let cid = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                JobOutcome::succeeded(json!({
+                    "image": image, "container_id": cid, "container": container, "network": network,
+                }))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "docker run failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    async fn mailbox_create(&self, job: &Job) -> JobOutcome {
+        use tokio::io::AsyncWriteExt;
+        let address = job
+            .payload
+            .get("address")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let password = job
+            .payload
+            .get("password")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if address.is_empty() {
+            return JobOutcome::failed("mail.mailbox.create: missing address");
+        }
+        let dir = std::env::var("AGENT_MAIL_DIR").unwrap_or_else(|_| "/etc/asterpanel/mail".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mkdir failed: {e}"));
+        }
+
+        let users_path = format!("{dir}/dovecot-users");
+        match tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&users_path)
+            .await
+        {
+            Ok(mut f) => {
+                if let Err(e) = f
+                    .write_all(render_dovecot_user(address, password).as_bytes())
+                    .await
+                {
+                    return JobOutcome::failed(format!("write dovecot users failed: {e}"));
+                }
+            }
+            Err(e) => return JobOutcome::failed(format!("open dovecot users failed: {e}")),
+        }
+        let virtual_path = format!("{dir}/postfix-virtual");
+        match tokio::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&virtual_path)
+            .await
+        {
+            Ok(mut f) => {
+                if let Err(e) = f
+                    .write_all(render_postfix_virtual(address).as_bytes())
+                    .await
+                {
+                    return JobOutcome::failed(format!("write postfix virtual failed: {e}"));
+                }
+            }
+            Err(e) => return JobOutcome::failed(format!("open postfix virtual failed: {e}")),
+        }
+        JobOutcome::succeeded(json!({"address": address, "provisioned": true}))
+    }
+
+    async fn backup_create(&self, job: &Job) -> JobOutcome {
+        let backup_id = job
+            .payload
+            .get("backup_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let target = job
+            .payload
+            .get("target_path")
+            .and_then(Value::as_str)
+            .unwrap_or("/var/asterpanel/sites");
+        let dir =
+            std::env::var("AGENT_BACKUP_DIR").unwrap_or_else(|_| "/var/asterpanel/backups".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mkdir failed: {e}"));
+        }
+        let file = format!("{dir}/{backup_id}.tar.gz");
+        match run_cmd("tar", &backup_tar_args(&file, target)).await {
+            Ok(o) if o.status.success() => {
+                let size = tokio::fs::metadata(&file)
+                    .await
+                    .map(|m| m.len())
+                    .unwrap_or(0);
+                JobOutcome::succeeded(json!({"path": file, "size_bytes": size}))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "tar failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("tar not available: {e}")),
+        }
+    }
+
+    async fn backup_restore(&self, job: &Job) -> JobOutcome {
+        let backup_id = job
+            .payload
+            .get("backup_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let target = job
+            .payload
+            .get("target_path")
+            .and_then(Value::as_str)
+            .unwrap_or("/var/asterpanel/sites");
+        let dir =
+            std::env::var("AGENT_BACKUP_DIR").unwrap_or_else(|_| "/var/asterpanel/backups".into());
+        let file = format!("{dir}/{backup_id}.tar.gz");
+        let _ = run_cmd("mkdir", &["-p".into(), target.to_string()]).await;
+        match run_cmd("tar", &backup_untar_args(&file, target)).await {
+            Ok(o) if o.status.success() => {
+                JobOutcome::succeeded(json!({"restored": backup_id, "target": target}))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "tar restore failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("tar not available: {e}")),
+        }
+    }
+
     async fn database_delete(&self, job: &Job) -> JobOutcome {
         let db_id = job
             .payload
@@ -335,6 +565,93 @@ fn render_zone(zone: &str, serial: u64, records: &[Value]) -> String {
         out.push_str(&format!("{name}\t{ttl}\tIN\t{rtype}\t{rdata}\n"));
     }
     out
+}
+
+/// Caddy site config — automatic HTTPS (ACME) is on by default.
+fn render_caddy_site(domain: &str, upstream: &str) -> String {
+    if upstream.is_empty() {
+        format!("{domain} {{\n\trespond \"AsterPanel\" 200\n}}\n")
+    } else {
+        format!("{domain} {{\n\treverse_proxy {upstream}\n}}\n")
+    }
+}
+
+fn git_clone_args(url: &str, git_ref: &str, dir: &str) -> Vec<String> {
+    vec![
+        "clone".into(),
+        "--depth".into(),
+        "1".into(),
+        "--branch".into(),
+        git_ref.into(),
+        "--single-branch".into(),
+        url.into(),
+        dir.into(),
+    ]
+}
+
+fn app_run_args(
+    container: &str,
+    network: &str,
+    image: &str,
+    tenant: &str,
+    dep_id: &str,
+) -> Vec<String> {
+    vec![
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        container.into(),
+        "--restart".into(),
+        "unless-stopped".into(),
+        "--cap-drop".into(),
+        "ALL".into(),
+        "--security-opt".into(),
+        "no-new-privileges".into(),
+        "--pids-limit".into(),
+        "256".into(),
+        "--memory".into(),
+        "512m".into(),
+        "--cpus".into(),
+        "0.5".into(),
+        "--network".into(),
+        network.into(),
+        "--label".into(),
+        format!("asterpanel.tenant={tenant}"),
+        "--label".into(),
+        format!("asterpanel.deployment={dep_id}"),
+        image.into(),
+    ]
+}
+
+/// Dovecot passwd-file line. {PLAIN} is used for the MVP; production stores a
+/// hashed scheme such as {SHA512-CRYPT}.
+fn render_dovecot_user(address: &str, password: &str) -> String {
+    format!("{address}:{{PLAIN}}{password}\n")
+}
+
+fn render_postfix_virtual(address: &str) -> String {
+    format!("{address}\t{address}\n")
+}
+
+fn backup_tar_args(file: &str, target: &str) -> Vec<String> {
+    vec![
+        "-czf".into(),
+        file.into(),
+        "-C".into(),
+        target.into(),
+        ".".into(),
+    ]
+}
+
+fn backup_untar_args(file: &str, target: &str) -> Vec<String> {
+    vec!["-xzf".into(), file.into(), "-C".into(), target.into()]
+}
+
+async fn run_cmd(program: &str, args: &[String]) -> std::io::Result<std::process::Output> {
+    tokio::process::Command::new(program)
+        .args(args)
+        .output()
+        .await
 }
 
 fn image_for_runtime(runtime: &str) -> &'static str {
@@ -476,5 +793,49 @@ mod tests {
         assert!(z.contains("IN\tA\t1.2.3.4"), "{z}");
         assert!(z.contains("IN\tMX\t10 mail.acme.com."), "{z}");
         assert!(z.contains("IN\tTXT\t\"v=spf1 ~all\""), "{z}");
+    }
+
+    #[test]
+    fn caddy_site_with_and_without_upstream() {
+        assert!(render_caddy_site("acme.com", "astp_site_1:80")
+            .contains("reverse_proxy astp_site_1:80"));
+        assert!(render_caddy_site("acme.com", "").contains("respond"));
+    }
+
+    #[test]
+    fn git_clone_args_use_depth_and_branch() {
+        let a = git_clone_args("https://x/y.git", "main", "/tmp/w").join(" ");
+        assert_eq!(
+            a,
+            "clone --depth 1 --branch main --single-branch https://x/y.git /tmp/w"
+        );
+    }
+
+    #[test]
+    fn app_run_args_are_hardened() {
+        let a = app_run_args("astp_app_1", "net", "img:1", "t1", "d1").join(" ");
+        assert!(a.contains("--cap-drop ALL"), "{a}");
+        assert!(a.contains("no-new-privileges"), "{a}");
+        assert!(a.ends_with("img:1"), "{a}");
+    }
+
+    #[test]
+    fn dovecot_user_uses_plain_scheme() {
+        assert_eq!(
+            render_dovecot_user("info@acme.com", "pw"),
+            "info@acme.com:{PLAIN}pw\n"
+        );
+    }
+
+    #[test]
+    fn backup_args_compress_and_extract() {
+        assert_eq!(
+            backup_tar_args("/b/x.tar.gz", "/sites").join(" "),
+            "-czf /b/x.tar.gz -C /sites ."
+        );
+        assert_eq!(
+            backup_untar_args("/b/x.tar.gz", "/sites").join(" "),
+            "-xzf /b/x.tar.gz -C /sites"
+        );
     }
 }

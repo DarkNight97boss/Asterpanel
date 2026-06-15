@@ -128,6 +128,19 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
 
+			// SSL / TLS certificates
+			r.With(az.Require("ssl.read", "ssl.list", "ssl_certificate")).Get("/ssl-certificates", s.handleListCertificates)
+			r.With(az.Require("ssl.manage", "ssl.issue", "ssl_certificate")).Post("/ssl-certificates", s.handleIssueCertificate)
+
+			// Email mailboxes
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/mailboxes", s.handleListMailboxes)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/mailboxes", s.handleCreateMailbox)
+
+			// Backups & restore
+			r.With(az.Require("backup.read", "backup.list", "backup")).Get("/backups", s.handleListBackups)
+			r.With(az.Require("backup.create", "backup.create", "backup")).Post("/backups", s.handleCreateBackup)
+			r.With(az.Require("backup.restore", "backup.restore", "backup")).Post("/backups/{backupID}/restore", s.handleRestoreBackup)
+
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)
 			r.With(az.Require("apitoken.create", "apitoken.create", "api_token")).Post("/api-tokens", s.handleCreateAPIToken)

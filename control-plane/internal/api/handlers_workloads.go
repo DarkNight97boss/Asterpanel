@@ -154,6 +154,9 @@ type createDeploymentRequest struct {
 	Ref     string `json:"ref"`
 	Trigger string `json:"trigger"`
 	NodeID  string `json:"node_id"`
+	GitURL  string `json:"git_url"`
+	Runtime string `json:"runtime"`
+	Port    int    `json:"port"`
 }
 
 func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) {
@@ -198,11 +201,22 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	runtime := req.Runtime
+	if runtime == "" {
+		runtime = "docker"
+	}
+	port := req.Port
+	if port == 0 {
+		port = 3000
+	}
 	payload := map[string]any{
 		"application_id": appID,
 		"deployment_id":  depID,
 		"ref":            req.Ref,
 		"trigger":        trigger,
+		"git_url":        req.GitURL,
+		"runtime":        runtime,
+		"port":           port,
 	}
 	jobID, dispatched, jerr := s.signPersistDispatch(ctx, p, jobs.TypeAppDeploy, nodeID, payload)
 	if jerr == nil && dispatched {

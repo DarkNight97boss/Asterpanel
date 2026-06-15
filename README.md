@@ -264,8 +264,10 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Node enrollment (CSR/CA flow) | ✅ implemented |
 | Domains & DNS (authoritative zones + records) | ✅ API → RBAC+OPA → signed `dns.apply` job → agent renders/writes a BIND zone file on the node |
 | Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
-| Deploy executors (git / static / node / php), reverse-proxy + SSL automation | 🟡 executor contracts + Docker/Caddy wiring; per-runtime builders iterating |
-| Backups / restore / rollback | 🟡 schema + job types + executor stubs |
+| SSL/TLS (ACME) | ✅ API → signed `cert.issue` job → agent writes a Caddy site (automatic HTTPS) |
+| Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (full mail-server stack + webmail iterating) |
+| Deploy from Git | ✅ `app.deploy` executor: git clone → docker build → hardened run (prior image retained for rollback; Dockerfile-based, buildpacks iterating) |
+| Backups & restore | ✅ API → signed `backup.create`/`backup.restore` jobs → agent tars/untars the target (S3/B2 upload iterating) |
 | Web Panel — full hosting UI (sites, domains/DNS, SSL, databases, email + webmail, FTP, file manager, cron, backups, runtime, one-click apps, metrics, firewall, audit, API tokens, notifications) | 🟡 **all screens implemented** + typed API client; backend endpoints exist for auth/nodes/websites/deployments/**databases**/API-tokens — the remaining sections are UI-ready with backend WIP |
 | Observability (OTel/Prom/Grafana/Loki) | ✅ wired in compose; app instrumentation ongoing |
 

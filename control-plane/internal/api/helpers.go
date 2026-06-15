@@ -83,6 +83,15 @@ func (s *Server) clearAuthCookies(w http.ResponseWriter) {
 
 func ptr[T any](v T) *T { return &v }
 
+// firstNode returns the first available node for an org (auto-placement), or nil.
+func (s *Server) firstNode(ctx context.Context, orgID uuid.UUID) *store.ServerNode {
+	nodes, err := s.deps.Store.ListNodes(ctx, orgID)
+	if err != nil || len(nodes) == 0 {
+		return nil
+	}
+	return &nodes[0]
+}
+
 func userView(u *store.User, orgID uuid.NullUUID) map[string]any {
 	v := map[string]any{
 		"id":         u.ID,
