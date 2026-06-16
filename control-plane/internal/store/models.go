@@ -254,3 +254,12 @@ type FirewallRule struct {
 	Note           *string
 	CreatedAt      time.Time
 }
+
+type WafRule struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	MatchType      string
+	Pattern        string
+	Note           *string
+	CreatedAt      time.Time
+}

@@ -27,6 +27,7 @@ allowed_types := {
 	"ftp.account.create",
 	"cert.install",
 	"firewall.apply",
+	"waf.apply",
 	"file.list",
 	"file.read",
 	"file.write",

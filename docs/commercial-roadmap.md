@@ -28,7 +28,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 
 ## Phase 3 — Operations & security
 15. ✅ **Metrics & logs (real)** — agent samples CPU/mem/disk/load every 15s → CP (`node_metrics` time series), `GET /metrics` aggregates the fleet; signed `logs.tail` → `docker logs` powers a per-site log viewer (site picker, tail size, auto-refresh). *(container-level metrics + Loki streaming next)*
-16. 🟡 **Firewall + WAF + IP blocker** — `firewall.apply` renders/loads an `nft` ruleset (`table inet asterpanel`) per node; a **fail2ban-style watch** auto-bans source IPs with too many failed logins (firewall deny rule + notification). *(application-layer WAF rules next)*
+16. ✅ **Firewall + WAF + IP blocker** — `firewall.apply` renders/loads an `nft` ruleset per node; a fail2ban-style watch auto-bans abusive IPs; and `waf.apply` renders a Caddy WAF snippet (path/User-Agent/IP matchers → 403) with a managed UI + presets.
 17. ✅ **Health checks & alerting** — signed `health.check` probes (liveness + optional HTTP); a 60s background sweep re-probes the fleet, opens/closes incidents (`health_incidents`) and notifies on transitions; Health panel shows status + incident timeline. *(HTTP probe target from the site domain + paging/webhooks next)*
 18. ✅ **Antivirus/malware scan** — signed `antivirus.scan` runs `clamscan -r` on a sandboxed site path; `POST /sites/{id}/files/scan` + a File Manager Scan action surface clean/infected. *(scan-on-upload hook + quarantine next)*
 

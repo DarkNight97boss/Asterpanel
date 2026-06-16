@@ -67,6 +67,7 @@ impl Executor for DockerExecutor {
             "database.user.create" => self.database_user_create(job).await,
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
+            "waf.apply" => self.waf_apply(job).await,
             "file.list" => self.file_list(job).await,
             "file.read" => self.file_read(job).await,
             "file.write" => self.file_write(job).await,
@@ -612,6 +613,30 @@ impl DockerExecutor {
         }
         // Best-effort live load; the file is the source of truth (re-applied on boot).
         let _ = run_cmd("nft", &["-f".into(), path.clone()]).await;
+        JobOutcome::succeeded(json!({"path": path, "rules": rules.len()}))
+    }
+
+    /// Renders the org's WAF rules into a Caddy snippet (named matchers + 403)
+    /// that the site config imports. Caddy is the data-plane reverse proxy.
+    async fn waf_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let rules = job
+            .payload
+            .get("rules")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_waf(rules);
+        let dir =
+            std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
+        let path = format!("{dir}/waf.caddy");
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("waf.apply: mkdir failed: {e}"));
+        }
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("waf.apply: write failed: {e}"));
+        }
+        // Best-effort live reload; the file is the source of truth.
+        let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
         JobOutcome::succeeded(json!({"path": path, "rules": rules.len()}))
     }
 
@@ -1217,6 +1242,34 @@ fn s3_cp_args(file: &str, bucket: &str, key: &str) -> Vec<String> {
 }
 
 /// Renders an nftables ruleset from the org's firewall rules (deny => drop).
+/// Renders WAF rules into a Caddy snippet: a named request matcher per rule and
+/// a `respond <matcher> 403`. Supported match types: path (regex), user_agent
+/// (regex on the UA header), ip (CIDR/address).
+fn render_caddy_waf(rules: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel WAF (generated — do not edit)\n");
+    let mut names: Vec<String> = Vec::new();
+    for (i, r) in rules.iter().enumerate() {
+        let mt = r.get("match_type").and_then(Value::as_str).unwrap_or("");
+        let pat = r.get("pattern").and_then(Value::as_str).unwrap_or("");
+        if pat.is_empty() {
+            continue;
+        }
+        let name = format!("@waf{i}");
+        let line = match mt {
+            "path" => format!("{name} path_regexp wafp{i} {pat}\n"),
+            "user_agent" => format!("{name} header_regexp wafua{i} User-Agent {pat}\n"),
+            "ip" => format!("{name} remote_ip {pat}\n"),
+            _ => continue,
+        };
+        out.push_str(&line);
+        names.push(name);
+    }
+    for n in &names {
+        out.push_str(&format!("respond {n} 403\n"));
+    }
+    out
+}
+
 fn render_nftables(rules: &[Value]) -> String {
     let mut out = String::from(
         "table inet asterpanel {\n    chain input {\n        type filter hook input priority 0; policy accept;\n",
@@ -1713,6 +1766,25 @@ mod tests {
         let s = mail_server_args("/etc/mail").join(" ");
         assert!(s.contains("mailserver/docker-mailserver:latest"), "{s}");
         assert!(s.contains("143:143"), "{s}");
+    }
+
+    #[test]
+    fn caddy_waf_renders_matchers_and_403() {
+        let rules = vec![
+            json!({"match_type":"path","pattern":"(?i)/wp-admin"}),
+            json!({"match_type":"user_agent","pattern":"(?i)sqlmap"}),
+            json!({"match_type":"ip","pattern":"203.0.113.66"}),
+            json!({"match_type":"bogus","pattern":"x"}),
+            json!({"match_type":"path","pattern":""}),
+        ];
+        let s = render_caddy_waf(&rules);
+        assert!(s.contains("@waf0 path_regexp wafp0 (?i)/wp-admin"), "{s}");
+        assert!(s.contains("@waf1 header_regexp wafua1 User-Agent (?i)sqlmap"), "{s}");
+        assert!(s.contains("@waf2 remote_ip 203.0.113.66"), "{s}");
+        assert!(s.contains("respond @waf0 403"), "{s}");
+        // bogus type and empty pattern produce no matcher
+        assert!(!s.contains("@waf3"), "{s}");
+        assert!(!s.contains("@waf4"), "{s}");
     }
 
     #[test]

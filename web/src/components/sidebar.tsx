@@ -29,6 +29,7 @@ import {
   ScrollText,
   Server,
   Shield,
+  ShieldAlert,
   Terminal,
   ShieldCheck,
   type LucideIcon,
@@ -85,6 +86,7 @@ const groups: Group[] = [
     label: "Security",
     items: [
       { href: "/firewall", label: "Firewall", icon: Shield },
+      { href: "/waf", label: "WAF", icon: ShieldAlert },
       { href: "/audit", label: "Audit Log", icon: ScrollText },
       { href: "/tokens", label: "API Tokens", icon: Key },
     ],

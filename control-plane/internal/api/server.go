@@ -203,6 +203,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("firewall.manage", "firewall.create", "firewall_rule")).Post("/firewall", s.handleCreateFirewall)
 			r.With(az.Require("firewall.manage", "firewall.delete", "firewall_rule")).Delete("/firewall/{ruleID}", s.handleDeleteFirewall)
 
+			// WAF — application-layer rules (reuses firewall.* permissions)
+			r.With(az.Require("firewall.read", "waf.list", "waf_rule")).Get("/waf", s.handleListWaf)
+			r.With(az.Require("firewall.manage", "waf.create", "waf_rule")).Post("/waf", s.handleCreateWaf)
+			r.With(az.Require("firewall.manage", "waf.delete", "waf_rule")).Delete("/waf/{ruleID}", s.handleDeleteWaf)
+
 			// Edition / license (any authenticated user; drives the UI lock state)
 			r.Get("/license", s.handleLicense)
 
