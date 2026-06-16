@@ -183,8 +183,25 @@ func (s *Server) handleDeleteDNSRecord(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
-// applyZone fetches the full zone and dispatches a signed dns.apply job to a
-// node so the agent regenerates the authoritative zone file.
+// handleListNameservers returns the fleet's authoritative nameservers so a
+// customer knows which NS to set at their registrar (and sees the DNS cluster).
+func (s *Server) handleListNameservers(w http.ResponseWriter, r *http.Request) {
+	ns, err := s.deps.Store.ListNameservers(r.Context())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list nameservers")
+		return
+	}
+	views := make([]map[string]any, 0, len(ns))
+	for _, n := range ns {
+		views = append(views, map[string]any{"hostname": n.Hostname, "ipv4": n.IPv4, "label": n.Label})
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"nameservers": views})
+}
+
+// applyZone fetches the full zone and dispatches a signed dns.apply job to
+// EVERY node in the org, so the authoritative zone is replicated across the
+// fleet (secondary DNS / redundancy). Returns the first job id and whether any
+// node accepted it.
 func (s *Server) applyZone(ctx context.Context, p *middleware.Principal, zoneID uuid.UUID) (uuid.UUID, bool) {
 	za, err := s.deps.Store.ZoneForApply(ctx, zoneID)
 	if err != nil {
@@ -196,10 +213,6 @@ func (s *Server) applyZone(ctx context.Context, p *middleware.Principal, zoneID 
 		s.deps.Log.Warn("dns.apply: no node available")
 		return uuid.Nil, false
 	}
-	node := nodes[0]
-	if ok, _ := s.jobPolicyAllows(ctx, p, jobs.TypeDNSApply, node.ID); !ok {
-		return uuid.Nil, false
-	}
 
 	recs := make([]map[string]any, 0, len(za.Records))
 	for _, rec := range za.Records {
@@ -209,6 +222,18 @@ func (s *Server) applyZone(ctx context.Context, p *middleware.Principal, zoneID 
 		})
 	}
 	payload := map[string]any{"zone": za.Name, "serial": za.Serial, "records": recs}
-	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDNSApply, node.ID, payload)
-	return jobID, dispatched
+
+	var firstJob uuid.UUID
+	anyDispatched := false
+	for _, node := range nodes {
+		if ok, _ := s.jobPolicyAllows(ctx, p, jobs.TypeDNSApply, node.ID); !ok {
+			continue
+		}
+		jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDNSApply, node.ID, payload)
+		if firstJob == uuid.Nil {
+			firstJob = jobID
+		}
+		anyDispatched = anyDispatched || dispatched
+	}
+	return firstJob, anyDispatched
 }

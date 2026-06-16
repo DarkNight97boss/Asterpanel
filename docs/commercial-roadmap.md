@@ -37,7 +37,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 20. 🟡 **Billing & invoicing** — invoices + line items generated from the org plan (base fee + usage), numbered `INV-YYYY-NNNN`; list/detail/pay with a `PaymentProvider` seam (manual default, Stripe-ready) + Billing UI. *(real Stripe provider + usage-based overage metering + PDF/email next)*
 21. 🟡 **White-label / branding** — per-org branding (name/logo/color/support) with reseller→sub-account inheritance, applied live to the panel (`org_branding`, `GET/PUT /branding`, settings page + preview). *(customer-facing API keys + webhooks + docs portal next)*
 22. 🟡 **Migration tooling** — parse a normalized cPanel/Plesk account manifest into a plan (unit-tested), then import domains + their DNS for real; databases/mailboxes are logged as manual steps. *(archive upload/extraction + DB dump + IMAP mail sync next)*
-23. ⬜ **DNS clustering / secondary DNS**, multi-region.
+23. 🟡 **DNS clustering / secondary DNS** — `dns.apply` is replicated to every node in the org (zone redundancy); `GET /dns/nameservers` surfaces the fleet nameservers on the DNS page. *(dedicated geo-distributed DNS nodes + AXFR/NOTIFY + anycast next)*
 
 ## Intentional divergences from cPanel (by design — not gaps)
 - No direct host SSH/shell; everything is a signed, audited job. (A sandboxed

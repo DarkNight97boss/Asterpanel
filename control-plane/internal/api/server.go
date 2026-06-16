@@ -146,6 +146,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("domain.read", "domain.list", "domain")).Get("/domains", s.handleListDomains)
 			r.With(az.Require("domain.create", "domain.create", "domain")).Post("/domains", s.handleCreateDomain)
 			r.With(az.Require("dns.read", "dns.list", "dns_record")).Get("/dns", s.handleListDNSRecords)
+			r.With(az.Require("dns.read", "dns.nameservers", "dns_record")).Get("/dns/nameservers", s.handleListNameservers)
 			r.With(az.Require("dns.manage", "dns.create", "dns_record")).Post("/dns", s.handleCreateDNSRecord)
 			r.With(az.Require("dns.manage", "dns.delete", "dns_record")).Delete("/dns/{recordID}", s.handleDeleteDNSRecord)
 

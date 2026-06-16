@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import {
+  apiGet,
   createDnsRecord,
   createDomain,
   deleteDnsRecord,
@@ -18,11 +19,18 @@ import {
   type Domain,
 } from "@/lib/api";
 
+interface Nameserver {
+  hostname: string;
+  ipv4: string | null;
+  label: string | null;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [records, setRecords] = useState<DnsRecord[]>([]);
+  const [nameservers, setNameservers] = useState<Nameserver[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -37,9 +45,16 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r] = await Promise.all([listDomains(), listDnsRecords()]);
+      const [d, r, ns] = await Promise.all([
+        listDomains(),
+        listDnsRecords(),
+        apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
+          nameservers: [],
+        })),
+      ]);
       setDomains(d);
       setRecords(r);
+      setNameservers(ns.nameservers ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -116,6 +131,38 @@ export default function DomainsPage() {
 
       {error && <p className="text-sm text-red-400">{error}</p>}
       {notice && <p className="text-sm text-emerald-400">{notice}</p>}
+
+      {nameservers.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Nameservers</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              Point your domain at these nameservers at your registrar. Every zone is replicated
+              across the fleet for redundancy (secondary DNS).
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {nameservers.map((n) => (
+                <div
+                  key={n.hostname}
+                  className="flex items-center justify-between rounded-md border border-border px-4 py-2.5 text-sm"
+                >
+                  <div>
+                    <div className="font-mono">{n.hostname}</div>
+                    {n.ipv4 && <div className="font-mono text-xs text-muted-foreground">{n.ipv4}</div>}
+                  </div>
+                  {n.label && (
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      {n.label}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

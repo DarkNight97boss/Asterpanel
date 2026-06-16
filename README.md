@@ -263,6 +263,7 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Agent: mTLS server, signature verify, nonce/TTL, executor interface, Docker executor | ✅ implemented |
 | Node enrollment (CSR/CA flow) | ✅ implemented |
 | Domains & DNS (authoritative zones + records) | ✅ API → RBAC+OPA → signed `dns.apply` job → agent renders/writes a BIND zone file on the node |
+| Secondary DNS / zone replication | ✅ `dns.apply` is fanned out to **every node in the org** so each zone is replicated across the fleet (redundancy); `GET /dns/nameservers` lists the fleet nameservers (ns1/ns2) shown on the DNS page for registrar setup |
 | Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
 | SSL/TLS (ACME) | ✅ API → signed `cert.issue` job → agent writes a Caddy site (automatic HTTPS) |
 | Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (running mail-server containers iterating) |
