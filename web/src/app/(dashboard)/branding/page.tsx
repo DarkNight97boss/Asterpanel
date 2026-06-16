@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiPut } from "@/lib/api";
 import { useBranding, type Branding } from "@/lib/branding";
+import { Feature, ProGate } from "@/lib/license";
 
 export default function BrandingPage() {
   const { branding, setBranding } = useBranding();
@@ -42,6 +43,7 @@ export default function BrandingPage() {
   }
 
   return (
+    <ProGate feature={Feature.WhiteLabel}>
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Branding</h1>
@@ -152,5 +154,6 @@ export default function BrandingPage() {
         </Card>
       </div>
     </div>
+    </ProGate>
   );
 }

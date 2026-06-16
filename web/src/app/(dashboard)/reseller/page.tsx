@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { Feature, ProGate } from "@/lib/license";
 
 interface Account {
   id: string;
@@ -86,6 +87,7 @@ export default function ResellerPage() {
   }
 
   return (
+    <ProGate feature={Feature.Reseller}>
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Reseller</h1>
@@ -223,5 +225,6 @@ export default function ResellerPage() {
         </CardContent>
       </Card>
     </div>
+    </ProGate>
   );
 }

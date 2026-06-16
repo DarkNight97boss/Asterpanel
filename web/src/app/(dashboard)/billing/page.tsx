@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { Feature, ProGate, useLicense } from "@/lib/license";
 
 interface Billing {
   plan: string;
@@ -45,6 +46,7 @@ const statusBadge: Record<Invoice["status"], string> = {
 };
 
 export default function BillingPage() {
+  const { hasFeature } = useLicense();
   const [billing, setBilling] = useState<Billing | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [detail, setDetail] = useState<Invoice | null>(null);
@@ -113,10 +115,12 @@ export default function BillingPage() {
             Plan <span className="font-medium capitalize text-foreground">{billing?.plan ?? "—"}</span>, usage and invoices.
           </p>
         </div>
-        <Button size="sm" disabled={busy} onClick={generate}>
-          <Receipt className="h-4 w-4" />
-          Generate invoice
-        </Button>
+        {hasFeature(Feature.Billing) && (
+          <Button size="sm" disabled={busy} onClick={generate}>
+            <Receipt className="h-4 w-4" />
+            Generate invoice
+          </Button>
+        )}
       </header>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
@@ -152,6 +156,7 @@ export default function BillingPage() {
         </Card>
       )}
 
+      <ProGate feature={Feature.Billing}>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Invoices ({invoices.length})</CardTitle>
@@ -209,6 +214,7 @@ export default function BillingPage() {
           </table>
         </CardContent>
       </Card>
+      </ProGate>
 
       {detail && (
         <div

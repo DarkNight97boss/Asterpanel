@@ -36,9 +36,10 @@ import {
 
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
+import { Feature, useLicense } from "@/lib/license";
 import { cn } from "@/lib/utils";
 
-type Item = { href: string; label: string; icon: LucideIcon };
+type Item = { href: string; label: string; icon: LucideIcon; feature?: string };
 type Group = { label: string | null; items: Item[] };
 
 const groups: Group[] = [
@@ -91,10 +92,10 @@ const groups: Group[] = [
   {
     label: "Account",
     items: [
-      { href: "/reseller", label: "Reseller", icon: Building2 },
-      { href: "/migrations", label: "Migrations", icon: DownloadCloud },
-      { href: "/branding", label: "Branding", icon: Palette },
-      { href: "/billing", label: "Billing", icon: Receipt },
+      { href: "/reseller", label: "Reseller", icon: Building2, feature: Feature.Reseller },
+      { href: "/migrations", label: "Migrations", icon: DownloadCloud, feature: Feature.Migration },
+      { href: "/branding", label: "Branding", icon: Palette, feature: Feature.WhiteLabel },
+      { href: "/billing", label: "Billing", icon: Receipt, feature: Feature.Billing },
       { href: "/notifications", label: "Notifications", icon: Bell },
     ],
   },
@@ -104,6 +105,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const { branding } = useBranding();
+  const { license, hasFeature } = useLicense();
 
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-card/40">
@@ -128,6 +130,7 @@ export function Sidebar() {
             {group.items.map((item) => {
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               const Icon = item.icon;
+              const locked = item.feature ? !hasFeature(item.feature) : false;
               return (
                 <Link
                   key={item.href}
@@ -140,7 +143,15 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  {item.label}
+                  <span className="flex-1">{item.label}</span>
+                  {locked && (
+                    <span
+                      className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-400"
+                      title="Pro feature — requires a license"
+                    >
+                      Pro
+                    </span>
+                  )}
                 </Link>
               );
             })}
@@ -149,9 +160,26 @@ export function Sidebar() {
       </nav>
 
       <div className="border-t border-border px-4 py-3">
-        <p className="truncate px-3 text-xs text-muted-foreground" title={user?.email}>
-          {user?.email}
-        </p>
+        <div className="mb-1 flex items-center justify-between px-3">
+          <p className="truncate text-xs text-muted-foreground" title={user?.email}>
+            {user?.email}
+          </p>
+          <span
+            className={cn(
+              "ml-2 shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+              license.edition === "community"
+                ? "bg-muted text-muted-foreground"
+                : "bg-primary/15 text-primary",
+            )}
+            title={
+              license.edition === "community"
+                ? "Community edition — single node, no commercial features"
+                : `${license.edition} license${license.issued_to ? ` · ${license.issued_to}` : ""}`
+            }
+          >
+            {license.edition}
+          </span>
+        </div>
         <button
           onClick={() => logout()}
           className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"

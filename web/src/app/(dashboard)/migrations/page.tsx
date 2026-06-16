@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { Feature, ProGate } from "@/lib/license";
 
 interface PlanDomain {
   fqdn: string;
@@ -140,6 +141,7 @@ export default function MigrationsPage() {
   }
 
   return (
+    <ProGate feature={Feature.Migration}>
     <div className="space-y-6">
       <header>
         <h1 className="text-2xl font-semibold">Migrations</h1>
@@ -331,5 +333,6 @@ export default function MigrationsPage() {
         </div>
       )}
     </div>
+    </ProGate>
   );
 }
