@@ -325,6 +325,18 @@ How it works:
         -max-nodes 10 -days 365
   ```
 
+### Build hardening (deterrent)
+
+Source obfuscation is **not** the protection — the lock is the license above.
+Shipped *artifacts* are nonetheless hardened as a deterrent:
+
+- **Control plane (Go)** — built `-trimpath -ldflags "-s -w"` (no symbol table,
+  no DWARF, no source paths).
+- **Node agent (Rust)** — release profile `strip = true`, `lto = "thin"`,
+  `codegen-units = 1`.
+- **Web (Next.js)** — production bundle minified, no browser source maps, no
+  `X-Powered-By` header, `console.*` stripped (errors/warnings kept).
+
 ## Roadmap
 
 Phase 2 highlights: containerd/Kubernetes executor, HA Control Plane, billing & metering,
