@@ -7,6 +7,11 @@
 *.crt
 !deploy/**/example*.crt
 
+# License signing material — NEVER commit the private key or issued tokens
+*.license
+license-signing*.txt
+asterpanel-license*.txt
+
 # Go
 /control-plane/bin/
 *.test

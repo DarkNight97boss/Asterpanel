@@ -29,6 +29,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/config"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/crypto"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/jobs"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/licensing"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/logging"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
@@ -112,6 +113,14 @@ func runServe() {
 		SMTPTLS:  cfg.WebmailSMTPTLS,
 	})
 
+	// Open-core licensing: with no/invalid license the panel runs the limited
+	// Community edition (fails closed to free).
+	license, lerr := licensing.Load(getenv("ASTERPANEL_LICENSE", ""), getenv("ASTERPANEL_LICENSE_PUBKEY", ""), time.Now().UTC())
+	if lerr != nil {
+		log.Warn("license invalid; running Community edition", "error", lerr)
+	}
+	log.Info("license loaded", "edition", license.Edition(), "features", license.Features())
+
 	server := api.NewServer(api.Deps{
 		Cfg:               cfg,
 		Log:               log,
@@ -128,6 +137,7 @@ func runServe() {
 		Authz:             authorizer,
 		RateLimiter:       rl,
 		Webmail:           webmailSvc,
+		License:           license,
 		OpenAPIPath:       getenv("OPENAPI_PATH", "api/openapi.yaml"),
 		AgentBaseURL:      getenv("AGENT_DEV_BASE_URL", "https://node-agent:7443"),
 		JobSigningPubPath: cfg.JobSigningPubPath,

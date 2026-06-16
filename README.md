@@ -295,6 +295,36 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 The 🟡 items have their contracts, schema, job types, and tests in place so they extend
 without architectural change. See [`docs/roadmap.md`](docs/roadmap.md).
 
+## Editions & licensing (open-core)
+
+AsterPanel is **source-available under [PolyForm Noncommercial 1.0.0](LICENSE)**:
+noncommercial use is free; commercial production use requires a license.
+
+The whole source ships in this public repo, but the **commercial layer is gated by
+an Ed25519-signed license** — the source is present yet inert without a valid key:
+
+| Edition | What you get |
+| --- | --- |
+| **Community** (default) | Full core hosting — sites, domains/DNS, SSL, databases, email + webmail, file manager, cron, FTP, metrics/health/logs, firewall, antivirus — **limited to a single node** |
+| **Pro / Enterprise** (licensed) | Unlocks the commercial layer: **resellers & sub-accounts, white-label branding, the invoicing engine, migration tooling, and multi-node** |
+
+How it works:
+
+- The control plane verifies a license with `ASTERPANEL_LICENSE_PUBKEY` (your public
+  key) and `ASTERPANEL_LICENSE` (the issued token). No/invalid/expired license →
+  Community (it **fails closed to free**, never crashes). See
+  [`control-plane/internal/licensing`](control-plane/internal/licensing).
+- Gated routes return `402 license_required`; `GET /api/v1/license` reports the active
+  edition + features so the UI can show locked state.
+- Mint licenses offline with the vendor tool (the private key stays with you):
+
+  ```sh
+  go run ./control-plane/cmd/license-gen keygen          # one-time keypair
+  go run ./control-plane/cmd/license-gen sign -key <privB64> \
+        -to "Customer" -features reseller,white_label,billing,migration,multi_node \
+        -max-nodes 10 -days 365
+  ```
+
 ## Roadmap
 
 Phase 2 highlights: containerd/Kubernetes executor, HA Control Plane, billing & metering,

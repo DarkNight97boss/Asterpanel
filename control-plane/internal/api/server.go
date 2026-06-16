@@ -19,6 +19,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/config"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/crypto"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/jobs"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/licensing"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webmail"
@@ -41,6 +42,7 @@ type Deps struct {
 	Authz             *middleware.Authorizer
 	RateLimiter       *middleware.RateLimiter
 	Webmail           *webmail.Service
+	License           *licensing.Manager
 	OpenAPIPath       string
 	AgentBaseURL      string
 	JobSigningPubPath string
@@ -201,27 +203,42 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("firewall.manage", "firewall.create", "firewall_rule")).Post("/firewall", s.handleCreateFirewall)
 			r.With(az.Require("firewall.manage", "firewall.delete", "firewall_rule")).Delete("/firewall/{ruleID}", s.handleDeleteFirewall)
 
-			// Billing & usage
+			// Edition / license (any authenticated user; drives the UI lock state)
+			r.Get("/license", s.handleLicense)
+
+			// Billing & usage. The plan/usage view stays in Community; the
+			// invoicing engine is a Pro (commercial) feature.
 			r.With(az.Require("billing.read", "billing.read", "billing")).Get("/billing", s.handleBilling)
-			r.With(az.Require("billing.read", "billing.invoices.list", "invoice")).Get("/billing/invoices", s.handleListInvoices)
-			r.With(az.Require("billing.read", "billing.invoices.get", "invoice")).Get("/billing/invoices/{invoiceID}", s.handleGetInvoice)
-			r.With(az.Require("billing.manage", "invoice.create", "invoice")).Post("/billing/invoices", s.handleGenerateInvoice)
-			r.With(az.Require("billing.manage", "invoice.pay", "invoice")).Post("/billing/invoices/{invoiceID}/pay", s.handlePayInvoice)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireFeature(licensing.FeatureBilling))
+				r.With(az.Require("billing.read", "billing.invoices.list", "invoice")).Get("/billing/invoices", s.handleListInvoices)
+				r.With(az.Require("billing.read", "billing.invoices.get", "invoice")).Get("/billing/invoices/{invoiceID}", s.handleGetInvoice)
+				r.With(az.Require("billing.manage", "invoice.create", "invoice")).Post("/billing/invoices", s.handleGenerateInvoice)
+				r.With(az.Require("billing.manage", "invoice.pay", "invoice")).Post("/billing/invoices/{invoiceID}/pay", s.handlePayInvoice)
+			})
 
-			// Reseller — sub-account hierarchy
-			r.With(az.Require("reseller.read", "reseller.list", "organization")).Get("/reseller/accounts", s.handleListSubAccounts)
-			r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
-			r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
+			// Reseller — sub-account hierarchy (Pro)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireFeature(licensing.FeatureReseller))
+				r.With(az.Require("reseller.read", "reseller.list", "organization")).Get("/reseller/accounts", s.handleListSubAccounts)
+				r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
+				r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
+			})
 
-			// White-label branding
+			// White-label branding — reading is free (the panel still themes);
+			// customizing it is Pro.
 			r.With(az.Require("branding.read", "branding.read", "organization")).Get("/branding", s.handleGetBranding)
-			r.With(az.Require("branding.manage", "branding.update", "organization")).Put("/branding", s.handleUpdateBranding)
+			r.With(s.requireFeature(licensing.FeatureWhiteLabel)).
+				With(az.Require("branding.manage", "branding.update", "organization")).Put("/branding", s.handleUpdateBranding)
 
-			// Migration tooling (import from cPanel/Plesk)
-			r.With(az.Require("migration.read", "migration.list", "migration")).Get("/migrations", s.handleListMigrations)
-			r.With(az.Require("migration.read", "migration.get", "migration")).Get("/migrations/{migrationID}", s.handleGetMigration)
-			r.With(az.Require("migration.manage", "migration.plan", "migration")).Post("/migrations", s.handleCreateMigration)
-			r.With(az.Require("migration.manage", "migration.import", "migration")).Post("/migrations/{migrationID}/import", s.handleRunImport)
+			// Migration tooling — import from cPanel/Plesk (Pro)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireFeature(licensing.FeatureMigration))
+				r.With(az.Require("migration.read", "migration.list", "migration")).Get("/migrations", s.handleListMigrations)
+				r.With(az.Require("migration.read", "migration.get", "migration")).Get("/migrations/{migrationID}", s.handleGetMigration)
+				r.With(az.Require("migration.manage", "migration.plan", "migration")).Post("/migrations", s.handleCreateMigration)
+				r.With(az.Require("migration.manage", "migration.import", "migration")).Post("/migrations/{migrationID}/import", s.handleRunImport)
+			})
 
 			// API tokens (scoped machine credentials)
 			r.With(az.Require("apitoken.read", "apitoken.list", "api_token")).Get("/api-tokens", s.handleListAPITokens)

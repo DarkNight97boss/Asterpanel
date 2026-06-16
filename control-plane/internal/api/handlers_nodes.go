@@ -13,6 +13,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/audit"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/crypto"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/httpx"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/licensing"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
 )
@@ -69,6 +70,15 @@ func (s *Server) handleCreateNode(w http.ResponseWriter, r *http.Request) {
 	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Hostname) == "" {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "name and hostname are required")
 		return
+	}
+	// Community edition (no multi_node feature) is capped at a single node.
+	if max := s.licenseMgr().MaxNodes(); max > 0 {
+		if existing, _ := s.deps.Store.ListNodes(ctx, p.OrgID); len(existing) >= max {
+			httpx.ErrorWithDetails(w, http.StatusPaymentRequired, "license_required",
+				"this edition is limited to one node — a Pro license unlocks multi-node",
+				map[string]any{"feature": licensing.FeatureMultiNode, "max_nodes": max})
+			return
+		}
 	}
 	var region *string
 	if strings.TrimSpace(req.Region) != "" {
