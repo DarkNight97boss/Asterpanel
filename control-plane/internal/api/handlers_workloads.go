@@ -151,6 +151,10 @@ func (s *Server) handleCreateWebsite(w http.ResponseWriter, r *http.Request) {
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "website.create", "website", site.ID.String(), audit.OutcomeSuccess, r,
 		map[string]any{"job_id": jobID.String(), "dispatched": dispatched})
+	if s.deps.Webhooks != nil {
+		s.deps.Webhooks.Fire(ctx, p.OrgID, "site.created",
+			map[string]any{"id": site.ID, "name": site.Name, "runtime": site.Runtime})
+	}
 
 	httpx.JSON(w, http.StatusAccepted, map[string]any{
 		"website": websiteView(*site),

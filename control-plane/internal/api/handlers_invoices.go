@@ -167,6 +167,10 @@ func (s *Server) handlePayInvoice(w http.ResponseWriter, r *http.Request) {
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "invoice.pay", "invoice", id.String(), audit.OutcomeSuccess, r,
 		map[string]any{"reference": ref, "total_cents": inv.TotalCents})
+	if s.deps.Webhooks != nil {
+		s.deps.Webhooks.Fire(ctx, p.OrgID, "invoice.paid",
+			map[string]any{"id": inv.ID, "number": inv.Number, "total_cents": inv.TotalCents, "currency": inv.Currency, "reference": ref})
+	}
 
 	updated, _ := s.deps.Store.GetInvoice(ctx, p.OrgID, id)
 	if updated == nil {

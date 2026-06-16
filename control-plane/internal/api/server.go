@@ -22,6 +22,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/licensing"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webhooks"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webmail"
 )
 
@@ -42,6 +43,7 @@ type Deps struct {
 	Authz             *middleware.Authorizer
 	RateLimiter       *middleware.RateLimiter
 	Webmail           *webmail.Service
+	Webhooks          *webhooks.Dispatcher
 	License           *licensing.Manager
 	OpenAPIPath       string
 	AgentBaseURL      string
@@ -235,6 +237,15 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("branding.read", "branding.read", "organization")).Get("/branding", s.handleGetBranding)
 			r.With(s.requireFeature(licensing.FeatureWhiteLabel)).
 				With(az.Require("branding.manage", "branding.update", "organization")).Put("/branding", s.handleUpdateBranding)
+
+			// Customer webhooks (Pro — part of the white-label / customer-facing API)
+			r.Group(func(r chi.Router) {
+				r.Use(s.requireFeature(licensing.FeatureWhiteLabel))
+				r.With(az.Require("webhooks.read", "webhooks.list", "webhook")).Get("/webhooks", s.handleListWebhooks)
+				r.With(az.Require("webhooks.manage", "webhooks.create", "webhook")).Post("/webhooks", s.handleCreateWebhook)
+				r.With(az.Require("webhooks.manage", "webhooks.delete", "webhook")).Delete("/webhooks/{hookID}", s.handleDeleteWebhook)
+				r.With(az.Require("webhooks.manage", "webhooks.test", "webhook")).Post("/webhooks/{hookID}/test", s.handleTestWebhook)
+			})
 
 			// Migration tooling — import from cPanel/Plesk (Pro)
 			r.Group(func(r chi.Router) {

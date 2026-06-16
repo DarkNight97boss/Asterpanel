@@ -33,6 +33,7 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/logging"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
+	whpkg "github.com/DarkNight97boss/asterpanel/control-plane/internal/webhooks"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/webmail"
 )
 
@@ -137,6 +138,7 @@ func runServe() {
 		Authz:             authorizer,
 		RateLimiter:       rl,
 		Webmail:           webmailSvc,
+		Webhooks:          whpkg.NewDispatcher(st, log),
 		License:           license,
 		OpenAPIPath:       getenv("OPENAPI_PATH", "api/openapi.yaml"),
 		AgentBaseURL:      getenv("AGENT_DEV_BASE_URL", "https://node-agent:7443"),

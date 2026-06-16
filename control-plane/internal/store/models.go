@@ -263,3 +263,15 @@ type WafRule struct {
 	Note           *string
 	CreatedAt      time.Time
 }
+
+type Webhook struct {
+	ID              uuid.UUID
+	OrganizationID  uuid.UUID
+	URL             string
+	Secret          string
+	Events          []string
+	Active          bool
+	LastStatus      *int
+	LastDeliveredAt *time.Time
+	CreatedAt       time.Time
+}
