@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 
 import "./globals.css";
 import { AuthProvider } from "@/lib/auth";
+import { I18nProvider } from "@/lib/i18n";
 
 export const metadata: Metadata = {
   title: "AsterPanel",
@@ -13,7 +14,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body className="min-h-screen antialiased">
-        <AuthProvider>{children}</AuthProvider>
+        <I18nProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </I18nProvider>
       </body>
     </html>
   );

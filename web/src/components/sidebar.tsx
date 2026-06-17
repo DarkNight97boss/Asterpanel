@@ -40,6 +40,7 @@ import {
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
 import { Feature, useLicense } from "@/lib/license";
+import { LanguageSwitcher, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 
 type Item = { href: string; label: string; icon: LucideIcon; feature?: string };
@@ -112,6 +113,7 @@ export function Sidebar() {
   const { user, logout } = useAuth();
   const { branding } = useBranding();
   const { license, hasFeature } = useLicense();
+  const { t } = useT();
 
   return (
     <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-card/40">
@@ -130,7 +132,7 @@ export function Sidebar() {
           <div key={group.label ?? i} className="space-y-0.5">
             {group.label && (
               <p className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/60">
-                {group.label}
+                {t(group.label)}
               </p>
             )}
             {group.items.map((item) => {
@@ -149,7 +151,7 @@ export function Sidebar() {
                   )}
                 >
                   <Icon className="h-4 w-4 shrink-0" />
-                  <span className="flex-1">{item.label}</span>
+                  <span className="flex-1">{t(item.label)}</span>
                   {locked && (
                     <span
                       className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-400"
@@ -186,13 +188,16 @@ export function Sidebar() {
             {license.edition}
           </span>
         </div>
-        <button
-          onClick={() => logout()}
-          className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-        >
-          <LogOut className="h-4 w-4" />
-          Sign out
-        </button>
+        <div className="mt-1 flex items-center gap-2">
+          <button
+            onClick={() => logout()}
+            className="flex flex-1 items-center gap-3 rounded-md px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <LogOut className="h-4 w-4" />
+            {t("Sign out")}
+          </button>
+          <LanguageSwitcher />
+        </div>
       </div>
     </aside>
   );

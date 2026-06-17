@@ -11,9 +11,11 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
 import { loginWithPasskey, passkeysSupported } from "@/lib/webauthn";
+import { useT } from "@/lib/i18n";
 
 export default function LoginPage() {
   const { login, verifyMfa } = useAuth();
+  const { t } = useT();
   const router = useRouter();
 
   const [email, setEmail] = useState("admin@asterpanel.local");
@@ -77,14 +79,14 @@ export default function LoginPage() {
           </div>
           <CardTitle className="text-xl">AsterPanel</CardTitle>
           <CardDescription>
-            {mfaToken ? "Enter your authenticator code" : "Sign in to your control panel"}
+            {mfaToken ? t("Enter your authenticator code") : t("Sign in to your control panel")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {!mfaToken ? (
             <form onSubmit={onPasswordSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("Email")}</Label>
                 <Input
                   id="email"
                   type="email"
@@ -95,7 +97,7 @@ export default function LoginPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("Password")}</Label>
                 <Input
                   id="password"
                   type="password"
@@ -107,7 +109,7 @@ export default function LoginPage() {
               </div>
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={busy}>
-                {busy ? "Signing in…" : "Sign in"}
+                {busy ? t("Signing in…") : t("Sign in")}
               </Button>
               {passkeysSupported() && (
                 <Button
@@ -118,14 +120,14 @@ export default function LoginPage() {
                   onClick={onPasskey}
                 >
                   <KeyRound className="h-4 w-4" />
-                  Sign in with a passkey
+                  {t("Sign in with a passkey")}
                 </Button>
               )}
             </form>
           ) : (
             <form onSubmit={onMfaSubmit} className="space-y-4">
               <div className="space-y-1.5">
-                <Label htmlFor="code">6-digit code</Label>
+                <Label htmlFor="code">{t("6-digit code")}</Label>
                 <Input
                   id="code"
                   inputMode="numeric"
@@ -139,7 +141,7 @@ export default function LoginPage() {
               </div>
               {error && <p className="text-sm text-red-400">{error}</p>}
               <Button type="submit" className="w-full" disabled={busy}>
-                {busy ? "Verifying…" : "Verify"}
+                {busy ? t("Verifying…") : t("Verify")}
               </Button>
             </form>
           )}
