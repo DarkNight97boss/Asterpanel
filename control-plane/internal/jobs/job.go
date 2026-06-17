@@ -32,6 +32,7 @@ const (
 	TypeDatabaseUser     Type = "database.user.create"
 	TypeMailboxCreate    Type = "mail.mailbox.create"
 	TypeMailServerEnsure Type = "mail.server.ensure"
+	TypeMailDKIMGenerate Type = "mail.dkim.generate"
 	TypeCronApply        Type = "cron.apply"
 	TypeFTPAccountCreate Type = "ftp.account.create"
 	TypeCertInstall      Type = "cert.install"

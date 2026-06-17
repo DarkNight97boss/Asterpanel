@@ -21,7 +21,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 10. ✅ **Runtime manager** — per-site Node (18/20/22) and PHP (8.1–8.4) version switch; catalog-validated endpoint → signed `runtime.switch` recreates the container from the matching base image (version sanitized before the image tag). **Phase 1 complete.** *(buildpack-style auto-detect next)*
 
 ## Phase 2 — Email stack (the biggest cPanel surface)
-11. 🟡 **Mail server** — `mail.mailbox.create` writes Dovecot/Postfix config + `mail.server.ensure` launches a docker-mailserver container that reads it. *(full DMS tuning + DKIM signing + antispam next)*
+11. ✅ **Mail server** — `mail.mailbox.create` writes Dovecot/Postfix config; `mail.server.ensure` launches docker-mailserver with **Rspamd antispam + ClamAV**; `mail.dkim.generate` mints the DKIM keypair and returns DKIM/SPF/DMARC DNS records. *(running per-node Postfix/Dovecot + autoconfig next)*
 12. ✅ **Webmail** — **native** integrated IMAP/SMTP client (no Roundcube): Go gateway (`go-imap`/`go-message`) + Next.js UI (folders, read, compose/send); GreenMail dev server in compose. *(running Postfix/Dovecot per node next)*
 13. ⬜ **Forwarders, aliases, autoresponders, filters.**
 14. ⬜ **Deliverability** — DKIM/SPF/DMARC management, SpamAssassin/Rspamd antispam.

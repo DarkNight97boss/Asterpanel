@@ -62,6 +62,7 @@ impl Executor for DockerExecutor {
             "app.deploy" => self.app_deploy(job).await,
             "mail.mailbox.create" => self.mailbox_create(job).await,
             "mail.server.ensure" => self.mail_server_ensure(job).await,
+            "mail.dkim.generate" => self.mail_dkim_generate(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -661,6 +662,49 @@ impl DockerExecutor {
                     JobOutcome::failed(format!("mail server run failed: {}", stderr.trim()))
                 }
             }
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    /// Generates the DKIM keypair for a mail domain on the mail-server container
+    /// and returns the public key as a DNS-ready TXT record so the customer can
+    /// publish `<selector>._domainkey.<domain>` at their registrar. Idempotent:
+    /// re-running just reads the existing public key.
+    async fn mail_dkim_generate(&self, job: &Job) -> JobOutcome {
+        let domain = job.payload.get("domain").and_then(Value::as_str).unwrap_or("");
+        let selector = job.payload.get("selector").and_then(Value::as_str).unwrap_or("mail");
+        if domain.is_empty() || !valid_mail_domain(domain) {
+            return JobOutcome::failed("mail.dkim.generate: invalid domain");
+        }
+        if !valid_dkim_selector(selector) {
+            return JobOutcome::failed("mail.dkim.generate: invalid selector");
+        }
+        // setup.sh inside docker-mailserver is the supported entry point for DKIM.
+        let _ = run_docker(&[
+            "exec".into(), "astp_mailserver".into(),
+            "setup".into(), "config".into(), "dkim".into(),
+            "domain".into(), domain.into(), "selector".into(), selector.into(),
+        ]).await;
+        let txt_path = format!(
+            "/tmp/docker-mailserver/opendkim/keys/{domain}/{selector}.txt",
+        );
+        let out = run_docker(&["exec".into(), "astp_mailserver".into(), "cat".into(), txt_path]).await;
+        match out {
+            Ok(o) if o.status.success() => {
+                let raw = String::from_utf8_lossy(&o.stdout).into_owned();
+                let value = parse_dkim_txt(&raw).unwrap_or_default();
+                JobOutcome::succeeded(json!({
+                    "domain": domain, "selector": selector,
+                    "record": {
+                        "name": format!("{selector}._domainkey.{domain}"),
+                        "type": "TXT", "ttl": 3600, "content": value,
+                    },
+                    "spf": {"name": domain, "type": "TXT", "ttl": 3600, "content": "v=spf1 mx ~all"},
+                    "dmarc": {"name": format!("_dmarc.{domain}"), "type": "TXT", "ttl": 3600,
+                              "content": format!("v=DMARC1; p=quarantine; rua=mailto:postmaster@{domain}")},
+                }))
+            }
+            Ok(o) => JobOutcome::failed(format!("dkim key not found: {}", String::from_utf8_lossy(&o.stderr).trim())),
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
     }
@@ -1348,6 +1392,44 @@ fn render_caddy_site_tls(domain: &str, cert: &str, key: &str) -> String {
     format!("{domain} {{\n\ttls {cert} {key}\n\trespond \"AsterPanel\" 200\n}}\n")
 }
 
+/// Extracts the unquoted DKIM TXT value from an OpenDKIM-style key file.
+/// The file format is BIND-zone-ish, e.g.
+///   `mail._domainkey IN TXT ("v=DKIM1; ...; " "p=MII...")`
+/// We concatenate the quoted segments and trim whitespace.
+fn parse_dkim_txt(raw: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut inside = false;
+    let mut iter = raw.chars();
+    while let Some(c) = iter.next() {
+        if c == '"' {
+            inside = !inside;
+            continue;
+        }
+        if inside {
+            out.push(c);
+        }
+    }
+    let s = out.trim().to_string();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
+}
+
+/// Allow only domain-shaped strings (letters, digits, dot, hyphen). Guards
+/// `docker exec setup ... domain <arg>` against argv injection.
+fn valid_mail_domain(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 253
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        && s.contains('.')
+}
+
+fn valid_dkim_selector(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 63 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 fn mail_server_args(mail_dir: &str) -> Vec<String> {
     vec![
         "run".into(),
@@ -1370,6 +1452,18 @@ fn mail_server_args(mail_dir: &str) -> Vec<String> {
         format!("{mail_dir}:/tmp/docker-mailserver"),
         "-e".into(),
         "ONE_DIR=1".into(),
+        // Antispam: enable Rspamd; turn off the older SpamAssassin/Amavis chain
+        // (Rspamd already includes scoring + greylisting + DKIM signing).
+        "-e".into(),
+        "ENABLE_RSPAMD=1".into(),
+        "-e".into(),
+        "ENABLE_OPENDKIM=0".into(),
+        "-e".into(),
+        "ENABLE_AMAVIS=0".into(),
+        "-e".into(),
+        "ENABLE_SPAMASSASSIN=0".into(),
+        "-e".into(),
+        "ENABLE_CLAMAV=1".into(),
         "mailserver/docker-mailserver:latest".into(),
     ]
 }
@@ -1766,6 +1860,20 @@ mod tests {
         let s = mail_server_args("/etc/mail").join(" ");
         assert!(s.contains("mailserver/docker-mailserver:latest"), "{s}");
         assert!(s.contains("143:143"), "{s}");
+        // antispam: Rspamd on, legacy SA/Amavis off
+        assert!(s.contains("ENABLE_RSPAMD=1"), "{s}");
+        assert!(s.contains("ENABLE_AMAVIS=0"), "{s}");
+        assert!(s.contains("ENABLE_SPAMASSASSIN=0"), "{s}");
+        assert!(s.contains("ENABLE_CLAMAV=1"), "{s}");
+    }
+
+    #[test]
+    fn parses_dkim_public_key_record() {
+        let in1 = "mail._domainkey IN TXT (\"v=DKIM1; h=sha256; k=rsa; \" \"p=MIIBIjAN...\" )";
+        let rec = parse_dkim_txt(in1).expect("should parse");
+        assert!(rec.starts_with("v=DKIM1; h=sha256; k=rsa; p=MIIBIjAN"), "{rec}");
+        // an unrelated line returns None
+        assert!(parse_dkim_txt("; not a dkim line\n").is_none());
     }
 
     #[test]

@@ -167,6 +167,7 @@ func (s *Server) routes() http.Handler {
 			// Email mailboxes
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/mailboxes", s.handleListMailboxes)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/mailboxes", s.handleCreateMailbox)
+			r.With(az.Require("email.manage", "mail.dkim", "domain")).Post("/email/dkim", s.handleGenerateDKIM)
 
 			// Native webmail client (IMAP/SMTP gateway)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/folders", s.handleWebmailFolders)

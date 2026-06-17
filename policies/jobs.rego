@@ -23,6 +23,7 @@ allowed_types := {
 	"database.user.create",
 	"mail.mailbox.create",
 	"mail.server.ensure",
+	"mail.dkim.generate",
 	"cron.apply",
 	"ftp.account.create",
 	"cert.install",

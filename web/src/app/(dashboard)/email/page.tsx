@@ -23,6 +23,28 @@ export default function EmailPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
+  const [dkimDomain, setDkimDomain] = useState("");
+  const [dkimBusy, setDkimBusy] = useState(false);
+  const [dkim, setDkim] = useState<{
+    domain: string;
+    record: { name: string; type: string; content: string };
+    spf: { name: string; content: string };
+    dmarc: { name: string; content: string };
+  } | null>(null);
+
+  async function generateDkim(e: FormEvent) {
+    e.preventDefault();
+    setDkimBusy(true);
+    setError(null);
+    try {
+      const r = await apiPost<typeof dkim>("/api/v1/email/dkim", { domain: dkimDomain });
+      setDkim(r);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "DKIM generation failed");
+    } finally {
+      setDkimBusy(false);
+    }
+  }
 
   async function refresh() {
     try {
@@ -78,6 +100,53 @@ export default function EmailPage() {
           </CardContent>
         </Card>
       )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Deliverability — DKIM / SPF / DMARC</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Generate a DKIM keypair on the mail server and publish the printed records at your DNS
+            registrar. Antispam (Rspamd) and antivirus (ClamAV) are enabled on the mail server.
+          </p>
+          <form onSubmit={generateDkim} className="flex flex-wrap items-end gap-3">
+            <div className="grow space-y-1">
+              <Label htmlFor="dkim-domain">Mail domain</Label>
+              <Input
+                id="dkim-domain"
+                placeholder="acme.com"
+                value={dkimDomain}
+                onChange={(e) => setDkimDomain(e.target.value)}
+                required
+              />
+            </div>
+            <Button type="submit" disabled={dkimBusy}>
+              Generate DKIM
+            </Button>
+          </form>
+          {dkim && (
+            <div className="space-y-2 rounded-md border border-border bg-muted/30 p-3 font-mono text-xs">
+              <p className="font-sans text-muted-foreground">
+                Publish these records at your registrar:
+              </p>
+              <div>
+                <span className="text-emerald-400">DKIM</span> {dkim.record.name}{" "}
+                <span className="text-muted-foreground">TTL {3600}</span>
+                <div className="break-all">{dkim.record.content || <em>see node logs</em>}</div>
+              </div>
+              <div>
+                <span className="text-emerald-400">SPF </span> {dkim.spf.name} ·{" "}
+                {dkim.spf.content}
+              </div>
+              <div>
+                <span className="text-emerald-400">DMARC</span> {dkim.dmarc.name} ·{" "}
+                {dkim.dmarc.content}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>
