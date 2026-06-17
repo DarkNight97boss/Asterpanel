@@ -33,6 +33,7 @@ const (
 	TypeMailboxCreate    Type = "mail.mailbox.create"
 	TypeMailServerEnsure Type = "mail.server.ensure"
 	TypeMailDKIMGenerate Type = "mail.dkim.generate"
+	TypeMailAliasApply   Type = "mail.alias.apply"
 	TypeCronApply        Type = "cron.apply"
 	TypeFTPAccountCreate Type = "ftp.account.create"
 	TypeCertInstall      Type = "cert.install"

@@ -174,6 +174,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/mailboxes", s.handleCreateMailbox)
 			r.With(az.Require("email.manage", "mail.dkim", "domain")).Post("/email/dkim", s.handleGenerateDKIM)
 
+			// Email forwarders / aliases (incl. catch-all)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/forwarders", s.handleListForwarders)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/forwarders", s.handleCreateForwarder)
+			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/forwarders/{forwarderID}", s.handleDeleteForwarder)
+
 			// Native webmail client (IMAP/SMTP gateway)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/folders", s.handleWebmailFolders)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/messages", s.handleWebmailMessages)

@@ -195,6 +195,15 @@ type Mailbox struct {
 	CreatedAt      time.Time
 }
 
+type MailForwarder struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Source         string
+	Destinations   []string
+	IsCatchall     bool
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

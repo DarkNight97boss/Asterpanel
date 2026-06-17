@@ -63,6 +63,7 @@ impl Executor for DockerExecutor {
             "mail.mailbox.create" => self.mailbox_create(job).await,
             "mail.server.ensure" => self.mail_server_ensure(job).await,
             "mail.dkim.generate" => self.mail_dkim_generate(job).await,
+            "mail.alias.apply" => self.mail_alias_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -422,6 +423,33 @@ impl DockerExecutor {
             Err(e) => return JobOutcome::failed(format!("open postfix virtual failed: {e}")),
         }
         JobOutcome::succeeded(json!({"address": address, "provisioned": true}))
+    }
+
+    /// Regenerates the Postfix virtual-alias map from the full forwarder set.
+    /// Declarative: the job carries every forwarder for the tenant and the agent
+    /// overwrites the map, so deletes propagate without a separate command.
+    async fn mail_alias_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let forwarders = job
+            .payload
+            .get("forwarders")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_postfix_virtual_aliases(forwarders);
+        let dir = std::env::var("AGENT_MAIL_DIR").unwrap_or_else(|_| "/etc/asterpanel/mail".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mail.alias.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/postfix-virtual-aliases");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("mail.alias.apply: write failed: {e}"));
+        }
+        // The data lines (everything but the header comment) are the live aliases.
+        let count = content
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with('#'))
+            .count();
+        JobOutcome::succeeded(json!({"path": path, "forwarders": count}))
     }
 
     async fn backup_create(&self, job: &Job) -> JobOutcome {
@@ -1330,6 +1358,61 @@ fn render_postfix_virtual(address: &str) -> String {
     format!("{address}\t{address}\n")
 }
 
+/// Renders the Postfix virtual-alias map from forwarder entries, one line per
+/// source: `source dest1,dest2` (docker-mailserver `postfix-virtual.cf` format).
+/// A bad source or an empty destination set is skipped so a single malformed row
+/// can't poison the whole map.
+fn render_postfix_virtual_aliases(forwarders: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel mail forwarders (generated — do not edit)\n");
+    for f in forwarders {
+        let source = f.get("source").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_forward_source(source) {
+            continue;
+        }
+        let dests: Vec<&str> = f
+            .get("destinations")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|d| valid_email(d))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if dests.is_empty() {
+            continue;
+        }
+        out.push_str(&format!("{source} {}\n", dests.join(",")));
+    }
+    out
+}
+
+/// A forwarder source is a full address (`sales@example.com`) or a catch-all
+/// (`@example.com`).
+fn valid_forward_source(s: &str) -> bool {
+    match s.strip_prefix('@') {
+        Some(domain) => valid_mail_domain(domain),
+        None => valid_email(s),
+    }
+}
+
+/// Minimal address check: exactly one `@`, sane local part, valid mail domain.
+fn valid_email(s: &str) -> bool {
+    let mut parts = s.splitn(2, '@');
+    let local = parts.next().unwrap_or("");
+    let domain = match parts.next() {
+        Some(d) => d,
+        None => return false,
+    };
+    !local.is_empty()
+        && local.len() <= 64
+        && local
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._%+-".contains(c))
+        && valid_mail_domain(domain)
+}
+
 /// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
 async fn sha256_file(path: &str) -> String {
     match run_cmd("sha256sum", &[path.to_string()]).await {
@@ -1987,6 +2070,27 @@ mod tests {
         assert!(rec.starts_with("v=DKIM1; h=sha256; k=rsa; p=MIIBIjAN"), "{rec}");
         // an unrelated line returns None
         assert!(parse_dkim_txt("; not a dkim line\n").is_none());
+    }
+
+    #[test]
+    fn forwarders_render_virtual_map_and_skip_invalid() {
+        let fwds = vec![
+            json!({"source":"sales@example.com","destinations":["a@example.com","b@example.com"]}),
+            json!({"source":"@example.com","destinations":["catchall@example.com"]}), // catch-all
+            json!({"source":"bad-source","destinations":["x@example.com"]}),          // invalid source
+            json!({"source":"ok@example.com","destinations":[]}),                     // no destinations
+            json!({"source":"ops@example.com","destinations":["not-an-email"]}),      // invalid dest
+        ];
+        let out = render_postfix_virtual_aliases(&fwds);
+        assert!(out.contains("sales@example.com a@example.com,b@example.com"), "{out}");
+        assert!(out.contains("@example.com catchall@example.com"), "{out}");
+        assert!(!out.contains("bad-source"), "{out}");
+        assert!(!out.contains("ok@example.com"), "{out}");
+        assert!(!out.contains("ops@example.com"), "{out}");
+        assert!(valid_forward_source("@example.com"));
+        assert!(valid_forward_source("user@example.com"));
+        assert!(!valid_forward_source("nope"));
+        assert!(!valid_email("two@@at.com"));
     }
 
     #[test]

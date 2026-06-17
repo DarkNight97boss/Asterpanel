@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 
 interface Mailbox {
   id: string;
@@ -14,6 +15,13 @@ interface Mailbox {
   quota_mb: number;
   used_mb: number;
   status: string;
+}
+
+interface Forwarder {
+  id: string;
+  source: string;
+  destinations: string[];
+  is_catchall: boolean;
 }
 
 export default function EmailPage() {
@@ -31,6 +39,48 @@ export default function EmailPage() {
     spf: { name: string; content: string };
     dmarc: { name: string; content: string };
   } | null>(null);
+  const [forwarders, setForwarders] = useState<Forwarder[]>([]);
+  const [fwdSource, setFwdSource] = useState("");
+  const [fwdDests, setFwdDests] = useState("");
+  const [fwdBusy, setFwdBusy] = useState(false);
+
+  async function refreshForwarders() {
+    try {
+      const { forwarders } = await apiGet<{ forwarders: Forwarder[] }>("/api/v1/email/forwarders");
+      setForwarders(forwarders);
+    } catch {
+      /* the section just stays empty if the backend is unreachable */
+    }
+  }
+
+  async function onCreateForwarder(e: FormEvent) {
+    e.preventDefault();
+    setFwdBusy(true);
+    setError(null);
+    try {
+      const destinations = fwdDests
+        .split(/[\s,]+/)
+        .map((d) => d.trim())
+        .filter(Boolean);
+      await apiPost("/api/v1/email/forwarders", { source: fwdSource.trim(), destinations });
+      setFwdSource("");
+      setFwdDests("");
+      await refreshForwarders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create forwarder");
+    } finally {
+      setFwdBusy(false);
+    }
+  }
+
+  async function onDeleteForwarder(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/forwarders/${id}`);
+      await refreshForwarders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete forwarder");
+    }
+  }
 
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
@@ -56,6 +106,7 @@ export default function EmailPage() {
   }
   useEffect(() => {
     refresh();
+    refreshForwarders();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -204,6 +255,74 @@ export default function EmailPage() {
               ))}
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Forwarders &amp; aliases ({forwarders.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Route mail from an address to one or more destinations. Use{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">@domain.com</code> as the source
+            for a catch-all that captures every unmatched recipient.
+          </p>
+          <form onSubmit={onCreateForwarder} className="grid gap-4 sm:grid-cols-5 sm:items-end">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="fwd-source">Source</Label>
+              <Input
+                id="fwd-source"
+                value={fwdSource}
+                onChange={(e) => setFwdSource(e.target.value)}
+                placeholder="sales@acme.com or @acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="fwd-dests">Destinations (comma-separated)</Label>
+              <Input
+                id="fwd-dests"
+                value={fwdDests}
+                onChange={(e) => setFwdDests(e.target.value)}
+                placeholder="a@acme.com, b@acme.com"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={fwdBusy}>
+              {fwdBusy ? "Adding…" : "Add forwarder"}
+            </Button>
+          </form>
+
+          {forwarders.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No forwarders yet.</p>
+          ) : (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {forwarders.map((f) => (
+                <li key={f.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">{f.source}</span>
+                  {f.is_catchall && (
+                    <span className="rounded bg-primary/15 px-1.5 py-0.5 text-[11px] text-primary">
+                      catch-all
+                    </span>
+                  )}
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {f.destinations.join(", ")}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteForwarder(f.id)}
+                    aria-label="Delete forwarder"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>
