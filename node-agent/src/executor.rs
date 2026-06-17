@@ -288,6 +288,42 @@ impl DockerExecutor {
             Err(e) => return JobOutcome::failed(format!("git not available: {e}")),
         }
 
+        // Buildpacks: if the repo ships no Dockerfile, detect the stack from its
+        // marker files and synthesize one so deploy-from-git works without it.
+        let mut buildpack = "dockerfile";
+        if !tokio::fs::try_exists(format!("{workdir}/Dockerfile"))
+            .await
+            .unwrap_or(false)
+        {
+            let mut names: Vec<String> = Vec::new();
+            if let Ok(mut rd) = tokio::fs::read_dir(&workdir).await {
+                while let Ok(Some(e)) = rd.next_entry().await {
+                    names.push(e.file_name().to_string_lossy().into_owned());
+                }
+            }
+            let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            match detect_buildpack(&refs) {
+                Some(bp) => match generate_dockerfile(bp) {
+                    Some(df) => {
+                        if let Err(e) =
+                            tokio::fs::write(format!("{workdir}/Dockerfile"), df).await
+                        {
+                            return JobOutcome::failed(format!(
+                                "app.deploy: could not write generated Dockerfile: {e}"
+                            ));
+                        }
+                        buildpack = bp;
+                    }
+                    None => return JobOutcome::failed("app.deploy: unsupported buildpack"),
+                },
+                None => {
+                    return JobOutcome::failed(
+                        "app.deploy: no Dockerfile and no detectable stack (node/php/static)",
+                    )
+                }
+            }
+        }
+
         let image = format!("astp_app_{dep_id}");
         match run_docker(&["build".into(), "-t".into(), image.clone(), workdir.clone()]).await {
             Ok(o) if o.status.success() => {}
@@ -319,7 +355,8 @@ impl DockerExecutor {
             Ok(o) if o.status.success() => {
                 let cid = String::from_utf8_lossy(&o.stdout).trim().to_string();
                 JobOutcome::succeeded(json!({
-                    "image": image, "container_id": cid, "container": container, "network": network,
+                    "image": image, "container_id": cid, "container": container,
+                    "network": network, "buildpack": buildpack,
                 }))
             }
             Ok(o) => JobOutcome::failed(format!(
@@ -1209,6 +1246,33 @@ fn render_caddy_site(domain: &str, upstream: &str) -> String {
     }
 }
 
+/// Detects a buildpack from a repo's top-level file names (used only when no
+/// Dockerfile is present). Order matters: an explicit app manifest wins over a
+/// bare static site.
+fn detect_buildpack(files: &[&str]) -> Option<&'static str> {
+    let has = |n: &str| files.iter().any(|f| f.eq_ignore_ascii_case(n));
+    if has("package.json") {
+        Some("node")
+    } else if has("composer.json") || has("index.php") {
+        Some("php")
+    } else if has("index.html") {
+        Some("static")
+    } else {
+        None
+    }
+}
+
+/// Synthesizes a hardened Dockerfile for a detected buildpack.
+fn generate_dockerfile(buildpack: &str) -> Option<String> {
+    let df = match buildpack {
+        "node" => "FROM node:20-alpine\nWORKDIR /app\nCOPY . .\nRUN if [ -f package-lock.json ]; then npm ci --omit=dev; else npm install --omit=dev; fi\nEXPOSE 3000\nCMD [\"npm\",\"start\"]\n",
+        "php" => "FROM php:8.3-apache\nCOPY . /var/www/html/\nEXPOSE 80\n",
+        "static" => "FROM nginxinc/nginx-unprivileged:stable-alpine\nCOPY . /usr/share/nginx/html/\nEXPOSE 8080\n",
+        _ => return None,
+    };
+    Some(df.to_string())
+}
+
 fn git_clone_args(url: &str, git_ref: &str, dir: &str) -> Vec<String> {
     vec![
         "clone".into(),
@@ -1801,6 +1865,21 @@ mod tests {
         assert!(render_caddy_site("acme.com", "astp_site_1:80")
             .contains("reverse_proxy astp_site_1:80"));
         assert!(render_caddy_site("acme.com", "").contains("respond"));
+    }
+
+    #[test]
+    fn buildpack_detection_and_dockerfile() {
+        assert_eq!(detect_buildpack(&["package.json", "src"]), Some("node"));
+        assert_eq!(detect_buildpack(&["composer.json"]), Some("php"));
+        assert_eq!(detect_buildpack(&["index.php"]), Some("php"));
+        assert_eq!(detect_buildpack(&["index.html", "style.css"]), Some("static"));
+        // node manifest wins over a stray index.html
+        assert_eq!(detect_buildpack(&["index.html", "package.json"]), Some("node"));
+        assert_eq!(detect_buildpack(&["README.md"]), None);
+        assert!(generate_dockerfile("node").unwrap().contains("FROM node:20-alpine"));
+        assert!(generate_dockerfile("php").unwrap().contains("php:8.3-apache"));
+        assert!(generate_dockerfile("static").unwrap().contains("nginx"));
+        assert!(generate_dockerfile("ruby").is_none());
     }
 
     #[test]
