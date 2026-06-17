@@ -294,8 +294,10 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Antivirus (ClamAV) | ✅ signed `antivirus.scan` → agent runs `clamscan -r` on a **sandboxed** site path (same path-traversal guard as the file manager), parses per-file verdicts → `POST /sites/{id}/files/scan` + a Scan action in the File Manager (clean / infected list; graceful when the engine isn't installed) |
 | Observability (OTel/Prom/Grafana/Loki) | ✅ wired in compose; app instrumentation ongoing |
 
-The 🟡 items have their contracts, schema, job types, and tests in place so they extend
-without architectural change. See [`docs/roadmap.md`](docs/roadmap.md).
+Every feature above is wired end to end (API → RBAC+OPA → signed job → agent → node, with
+a typed UI on top). The remaining `ongoing` notes (app-level OTel spans, proxy traffic
+metrics) are incremental instrumentation, not missing verticals. See
+[`docs/roadmap.md`](docs/roadmap.md).
 
 ## Editions & licensing (open-core)
 

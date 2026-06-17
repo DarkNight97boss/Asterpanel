@@ -16,9 +16,12 @@ Goal: a real, buildable, secure core with the control/data-plane split fully wir
 - [x] Node enrollment (one-time bootstrap token → CSR → CA-signed cert).
 - [x] Reverse-proxy (Caddy/Traefik) dynamic config; provisioning script.
 - [x] OpenAPI 3.1 spec + Swagger UI; OPA policy tests; per-language unit tests.
-- [ ] Finish per-runtime deploy builders (git/static/node/php) end-to-end.
-- [ ] Backups/restore/rollback executors end-to-end.
-- [ ] Web Panel: complete the remaining screens against the typed API client.
+- [x] Per-runtime deploy builders end-to-end: `app.deploy` (git clone → docker build →
+      hardened run, prior image kept for rollback) with buildpack auto-detection
+      (Node/PHP/static) synthesizing a Dockerfile when the repo lacks one.
+- [x] Backups/restore/rollback executors end-to-end: `backup.create`/`backup.restore`
+      (tar, off-site S3 upload, SHA-256 checksum, completion callback) + recurring schedules.
+- [x] Web Panel: every screen wired to the typed API client (hosting + commercial layer).
 
 ## Phase 2 — Hardening & scale
 
