@@ -74,6 +74,7 @@ impl Executor for DockerExecutor {
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
             "redirect.apply" => self.redirect_apply(job).await,
+            "protection.apply" => self.protection_apply(job).await,
             "file.list" => self.file_list(job).await,
             "file.read" => self.file_read(job).await,
             "file.write" => self.file_write(job).await,
@@ -861,6 +862,29 @@ impl DockerExecutor {
         }
         let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
         JobOutcome::succeeded(json!({"path": path, "redirects": redirects.len()}))
+    }
+
+    /// Regenerates the Caddy directory-privacy snippet (HTTP basic-auth on a
+    /// path) from the full rule set, grouped into one site block per domain.
+    async fn protection_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let basic_auth = job
+            .payload
+            .get("basic_auth")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_protection(basic_auth);
+        let dir =
+            std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("protection.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/protection.caddy");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("protection.apply: write failed: {e}"));
+        }
+        let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
+        JobOutcome::succeeded(json!({"path": path, "rules": basic_auth.len()}))
     }
 
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
@@ -1817,6 +1841,47 @@ fn render_caddy_redirects(redirects: &[Value]) -> String {
     out
 }
 
+/// Renders the Caddy directory-privacy snippet: one site block per domain, each
+/// with `basic_auth` matchers scoped to a path. Only bcrypt hashes (`$2…`) are
+/// accepted; invalid domains/hashes are skipped.
+fn render_caddy_protection(basic_auth: &[Value]) -> String {
+    use std::collections::BTreeMap;
+    let mut by_domain: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+    for r in basic_auth {
+        let domain = r.get("domain").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(domain) {
+            continue;
+        }
+        let user = r.get("username").and_then(Value::as_str).unwrap_or("").trim();
+        let hash = r.get("password_hash").and_then(Value::as_str).unwrap_or("").trim();
+        // Only bcrypt hashes are valid for Caddy basic_auth; never accept a plain value.
+        if user.is_empty() || !hash.starts_with("$2") {
+            continue;
+        }
+        let mut path = r.get("path").and_then(Value::as_str).unwrap_or("/*").trim().to_string();
+        if !path.starts_with('/') {
+            path = "/*".into();
+        }
+        by_domain
+            .entry(domain.to_string())
+            .or_default()
+            .push((path, user.to_string(), hash.to_string()));
+    }
+
+    let mut out = String::from("# AsterPanel directory privacy (generated — do not edit)\n");
+    for (domain, rules) in by_domain {
+        out.push_str(&format!("{domain} {{\n"));
+        for (i, (path, user, hash)) in rules.iter().enumerate() {
+            out.push_str(&format!("\t@priv{i} path {path}\n"));
+            out.push_str(&format!("\tbasic_auth @priv{i} {{\n"));
+            out.push_str(&format!("\t\t{user} {hash}\n"));
+            out.push_str("\t}\n");
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
 /// A redirect target is an absolute URL or a root-relative path, single-line.
 fn valid_redirect_target(s: &str) -> bool {
     (s.starts_with("https://") || s.starts_with("http://") || s.starts_with('/'))
@@ -2701,6 +2766,24 @@ mod tests {
         assert!(valid_redirect_target("https://x.com/a"));
         assert!(valid_redirect_target("/local"));
         assert!(!valid_redirect_target("ftp://x"));
+    }
+
+    #[test]
+    fn caddy_protection_renders_basic_auth() {
+        let rules = vec![
+            json!({"domain":"acme.com","path":"/admin/*","username":"boss","password_hash":"$2a$14$abcdefghijklmnopqrstuv"}),
+            json!({"domain":"acme.com","path":"/staging/*","username":"qa","password_hash":"$2a$14$zzzzzzzzzzzzzzzzzzzzzz"}),
+            json!({"domain":"bad dom","path":"/x","username":"u","password_hash":"$2a$14$x"}), // invalid domain
+            json!({"domain":"acme.com","path":"/y","username":"u","password_hash":"plaintext"}), // not bcrypt
+        ];
+        let out = render_caddy_protection(&rules);
+        assert!(out.contains("acme.com {"), "{out}");
+        assert!(out.contains("@priv0 path /admin/*"), "{out}");
+        assert!(out.contains("basic_auth @priv0 {"), "{out}");
+        assert!(out.contains("boss $2a$14$abcdefghijklmnopqrstuv"), "{out}");
+        assert!(out.contains("qa $2a$14$"), "{out}");
+        assert!(!out.contains("bad dom"), "{out}");
+        assert!(!out.contains("plaintext"), "{out}");
     }
 
     #[test]

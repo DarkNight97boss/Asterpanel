@@ -35,6 +35,13 @@ interface Redirect {
   status_code: number;
 }
 
+interface Protection {
+  id: string;
+  domain: string;
+  path: string;
+  username: string;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
@@ -43,6 +50,8 @@ export default function DomainsPage() {
   const [nameservers, setNameservers] = useState<Nameserver[]>([]);
   const [redirects, setRedirects] = useState<Redirect[]>([]);
   const [red, setRed] = useState({ source_domain: "", source_path: "*", target_url: "", status_code: "301" });
+  const [protections, setProtections] = useState<Protection[]>([]);
+  const [dp, setDp] = useState({ domain: "", path: "/*", username: "", password: "" });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -57,18 +66,22 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd] = await Promise.all([
+      const [d, r, ns, rd, pr] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
           nameservers: [],
         })),
         apiGet<{ redirects: Redirect[] }>("/api/v1/redirects").catch(() => ({ redirects: [] })),
+        apiGet<{ protections: Protection[] }>("/api/v1/directory-privacy").catch(() => ({
+          protections: [],
+        })),
       ]);
       setDomains(d);
       setRecords(r);
       setNameservers(ns.nameservers ?? []);
       setRedirects(rd.redirects ?? []);
+      setProtections(pr.protections ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -156,6 +169,38 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/redirects/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onAddDirPrivacy(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/v1/directory-privacy", {
+        domain: dp.domain.trim(),
+        path: dp.path.trim() || "/*",
+        username: dp.username.trim(),
+        password: dp.password,
+      });
+      setNotice("Protected path added; Caddy config re-applied on the node.");
+      setDp({ domain: "", path: "/*", username: "", password: "" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteDirPrivacy(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/directory-privacy/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -422,6 +467,86 @@ export default function DomainsPage() {
                     className="ml-auto h-7 w-7"
                     onClick={() => onDeleteRedirect(rd.id)}
                     aria-label="Delete redirect"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Directory privacy ({protections.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Password-protect a path with HTTP basic auth. The password is stored only as a bcrypt
+            hash and rendered into the Caddy config.
+          </p>
+          <form onSubmit={onAddDirPrivacy} className="grid gap-3 sm:grid-cols-5 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="dp-domain">Domain</Label>
+              <Input
+                id="dp-domain"
+                value={dp.domain}
+                onChange={(e) => setDp({ ...dp, domain: e.target.value })}
+                placeholder="acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dp-path">Path</Label>
+              <Input
+                id="dp-path"
+                value={dp.path}
+                onChange={(e) => setDp({ ...dp, path: e.target.value })}
+                placeholder="/admin/*"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dp-user">Username</Label>
+              <Input
+                id="dp-user"
+                value={dp.username}
+                onChange={(e) => setDp({ ...dp, username: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="dp-pass">Password</Label>
+              <Input
+                id="dp-pass"
+                type="password"
+                value={dp.password}
+                onChange={(e) => setDp({ ...dp, password: e.target.value })}
+                placeholder="min 6 chars"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Adding…" : "Protect"}
+            </Button>
+          </form>
+
+          {protections.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {protections.map((pr) => (
+                <li key={pr.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">
+                    {pr.domain}
+                    {pr.path}
+                  </span>
+                  <span className="text-muted-foreground">·</span>
+                  <span className="text-xs text-muted-foreground">user: {pr.username}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteDirPrivacy(pr.id)}
+                    aria-label="Delete protection"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

@@ -165,6 +165,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("domain.create", "redirect.create", "domain")).Post("/redirects", s.handleCreateRedirect)
 			r.With(az.Require("domain.create", "redirect.delete", "domain")).Delete("/redirects/{redirectID}", s.handleDeleteRedirect)
 
+			// Directory privacy (Caddy HTTP basic-auth on a path)
+			r.With(az.Require("domain.read", "protection.list", "domain")).Get("/directory-privacy", s.handleListDirPrivacy)
+			r.With(az.Require("domain.create", "protection.create", "domain")).Post("/directory-privacy", s.handleCreateDirPrivacy)
+			r.With(az.Require("domain.create", "protection.delete", "domain")).Delete("/directory-privacy/{protectionID}", s.handleDeleteDirPrivacy)
+
 			// Databases (managed SQL/KV instances)
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)

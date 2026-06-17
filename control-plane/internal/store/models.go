@@ -242,6 +242,16 @@ type Redirect struct {
 	CreatedAt      time.Time
 }
 
+type DirectoryPrivacy struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Domain         string
+	Path           string
+	Username       string
+	PasswordHash   string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID
