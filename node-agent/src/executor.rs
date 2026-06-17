@@ -69,6 +69,7 @@ impl Executor for DockerExecutor {
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
+            "database.query" => self.database_query(job).await,
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
@@ -656,6 +657,51 @@ impl DockerExecutor {
             }
             Ok(o) => JobOutcome::failed(format!(
                 "create user failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    /// Runs an ad-hoc SQL statement inside the database container and returns the
+    /// result set as columns + rows (a phpMyAdmin-style query runner). A
+    /// statement timeout caps runaway queries; the output row count is capped by
+    /// the caller's `max_rows`.
+    async fn database_query(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let db_id = pv("database_id").unwrap_or("unknown");
+        let engine = pv("engine").unwrap_or("postgres");
+        let database = pv("database").unwrap_or("app");
+        let owner = pv("owner").unwrap_or(database);
+        let sql = pv("sql").unwrap_or("").trim();
+        if sql.is_empty() {
+            return JobOutcome::failed("database.query: empty sql");
+        }
+        let max_rows = job
+            .payload
+            .get("max_rows")
+            .and_then(Value::as_u64)
+            .unwrap_or(500) as usize;
+        let container = format!("astp_db_{db_id}");
+        let args = match db_query_args(engine, &container, database, owner, sql) {
+            Some(a) => a,
+            None => return JobOutcome::failed(format!("database.query: unsupported engine {engine}")),
+        };
+        match run_docker(&args).await {
+            Ok(o) if o.status.success() => {
+                let out = String::from_utf8_lossy(&o.stdout);
+                let (columns, mut rows) = parse_query_output(engine, &out);
+                let total = rows.len();
+                let truncated = total > max_rows;
+                if truncated {
+                    rows.truncate(max_rows);
+                }
+                JobOutcome::succeeded(json!({
+                    "columns": columns, "rows": rows, "row_count": total, "truncated": truncated,
+                }))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "query failed: {}",
                 String::from_utf8_lossy(&o.stderr).trim()
             )),
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
@@ -1724,6 +1770,103 @@ fn db_user_exec_args(
     }
 }
 
+/// Builds the `docker exec` argv that runs `sql` inside the DB container.
+/// Postgres emits CSV (with a 5s statement timeout); MySQL/MariaDB emit
+/// tab-separated batch output. Returns None for engines without a CLI here.
+fn db_query_args(
+    engine: &str,
+    container: &str,
+    database: &str,
+    owner: &str,
+    sql: &str,
+) -> Option<Vec<String>> {
+    match engine {
+        "postgres" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "psql".into(),
+            "-U".into(),
+            owner.into(),
+            "-d".into(),
+            database.into(),
+            "--csv".into(),
+            "-c".into(),
+            "SET statement_timeout = 5000".into(),
+            "-c".into(),
+            sql.into(),
+        ]),
+        "mysql" | "mariadb" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "mysql".into(),
+            "--batch".into(),
+            format!("--execute=SET max_execution_time=5000; {sql}"),
+            database.into(),
+        ]),
+        _ => None,
+    }
+}
+
+/// Parses a query result into (columns, rows). Postgres `--csv` is parsed as
+/// RFC-4180 CSV; MySQL `--batch` is tab-separated. The first record is the
+/// header row.
+fn parse_query_output(engine: &str, out: &str) -> (Vec<String>, Vec<Vec<String>>) {
+    let records: Vec<Vec<String>> = match engine {
+        "mysql" | "mariadb" => out
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.split('\t').map(str::to_string).collect())
+            .collect(),
+        _ => parse_csv(out),
+    };
+    if records.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    let cols = records[0].clone();
+    let rows = records[1..].to_vec();
+    (cols, rows)
+}
+
+/// Minimal RFC-4180 CSV parser: handles quoted fields, doubled quotes, and
+/// embedded commas/newlines.
+fn parse_csv(input: &str) -> Vec<Vec<String>> {
+    let mut records = Vec::new();
+    let mut record = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = input.chars().peekable();
+    while let Some(c) = chars.next() {
+        if in_quotes {
+            if c == '"' {
+                if chars.peek() == Some(&'"') {
+                    field.push('"');
+                    chars.next();
+                } else {
+                    in_quotes = false;
+                }
+            } else {
+                field.push(c);
+            }
+        } else {
+            match c {
+                '"' => in_quotes = true,
+                ',' => record.push(std::mem::take(&mut field)),
+                '\n' => {
+                    record.push(std::mem::take(&mut field));
+                    records.push(std::mem::take(&mut record));
+                }
+                '\r' => {}
+                _ => field.push(c),
+            }
+        }
+    }
+    if !field.is_empty() || !record.is_empty() {
+        record.push(field);
+        records.push(record);
+    }
+    records
+}
+
 /// Caddy site serving a manually-installed certificate (no ACME).
 fn render_caddy_site_tls(domain: &str, cert: &str, key: &str) -> String {
     format!("{domain} {{\n\ttls {cert} {key}\n\trespond \"AsterPanel\" 200\n}}\n")
@@ -2297,6 +2440,28 @@ mod tests {
         assert!(out.contains("redirect \"team@example.com\""), "{out}");
         assert!(!out.contains("\"nope\""), "{out}");
         assert!(!out.contains("nofolder"), "{out}");
+    }
+
+    #[test]
+    fn db_query_csv_and_args() {
+        // Postgres --csv with a quoted field containing a comma + doubled quote.
+        let csv = "id,name\n1,Acme\n2,\"Doe, \"\"J\"\"\"\n";
+        let (cols, rows) = parse_query_output("postgres", csv);
+        assert_eq!(cols, vec!["id", "name"]);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[1], vec!["2".to_string(), "Doe, \"J\"".to_string()]);
+
+        // MySQL --batch is tab-separated.
+        let tsv = "id\tname\n1\tAcme\n";
+        let (mcols, mrows) = parse_query_output("mysql", tsv);
+        assert_eq!(mcols, vec!["id", "name"]);
+        assert_eq!(mrows, vec![vec!["1".to_string(), "Acme".to_string()]]);
+
+        // argv targets the container with a statement timeout; unknown engine → None.
+        let args = db_query_args("postgres", "astp_db_x", "app", "app", "SELECT 1").unwrap();
+        assert!(args.contains(&"--csv".to_string()));
+        assert!(args.iter().any(|a| a.contains("statement_timeout")));
+        assert!(db_query_args("mongo", "c", "d", "o", "x").is_none());
     }
 
     #[test]

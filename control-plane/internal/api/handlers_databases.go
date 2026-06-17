@@ -248,3 +248,62 @@ func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
 		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
 	})
 }
+
+type databaseQueryRequest struct {
+	SQL     string `json:"sql"`
+	MaxRows int    `json:"max_rows"`
+}
+
+// handleDatabaseQuery runs an ad-hoc SQL statement inside the database container
+// and returns the result set — a built-in phpMyAdmin-style query runner. The
+// statement targets the tenant's own database (tenant-bound); the agent enforces
+// a statement timeout and the control plane caps the rows returned. Only the
+// engine is audited, never the SQL text (it can carry secrets).
+func (s *Server) handleDatabaseQuery(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	if !db.ServerNodeID.Valid {
+		httpx.Error(w, http.StatusConflict, "no_node", "database has no node")
+		return
+	}
+	var req databaseQueryRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	sql := strings.TrimSpace(req.SQL)
+	if sql == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a SQL statement is required")
+		return
+	}
+	maxRows := req.MaxRows
+	if maxRows <= 0 || maxRows > 5000 {
+		maxRows = 1000
+	}
+	owner := db.Name
+	if db.DBUser != nil && *db.DBUser != "" {
+		owner = *db.DBUser
+	}
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeDatabaseQuery, db.ServerNodeID.UUID, map[string]any{
+		"database_id": db.ID, "engine": db.Engine, "database": db.Name,
+		"owner": owner, "sql": sql, "max_rows": maxRows,
+	})
+	if err != nil {
+		fileJobError(w, err)
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.query", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"engine": db.Engine})
+	httpx.JSON(w, http.StatusOK, rawOrEmpty(res))
+}

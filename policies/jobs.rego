@@ -21,6 +21,7 @@ allowed_types := {
 	"database.create",
 	"database.delete",
 	"database.user.create",
+	"database.query",
 	"mail.mailbox.create",
 	"mail.server.ensure",
 	"mail.dkim.generate",

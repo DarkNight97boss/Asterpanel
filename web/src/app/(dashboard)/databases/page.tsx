@@ -6,10 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
+import { apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 
 const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
+const QUERYABLE = ["postgres", "mysql", "mariadb"];
+const selectCls =
+  "flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+
+interface QueryResult {
+  columns: string[];
+  rows: string[][];
+  row_count: number;
+  truncated: boolean;
+}
 
 function fmtSize(mb: number | null) {
   if (mb == null) return "—";
@@ -23,6 +34,11 @@ export default function DatabasesPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [creds, setCreds] = useState<{ user: string; password: string } | null>(null);
+  const [queryDbId, setQueryDbId] = useState("");
+  const [sql, setSql] = useState("");
+  const [queryBusy, setQueryBusy] = useState(false);
+  const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
+  const [queryError, setQueryError] = useState<string | null>(null);
 
   async function refresh() {
     try {
@@ -48,6 +64,25 @@ export default function DatabasesPage() {
       setError(e instanceof Error ? e.message : "Create failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  const queryableDbs = dbs.filter((d) => QUERYABLE.includes(d.engine));
+
+  async function onRunQuery(e: FormEvent) {
+    e.preventDefault();
+    setQueryBusy(true);
+    setQueryError(null);
+    setQueryResult(null);
+    try {
+      const id = queryDbId || queryableDbs[0]?.id;
+      if (!id) throw new Error("No queryable database");
+      const res = await apiPost<QueryResult>(`/api/v1/databases/${id}/query`, { sql });
+      setQueryResult(res);
+    } catch (e) {
+      setQueryError(e instanceof Error ? e.message : "Query failed");
+    } finally {
+      setQueryBusy(false);
     }
   }
 
@@ -145,6 +180,88 @@ export default function DatabasesPage() {
               ))}
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">SQL query</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Run a statement against a managed database (Postgres / MySQL). It executes inside the
+            database container with a statement timeout; returned rows are capped.
+          </p>
+          {queryableDbs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No SQL-queryable databases yet.</p>
+          ) : (
+            <form onSubmit={onRunQuery} className="space-y-3">
+              <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+                <div className="space-y-1.5">
+                  <Label htmlFor="q-db">Database</Label>
+                  <select
+                    id="q-db"
+                    className={selectCls}
+                    value={queryDbId || queryableDbs[0]?.id}
+                    onChange={(e) => setQueryDbId(e.target.value)}
+                  >
+                    {queryableDbs.map((d) => (
+                      <option key={d.id} value={d.id} className="bg-card">
+                        {d.name} ({d.engine})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <Textarea
+                value={sql}
+                onChange={(e) => setSql(e.target.value)}
+                placeholder="SELECT * FROM users LIMIT 50;"
+                className="font-mono"
+                required
+              />
+              <Button type="submit" disabled={queryBusy}>
+                {queryBusy ? "Running…" : "Run query"}
+              </Button>
+            </form>
+          )}
+
+          {queryError && <p className="text-sm text-red-400">{queryError}</p>}
+
+          {queryResult && (
+            <div className="space-y-2">
+              <p className="text-xs text-muted-foreground">
+                {queryResult.row_count} row{queryResult.row_count === 1 ? "" : "s"}
+                {queryResult.truncated && " (truncated)"}
+              </p>
+              {queryResult.columns.length > 0 && (
+                <div className="overflow-x-auto rounded-md border border-border/60">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-border text-left text-muted-foreground">
+                      <tr>
+                        {queryResult.columns.map((c) => (
+                          <th key={c} className="px-3 py-2 font-medium">
+                            {c}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {queryResult.rows.map((row, i) => (
+                        <tr key={i} className="border-b border-border/60 last:border-0">
+                          {row.map((cell, j) => (
+                            <td key={j} className="px-3 py-2 font-mono text-xs">
+                              {cell}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
     </div>

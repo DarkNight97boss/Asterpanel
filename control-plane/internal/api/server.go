@@ -163,6 +163,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
 			r.With(az.Require("database.create", "database.user.create", "database_instance")).Post("/databases/{dbID}/users", s.handleCreateDBUser)
+			r.With(az.Require("database.query", "database.query", "database_instance")).Post("/databases/{dbID}/query", s.handleDatabaseQuery)
 
 			// SSL / TLS certificates
 			r.With(az.Require("ssl.read", "ssl.list", "ssl_certificate")).Get("/ssl-certificates", s.handleListCertificates)
