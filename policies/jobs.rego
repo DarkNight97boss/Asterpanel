@@ -42,6 +42,7 @@ allowed_types := {
 	"logs.tail",
 	"antivirus.scan",
 	"health.check",
+	"analytics.compute",
 }
 
 default allow := false

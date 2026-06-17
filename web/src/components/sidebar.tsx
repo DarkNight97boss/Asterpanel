@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Activity,
   Archive,
+  BarChart3,
   Bell,
   Building2,
   Clock,
@@ -62,6 +63,7 @@ const groups: Group[] = [
       { href: "/domains", label: "Domains & DNS", icon: Network },
       { href: "/ssl", label: "SSL / TLS", icon: Lock },
       { href: "/runtime", label: "Runtime", icon: FileCode2 },
+      { href: "/analytics", label: "Analytics", icon: BarChart3 },
       { href: "/apps", label: "One-Click Apps", icon: Package },
     ],
   },

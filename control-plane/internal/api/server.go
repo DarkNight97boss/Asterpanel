@@ -137,6 +137,7 @@ func (s *Server) routes() http.Handler {
 
 			// Container logs (site-scoped tail)
 			r.With(az.Require("website.read", "logs.tail", "website")).Get("/sites/{siteID}/logs", s.handleSiteLogs)
+			r.With(az.Require("metrics.read", "analytics.read", "website")).Get("/sites/{siteID}/analytics", s.handleSiteAnalytics)
 
 			// Health checks (per-site probes + status)
 			r.With(az.Require("website.read", "health.list", "website")).Get("/health", s.handleListHealth)

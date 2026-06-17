@@ -82,6 +82,7 @@ impl Executor for DockerExecutor {
             "logs.tail" => self.logs_tail(job).await,
             "antivirus.scan" => self.antivirus_scan(job).await,
             "health.check" => self.health_check(job).await,
+            "analytics.compute" => self.analytics_compute(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             other => JobOutcome::failed(format!("unsupported job type: {other}")),
@@ -706,6 +707,45 @@ impl DockerExecutor {
             )),
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
+    }
+
+    /// Aggregates a site's Caddy JSON access log into web-analytics figures
+    /// (requests, unique visitors, bandwidth, top paths, status classes). A
+    /// missing log yields a well-formed empty summary rather than an error.
+    async fn analytics_compute(&self, job: &Job) -> JobOutcome {
+        let site_id = job
+            .payload
+            .get("site_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let top_n = job
+            .payload
+            .get("top_paths")
+            .and_then(Value::as_u64)
+            .unwrap_or(10) as usize;
+        let dir = std::env::var("AGENT_ACCESS_LOG_DIR")
+            .unwrap_or_else(|_| "/var/log/asterpanel/access".into());
+        let path = job
+            .payload
+            .get("log_path")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("{dir}/{site_id}.log"));
+        let content = match tokio::fs::read_to_string(&path).await {
+            Ok(c) => c,
+            Err(_) => {
+                return JobOutcome::succeeded(json!({
+                    "requests": 0, "visitors": 0, "bytes": 0, "top_paths": [],
+                    "status_classes": {"2xx": 0, "3xx": 0, "4xx": 0, "5xx": 0},
+                    "log_present": false,
+                }));
+            }
+        };
+        let mut summary = parse_access_log(&content, top_n);
+        if let Some(obj) = summary.as_object_mut() {
+            obj.insert("log_present".into(), json!(true));
+        }
+        JobOutcome::succeeded(summary)
     }
 
     async fn cert_install(&self, job: &Job) -> JobOutcome {
@@ -1867,6 +1907,73 @@ fn parse_csv(input: &str) -> Vec<Vec<String>> {
     records
 }
 
+/// Aggregates Caddy JSON access-log lines into web-analytics figures. Each line
+/// is a JSON object with `request.{remote_ip,uri}`, `status` and `size`.
+/// Unparseable lines are skipped. Returns requests, unique visitors, total
+/// bytes, the `top_n` paths (query string stripped), and a status-class tally.
+fn parse_access_log(content: &str, top_n: usize) -> Value {
+    use std::collections::{HashMap, HashSet};
+    let mut requests: u64 = 0;
+    let mut bytes: u64 = 0;
+    let mut visitors: HashSet<String> = HashSet::new();
+    let mut paths: HashMap<String, u64> = HashMap::new();
+    let mut classes: HashMap<&str, u64> = HashMap::new();
+
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let v: Value = match serde_json::from_str(line) {
+            Ok(v) => v,
+            Err(_) => continue,
+        };
+        requests += 1;
+        bytes += v.get("size").and_then(Value::as_u64).unwrap_or(0);
+        let req = v.get("request");
+        let ip = req
+            .and_then(|r| r.get("remote_ip").or_else(|| r.get("client_ip")))
+            .and_then(Value::as_str);
+        if let Some(ip) = ip {
+            visitors.insert(ip.to_string());
+        }
+        if let Some(uri) = req.and_then(|r| r.get("uri")).and_then(Value::as_str) {
+            let path = uri.split('?').next().unwrap_or(uri).to_string();
+            *paths.entry(path).or_insert(0) += 1;
+        }
+        let class = match v.get("status").and_then(Value::as_u64).unwrap_or(0) / 100 {
+            2 => "2xx",
+            3 => "3xx",
+            4 => "4xx",
+            5 => "5xx",
+            _ => "other",
+        };
+        *classes.entry(class).or_insert(0) += 1;
+    }
+
+    let mut top: Vec<(String, u64)> = paths.into_iter().collect();
+    // Most-hit first; ties broken by path for deterministic output.
+    top.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    top.truncate(top_n);
+    let top_paths: Vec<Value> = top
+        .into_iter()
+        .map(|(path, count)| json!({"path": path, "count": count}))
+        .collect();
+
+    json!({
+        "requests": requests,
+        "visitors": visitors.len(),
+        "bytes": bytes,
+        "top_paths": top_paths,
+        "status_classes": {
+            "2xx": classes.get("2xx").copied().unwrap_or(0),
+            "3xx": classes.get("3xx").copied().unwrap_or(0),
+            "4xx": classes.get("4xx").copied().unwrap_or(0),
+            "5xx": classes.get("5xx").copied().unwrap_or(0),
+        }
+    })
+}
+
 /// Caddy site serving a manually-installed certificate (no ACME).
 fn render_caddy_site_tls(domain: &str, cert: &str, key: &str) -> String {
     format!("{domain} {{\n\ttls {cert} {key}\n\trespond \"AsterPanel\" 200\n}}\n")
@@ -2462,6 +2569,31 @@ mod tests {
         assert!(args.contains(&"--csv".to_string()));
         assert!(args.iter().any(|a| a.contains("statement_timeout")));
         assert!(db_query_args("mongo", "c", "d", "o", "x").is_none());
+    }
+
+    #[test]
+    fn access_log_aggregates_caddy_json() {
+        let log = concat!(
+            r#"{"request":{"remote_ip":"1.1.1.1","uri":"/?ref=x"},"status":200,"size":100}"#,
+            "\n",
+            r#"{"request":{"remote_ip":"1.1.1.1","uri":"/about"},"status":200,"size":50}"#,
+            "\n",
+            r#"{"request":{"remote_ip":"2.2.2.2","uri":"/"},"status":404,"size":20}"#,
+            "\n",
+            "not json — skipped\n",
+            r#"{"request":{"remote_ip":"3.3.3.3","uri":"/"},"status":500,"size":10}"#,
+            "\n",
+        );
+        let v = parse_access_log(log, 10);
+        assert_eq!(v["requests"], 4);
+        assert_eq!(v["visitors"], 3); // 1.1.1.1, 2.2.2.2, 3.3.3.3
+        assert_eq!(v["bytes"], 180);
+        assert_eq!(v["status_classes"]["2xx"], 2);
+        assert_eq!(v["status_classes"]["4xx"], 1);
+        assert_eq!(v["status_classes"]["5xx"], 1);
+        // "/" is the top path (3 hits: query stripped, plus the two extra "/")
+        assert_eq!(v["top_paths"][0]["path"], "/");
+        assert_eq!(v["top_paths"][0]["count"], 3);
     }
 
     #[test]
