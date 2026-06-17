@@ -64,6 +64,7 @@ impl Executor for DockerExecutor {
             "mail.server.ensure" => self.mail_server_ensure(job).await,
             "mail.dkim.generate" => self.mail_dkim_generate(job).await,
             "mail.alias.apply" => self.mail_alias_apply(job).await,
+            "mail.autoresponder.apply" => self.mail_autoresponder_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -450,6 +451,27 @@ impl DockerExecutor {
             .filter(|l| !l.is_empty() && !l.starts_with('#'))
             .count();
         JobOutcome::succeeded(json!({"path": path, "forwarders": count}))
+    }
+
+    /// Regenerates the global Sieve vacation script from the full autoresponder
+    /// set (declarative, same model as the alias map).
+    async fn mail_autoresponder_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let items = job
+            .payload
+            .get("autoresponders")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_sieve_autoresponders(items);
+        let dir = std::env::var("AGENT_MAIL_DIR").unwrap_or_else(|_| "/etc/asterpanel/mail".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mail.autoresponder.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/asterpanel-autoresponders.sieve");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("mail.autoresponder.apply: write failed: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": path, "autoresponders": items.len()}))
     }
 
     async fn backup_create(&self, job: &Job) -> JobOutcome {
@@ -1388,6 +1410,71 @@ fn render_postfix_virtual_aliases(forwarders: &[Value]) -> String {
     out
 }
 
+/// Renders a global Pigeonhole Sieve script that fires a `vacation` auto-reply
+/// for each enabled autoresponder, guarded by the envelope recipient and (when
+/// set) a start/end date window. The script overwrites the previous one so a
+/// removed autoresponder simply disappears.
+fn render_sieve_autoresponders(items: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel autoresponders (generated — do not edit)\n");
+    out.push_str("require [\"vacation\", \"envelope\", \"date\", \"relational\"];\n\n");
+    for it in items {
+        let addr = it.get("address").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_email(addr) {
+            continue;
+        }
+        let subject = it.get("subject").and_then(Value::as_str).unwrap_or("Auto-reply");
+        let body = it.get("body").and_then(Value::as_str).unwrap_or("");
+        let days = it
+            .get("interval_days")
+            .and_then(Value::as_i64)
+            .unwrap_or(1)
+            .clamp(1, 30);
+        let start = it.get("start_date").and_then(Value::as_str).unwrap_or("").trim();
+        let end = it.get("end_date").and_then(Value::as_str).unwrap_or("").trim();
+
+        let mut conds = vec![format!("envelope :is \"to\" \"{}\"", sieve_quote(addr))];
+        if valid_iso_date(start) {
+            conds.push(format!("currentdate :value \"ge\" \"date\" \"{start}\""));
+        }
+        if valid_iso_date(end) {
+            conds.push(format!("currentdate :value \"le\" \"date\" \"{end}\""));
+        }
+        out.push_str(&format!("# {addr}\n"));
+        out.push_str(&format!("if allof ({}) {{\n", conds.join(", ")));
+        out.push_str(&format!(
+            "  vacation :days {days} :subject \"{}\"\n",
+            sieve_quote(subject)
+        ));
+        out.push_str("  text:\n");
+        for line in body.lines() {
+            if line.starts_with('.') {
+                out.push('.'); // dot-stuff so the body can't end the text block early
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out.push_str(".\n  ;\n}\n\n");
+    }
+    out
+}
+
+/// Escapes a Sieve quoted-string literal (`\` and `"`).
+fn sieve_quote(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Validates a `YYYY-MM-DD` date string (structure only).
+fn valid_iso_date(s: &str) -> bool {
+    s.len() == 10
+        && s.chars().enumerate().all(|(i, c)| {
+            if i == 4 || i == 7 {
+                c == '-'
+            } else {
+                c.is_ascii_digit()
+            }
+        })
+}
+
 /// A forwarder source is a full address (`sales@example.com`) or a catch-all
 /// (`@example.com`).
 fn valid_forward_source(s: &str) -> bool {
@@ -2091,6 +2178,24 @@ mod tests {
         assert!(valid_forward_source("user@example.com"));
         assert!(!valid_forward_source("nope"));
         assert!(!valid_email("two@@at.com"));
+    }
+
+    #[test]
+    fn sieve_autoresponder_renders_vacation() {
+        let items = vec![
+            json!({"address":"vip@example.com","subject":"Away","body":"Back Monday.\n.signature","interval_days":2,"start_date":"2026-06-01","end_date":"2026-06-15"}),
+            json!({"address":"bad","subject":"x","body":"y"}), // invalid address → skipped
+        ];
+        let out = render_sieve_autoresponders(&items);
+        assert!(out.contains("require [\"vacation\""), "{out}");
+        assert!(out.contains("envelope :is \"to\" \"vip@example.com\""), "{out}");
+        assert!(out.contains("vacation :days 2 :subject \"Away\""), "{out}");
+        assert!(out.contains("currentdate :value \"ge\" \"date\" \"2026-06-01\""), "{out}");
+        assert!(out.contains("currentdate :value \"le\" \"date\" \"2026-06-15\""), "{out}");
+        assert!(out.contains("..signature"), "{out}"); // dot-stuffed body line
+        assert!(!out.contains("\"bad\""), "{out}");
+        assert!(valid_iso_date("2026-06-01"));
+        assert!(!valid_iso_date("2026/06/01"));
     }
 
     #[test]

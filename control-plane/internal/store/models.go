@@ -204,6 +204,19 @@ type MailForwarder struct {
 	CreatedAt      time.Time
 }
 
+type MailAutoresponder struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Address        string
+	Subject        string
+	Body           string
+	IntervalDays   int
+	StartDate      *time.Time
+	EndDate        *time.Time
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

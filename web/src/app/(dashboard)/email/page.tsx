@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
 
 interface Mailbox {
@@ -22,6 +23,17 @@ interface Forwarder {
   source: string;
   destinations: string[];
   is_catchall: boolean;
+}
+
+interface Autoresponder {
+  id: string;
+  address: string;
+  subject: string;
+  body: string;
+  interval_days: number;
+  start_date: string;
+  end_date: string;
+  enabled: boolean;
 }
 
 export default function EmailPage() {
@@ -82,6 +94,59 @@ export default function EmailPage() {
     }
   }
 
+  const [autoresponders, setAutoresponders] = useState<Autoresponder[]>([]);
+  const [ar, setAr] = useState({
+    address: "",
+    subject: "",
+    body: "",
+    interval_days: "1",
+    start_date: "",
+    end_date: "",
+  });
+  const [arBusy, setArBusy] = useState(false);
+
+  async function refreshAutoresponders() {
+    try {
+      const { autoresponders } = await apiGet<{ autoresponders: Autoresponder[] }>(
+        "/api/v1/email/autoresponders",
+      );
+      setAutoresponders(autoresponders);
+    } catch {
+      /* keep the section empty if the backend is unreachable */
+    }
+  }
+
+  async function onCreateAutoresponder(e: FormEvent) {
+    e.preventDefault();
+    setArBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/v1/email/autoresponders", {
+        address: ar.address.trim(),
+        subject: ar.subject.trim(),
+        body: ar.body,
+        interval_days: Number(ar.interval_days) || 1,
+        start_date: ar.start_date,
+        end_date: ar.end_date,
+      });
+      setAr({ address: "", subject: "", body: "", interval_days: "1", start_date: "", end_date: "" });
+      await refreshAutoresponders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create autoresponder");
+    } finally {
+      setArBusy(false);
+    }
+  }
+
+  async function onDeleteAutoresponder(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/autoresponders/${id}`);
+      await refreshAutoresponders();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete autoresponder");
+    }
+  }
+
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
     setDkimBusy(true);
@@ -107,6 +172,7 @@ export default function EmailPage() {
   useEffect(() => {
     refresh();
     refreshForwarders();
+    refreshAutoresponders();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -316,6 +382,113 @@ export default function EmailPage() {
                     className="ml-auto h-7 w-7"
                     onClick={() => onDeleteForwarder(f.id)}
                     aria-label="Delete forwarder"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Autoresponders ({autoresponders.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Vacation auto-replies. Optionally bound to a date range; the same sender is answered at
+            most once per interval.
+          </p>
+          <form onSubmit={onCreateAutoresponder} className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="ar-address">Address</Label>
+                <Input
+                  id="ar-address"
+                  value={ar.address}
+                  onChange={(e) => setAr({ ...ar, address: e.target.value })}
+                  placeholder="vip@acme.com"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ar-subject">Subject</Label>
+                <Input
+                  id="ar-subject"
+                  value={ar.subject}
+                  onChange={(e) => setAr({ ...ar, subject: e.target.value })}
+                  placeholder="Out of office"
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ar-body">Message</Label>
+              <Textarea
+                id="ar-body"
+                value={ar.body}
+                onChange={(e) => setAr({ ...ar, body: e.target.value })}
+                placeholder="I'm away until Monday and will reply on my return."
+                required
+              />
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="ar-interval">Reply interval (days)</Label>
+                <Input
+                  id="ar-interval"
+                  type="number"
+                  min={1}
+                  max={30}
+                  value={ar.interval_days}
+                  onChange={(e) => setAr({ ...ar, interval_days: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ar-start">Start (optional)</Label>
+                <Input
+                  id="ar-start"
+                  type="date"
+                  value={ar.start_date}
+                  onChange={(e) => setAr({ ...ar, start_date: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="ar-end">End (optional)</Label>
+                <Input
+                  id="ar-end"
+                  type="date"
+                  value={ar.end_date}
+                  onChange={(e) => setAr({ ...ar, end_date: e.target.value })}
+                />
+              </div>
+            </div>
+            <Button type="submit" disabled={arBusy}>
+              {arBusy ? "Saving…" : "Add autoresponder"}
+            </Button>
+          </form>
+
+          {autoresponders.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No autoresponders yet.</p>
+          ) : (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {autoresponders.map((a) => (
+                <li key={a.id} className="flex items-start gap-3 px-4 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="font-mono">{a.address}</div>
+                    <div className="text-xs text-muted-foreground">
+                      “{a.subject}” · every {a.interval_days}d
+                      {a.start_date && ` · ${a.start_date} → ${a.end_date || "…"}`}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteAutoresponder(a.id)}
+                    aria-label="Delete autoresponder"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
