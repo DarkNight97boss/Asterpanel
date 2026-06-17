@@ -65,6 +65,7 @@ impl Executor for DockerExecutor {
             "mail.dkim.generate" => self.mail_dkim_generate(job).await,
             "mail.alias.apply" => self.mail_alias_apply(job).await,
             "mail.autoresponder.apply" => self.mail_autoresponder_apply(job).await,
+            "mail.filter.apply" => self.mail_filter_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -472,6 +473,26 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("mail.autoresponder.apply: write failed: {e}"));
         }
         JobOutcome::succeeded(json!({"path": path, "autoresponders": items.len()}))
+    }
+
+    /// Regenerates the global Sieve filter script from the full rule set.
+    async fn mail_filter_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let filters = job
+            .payload
+            .get("filters")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_sieve_filters(filters);
+        let dir = std::env::var("AGENT_MAIL_DIR").unwrap_or_else(|_| "/etc/asterpanel/mail".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mail.filter.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/asterpanel-filters.sieve");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("mail.filter.apply: write failed: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": path, "filters": filters.len()}))
     }
 
     async fn backup_create(&self, job: &Job) -> JobOutcome {
@@ -1475,6 +1496,66 @@ fn valid_iso_date(s: &str) -> bool {
         })
 }
 
+/// Renders a global Pigeonhole Sieve script of per-mailbox filter rules. Each
+/// rule matches a header (from/to/subject/cc) against a value and performs one
+/// action (file into a folder, discard, redirect, keep), guarded by the envelope
+/// recipient so a rule only affects its own mailbox. Malformed rules are skipped.
+fn render_sieve_filters(filters: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel mail filters (generated — do not edit)\n");
+    out.push_str("require [\"fileinto\", \"envelope\"];\n\n");
+    for f in filters {
+        let addr = f.get("address").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_email(addr) {
+            continue;
+        }
+        let header = match f.get("field").and_then(Value::as_str).unwrap_or("") {
+            "from" => "from",
+            "to" => "to",
+            "subject" => "subject",
+            "cc" => "cc",
+            _ => continue,
+        };
+        let op = match f.get("op").and_then(Value::as_str).unwrap_or("contains") {
+            "is" => ":is",
+            "matches" => ":matches",
+            _ => ":contains",
+        };
+        let value = f.get("value").and_then(Value::as_str).unwrap_or("").trim();
+        if value.is_empty() {
+            continue;
+        }
+        let arg = f.get("action_arg").and_then(Value::as_str).unwrap_or("").trim();
+        let action_body = match f.get("action").and_then(Value::as_str).unwrap_or("keep") {
+            "fileinto" => {
+                if arg.is_empty() {
+                    continue;
+                }
+                format!("  fileinto \"{}\";\n  stop;\n", sieve_quote(arg))
+            }
+            "discard" => "  discard;\n  stop;\n".to_string(),
+            "redirect" => {
+                if !valid_email(arg) {
+                    continue;
+                }
+                format!("  redirect \"{}\";\n  stop;\n", sieve_quote(arg))
+            }
+            _ => "  keep;\n".to_string(),
+        };
+        let name = f.get("name").and_then(Value::as_str).unwrap_or("filter");
+        out.push_str(&format!("# {name} ({addr})\n"));
+        out.push_str(&format!(
+            "if allof (envelope :is \"to\" \"{}\", header {} \"{}\" \"{}\") {{\n",
+            sieve_quote(addr),
+            op,
+            header,
+            sieve_quote(value)
+        ));
+        out.push_str(&action_body);
+        out.push_str("}\n\n");
+    }
+    out
+}
+
 /// A forwarder source is a full address (`sales@example.com`) or a catch-all
 /// (`@example.com`).
 fn valid_forward_source(s: &str) -> bool {
@@ -2196,6 +2277,26 @@ mod tests {
         assert!(!out.contains("\"bad\""), "{out}");
         assert!(valid_iso_date("2026-06-01"));
         assert!(!valid_iso_date("2026/06/01"));
+    }
+
+    #[test]
+    fn sieve_filters_render_rules() {
+        let filters = vec![
+            json!({"address":"info@example.com","name":"junk","field":"subject","op":"contains","value":"[SPAM]","action":"fileinto","action_arg":"Junk"}),
+            json!({"address":"info@example.com","name":"block","field":"from","op":"is","value":"bad@x.com","action":"discard"}),
+            json!({"address":"info@example.com","name":"fwd","field":"to","op":"contains","value":"sales","action":"redirect","action_arg":"team@example.com"}),
+            json!({"address":"nope","name":"x","field":"from","op":"is","value":"y","action":"discard"}), // bad address
+            json!({"address":"info@example.com","name":"nofolder","field":"subject","op":"is","value":"x","action":"fileinto","action_arg":""}), // missing folder
+        ];
+        let out = render_sieve_filters(&filters);
+        assert!(out.contains("require [\"fileinto\", \"envelope\"];"), "{out}");
+        assert!(out.contains("header :contains \"subject\" \"[SPAM]\""), "{out}");
+        assert!(out.contains("fileinto \"Junk\""), "{out}");
+        assert!(out.contains("header :is \"from\" \"bad@x.com\""), "{out}");
+        assert!(out.contains("discard;"), "{out}");
+        assert!(out.contains("redirect \"team@example.com\""), "{out}");
+        assert!(!out.contains("\"nope\""), "{out}");
+        assert!(!out.contains("nofolder"), "{out}");
     }
 
     #[test]

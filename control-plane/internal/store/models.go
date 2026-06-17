@@ -217,6 +217,21 @@ type MailAutoresponder struct {
 	CreatedAt      time.Time
 }
 
+type MailFilter struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Address        string
+	Name           string
+	Field          string
+	Op             string
+	Value          string
+	Action         string
+	ActionArg      string
+	Position       int
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

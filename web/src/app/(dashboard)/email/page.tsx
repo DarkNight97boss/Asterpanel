@@ -36,6 +36,22 @@ interface Autoresponder {
   enabled: boolean;
 }
 
+interface Filter {
+  id: string;
+  address: string;
+  name: string;
+  field: string;
+  op: string;
+  value: string;
+  action: string;
+  action_arg: string;
+  position: number;
+  enabled: boolean;
+}
+
+const selectCls =
+  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [address, setAddress] = useState("");
@@ -147,6 +163,58 @@ export default function EmailPage() {
     }
   }
 
+  const [filters, setFilters] = useState<Filter[]>([]);
+  const [flt, setFlt] = useState({
+    address: "",
+    name: "",
+    field: "subject",
+    op: "contains",
+    value: "",
+    action: "fileinto",
+    action_arg: "",
+  });
+  const [fltBusy, setFltBusy] = useState(false);
+
+  async function refreshFilters() {
+    try {
+      const { filters } = await apiGet<{ filters: Filter[] }>("/api/v1/email/filters");
+      setFilters(filters);
+    } catch {
+      /* keep the section empty if the backend is unreachable */
+    }
+  }
+
+  async function onCreateFilter(e: FormEvent) {
+    e.preventDefault();
+    setFltBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/v1/email/filters", { ...flt, address: flt.address.trim(), name: flt.name.trim() });
+      setFlt({ address: "", name: "", field: "subject", op: "contains", value: "", action: "fileinto", action_arg: "" });
+      await refreshFilters();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create filter");
+    } finally {
+      setFltBusy(false);
+    }
+  }
+
+  async function onDeleteFilter(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/filters/${id}`);
+      await refreshFilters();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete filter");
+    }
+  }
+
+  const filterActionLabel: Record<string, string> = {
+    fileinto: "File into folder",
+    discard: "Discard",
+    redirect: "Forward to",
+    keep: "Keep (no-op)",
+  };
+
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
     setDkimBusy(true);
@@ -173,6 +241,7 @@ export default function EmailPage() {
     refresh();
     refreshForwarders();
     refreshAutoresponders();
+    refreshFilters();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -489,6 +558,142 @@ export default function EmailPage() {
                     className="ml-auto h-7 w-7"
                     onClick={() => onDeleteAutoresponder(a.id)}
                     aria-label="Delete autoresponder"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Filters ({filters.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Server-side rules (Sieve): match a header on an incoming message for a mailbox, then
+            file it into a folder, forward, or discard it.
+          </p>
+          <form onSubmit={onCreateFilter} className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-address">Mailbox</Label>
+                <Input
+                  id="flt-address"
+                  value={flt.address}
+                  onChange={(e) => setFlt({ ...flt, address: e.target.value })}
+                  placeholder="info@acme.com"
+                  required
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-name">Rule name</Label>
+                <Input
+                  id="flt-name"
+                  value={flt.name}
+                  onChange={(e) => setFlt({ ...flt, name: e.target.value })}
+                  placeholder="Route newsletters"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-field">If header</Label>
+                <select
+                  id="flt-field"
+                  className={selectCls}
+                  value={flt.field}
+                  onChange={(e) => setFlt({ ...flt, field: e.target.value })}
+                >
+                  <option value="from">From</option>
+                  <option value="to">To</option>
+                  <option value="subject">Subject</option>
+                  <option value="cc">Cc</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-op">Operator</Label>
+                <select
+                  id="flt-op"
+                  className={selectCls}
+                  value={flt.op}
+                  onChange={(e) => setFlt({ ...flt, op: e.target.value })}
+                >
+                  <option value="contains">contains</option>
+                  <option value="is">is exactly</option>
+                  <option value="matches">matches (wildcards)</option>
+                </select>
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-value">Value</Label>
+                <Input
+                  id="flt-value"
+                  value={flt.value}
+                  onChange={(e) => setFlt({ ...flt, value: e.target.value })}
+                  placeholder="[newsletter]"
+                  required
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+              <div className="space-y-1.5">
+                <Label htmlFor="flt-action">Then</Label>
+                <select
+                  id="flt-action"
+                  className={selectCls}
+                  value={flt.action}
+                  onChange={(e) => setFlt({ ...flt, action: e.target.value })}
+                >
+                  <option value="fileinto">File into folder</option>
+                  <option value="redirect">Forward to</option>
+                  <option value="discard">Discard</option>
+                  <option value="keep">Keep (no-op)</option>
+                </select>
+              </div>
+              {(flt.action === "fileinto" || flt.action === "redirect") && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="flt-arg">
+                    {flt.action === "fileinto" ? "Folder" : "Forward to"}
+                  </Label>
+                  <Input
+                    id="flt-arg"
+                    value={flt.action_arg}
+                    onChange={(e) => setFlt({ ...flt, action_arg: e.target.value })}
+                    placeholder={flt.action === "fileinto" ? "Newsletters" : "team@acme.com"}
+                    required
+                  />
+                </div>
+              )}
+              <Button type="submit" disabled={fltBusy}>
+                {fltBusy ? "Saving…" : "Add filter"}
+              </Button>
+            </div>
+          </form>
+
+          {filters.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No filters yet.</p>
+          ) : (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {filters.map((f) => (
+                <li key={f.id} className="flex items-start gap-3 px-4 py-2 text-sm">
+                  <div className="min-w-0">
+                    <div className="font-medium">{f.name}</div>
+                    <div className="text-xs text-muted-foreground">
+                      <span className="font-mono">{f.address}</span> · if {f.field} {f.op} “{f.value}
+                      ” → {filterActionLabel[f.action] ?? f.action}
+                      {f.action_arg && ` ${f.action_arg}`}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteFilter(f.id)}
+                    aria-label="Delete filter"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

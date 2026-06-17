@@ -26,6 +26,7 @@ allowed_types := {
 	"mail.dkim.generate",
 	"mail.alias.apply",
 	"mail.autoresponder.apply",
+	"mail.filter.apply",
 	"cron.apply",
 	"ftp.account.create",
 	"cert.install",

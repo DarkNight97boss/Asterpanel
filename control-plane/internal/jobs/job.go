@@ -35,6 +35,7 @@ const (
 	TypeMailDKIMGenerate  Type = "mail.dkim.generate"
 	TypeMailAliasApply    Type = "mail.alias.apply"
 	TypeMailAutoresponder Type = "mail.autoresponder.apply"
+	TypeMailFilterApply   Type = "mail.filter.apply"
 	TypeCronApply         Type = "cron.apply"
 	TypeFTPAccountCreate  Type = "ftp.account.create"
 	TypeCertInstall       Type = "cert.install"

@@ -184,6 +184,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/autoresponders", s.handleCreateAutoresponder)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/autoresponders/{autoresponderID}", s.handleDeleteAutoresponder)
 
+			// Email filters (Sieve rules)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/filters", s.handleListFilters)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/filters", s.handleCreateFilter)
+			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/filters/{filterID}", s.handleDeleteFilter)
+
 			// Native webmail client (IMAP/SMTP gateway)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/folders", s.handleWebmailFolders)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/messages", s.handleWebmailMessages)

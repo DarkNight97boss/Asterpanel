@@ -267,6 +267,7 @@ core is implemented; breadth features are scaffolded behind clean interfaces.
 | Managed databases (Postgres/MySQL/MariaDB/Redis/Mongo) | ✅ API → RBAC+OPA → envelope-encrypted credentials → signed job → hardened-container executor (runs live on a Docker node) |
 | SSL/TLS (ACME) | ✅ API → signed `cert.issue` job → agent writes a Caddy site (automatic HTTPS) |
 | Email mailboxes (IMAP/SMTP) | ✅ API → sealed password → signed `mail.mailbox.create` job → agent writes Dovecot/Postfix config (running mail-server containers iterating) |
+| Email routing — forwarders, autoresponders, filters | ✅ **Forwarders/aliases** incl. domain catch-all → `mail.alias.apply` renders the Postfix virtual-alias map; **autoresponders** → `mail.autoresponder.apply` renders a Pigeonhole Sieve `vacation` script (subject/body, reply interval, optional date window); **filters** → `mail.filter.apply` renders Sieve rules (header match → file-into/forward/discard). All declarative (full set re-rendered each change); renderers + validators unit-tested. UI on the Email page |
 | Webmail — **native** IMAP/SMTP client (modern Roundcube alternative) | ✅ Go gateway (`go-imap`/`go-message`) + integrated Next.js UI: folders, read (text + sandboxed-iframe HTML), compose/send. Dev mail server (GreenMail) wired in compose |
 | Cron jobs | ✅ CRUD → signed `cron.apply` → agent writes the node crontab |
 | FTP/SFTP accounts | ✅ CRUD → sealed password → signed `ftp.account.create` → agent writes a chrooted OpenSSH SFTP `Match` block |
