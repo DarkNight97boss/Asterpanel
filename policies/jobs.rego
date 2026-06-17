@@ -14,6 +14,7 @@ allowed_types := {
 	"app.start",
 	"app.stop",
 	"proxy.apply",
+	"redirect.apply",
 	"cert.issue",
 	"dns.apply",
 	"backup.create",

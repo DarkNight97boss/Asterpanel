@@ -232,6 +232,16 @@ type MailFilter struct {
 	CreatedAt      time.Time
 }
 
+type Redirect struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	SourceDomain   string
+	SourcePath     string
+	TargetURL      string
+	StatusCode     int
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

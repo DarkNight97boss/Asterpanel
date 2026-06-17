@@ -73,6 +73,7 @@ impl Executor for DockerExecutor {
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
+            "redirect.apply" => self.redirect_apply(job).await,
             "file.list" => self.file_list(job).await,
             "file.read" => self.file_read(job).await,
             "file.write" => self.file_write(job).await,
@@ -837,6 +838,29 @@ impl DockerExecutor {
         // Best-effort live reload; the file is the source of truth.
         let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
         JobOutcome::succeeded(json!({"path": path, "rules": rules.len()}))
+    }
+
+    /// Regenerates the Caddy redirects snippet from the full redirect set: one
+    /// site block per source domain, each with its `redir` directives.
+    async fn redirect_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let redirects = job
+            .payload
+            .get("redirects")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_redirects(redirects);
+        let dir =
+            std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("redirect.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/redirects.caddy");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("redirect.apply: write failed: {e}"));
+        }
+        let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
+        JobOutcome::succeeded(json!({"path": path, "redirects": redirects.len()}))
     }
 
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
@@ -1737,6 +1761,69 @@ fn render_caddy_waf(rules: &[Value]) -> String {
     out
 }
 
+/// Renders the Caddy redirects snippet: one site block per source domain. A
+/// whole-domain rule (path `*`) preserves the path via `{uri}`; a path rule uses
+/// an inline path matcher. Invalid domains/targets are skipped.
+fn render_caddy_redirects(redirects: &[Value]) -> String {
+    use std::collections::BTreeMap;
+    let mut by_domain: BTreeMap<String, Vec<(String, String, u64)>> = BTreeMap::new();
+    for r in redirects {
+        let domain = r
+            .get("source_domain")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        if !valid_mail_domain(domain) {
+            continue;
+        }
+        let target = r.get("target_url").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_redirect_target(target) {
+            continue;
+        }
+        let mut path = r
+            .get("source_path")
+            .and_then(Value::as_str)
+            .unwrap_or("*")
+            .trim()
+            .to_string();
+        if path.is_empty() {
+            path = "*".into();
+        }
+        if path != "*" && !path.starts_with('/') {
+            continue;
+        }
+        let code = match r.get("status_code").and_then(Value::as_u64).unwrap_or(301) {
+            c @ (301 | 302 | 307 | 308) => c,
+            _ => 301,
+        };
+        by_domain
+            .entry(domain.to_string())
+            .or_default()
+            .push((path, target.to_string(), code));
+    }
+
+    let mut out = String::from("# AsterPanel redirects (generated — do not edit)\n");
+    for (domain, rules) in by_domain {
+        out.push_str(&format!("{domain} {{\n"));
+        for (path, target, code) in rules {
+            if path == "*" {
+                out.push_str(&format!("\tredir {target}{{uri}} {code}\n"));
+            } else {
+                out.push_str(&format!("\tredir {path} {target} {code}\n"));
+            }
+        }
+        out.push_str("}\n");
+    }
+    out
+}
+
+/// A redirect target is an absolute URL or a root-relative path, single-line.
+fn valid_redirect_target(s: &str) -> bool {
+    (s.starts_with("https://") || s.starts_with("http://") || s.starts_with('/'))
+        && !s.contains(char::is_whitespace)
+        && s.len() <= 2048
+}
+
 fn render_nftables(rules: &[Value]) -> String {
     let mut out = String::from(
         "table inet asterpanel {\n    chain input {\n        type filter hook input priority 0; policy accept;\n",
@@ -2594,6 +2681,26 @@ mod tests {
         // "/" is the top path (3 hits: query stripped, plus the two extra "/")
         assert_eq!(v["top_paths"][0]["path"], "/");
         assert_eq!(v["top_paths"][0]["count"], 3);
+    }
+
+    #[test]
+    fn caddy_redirects_render_grouped() {
+        let rs = vec![
+            json!({"source_domain":"old.com","source_path":"*","target_url":"https://new.com","status_code":301}),
+            json!({"source_domain":"acme.com","source_path":"/promo","target_url":"https://acme.com/sale","status_code":302}),
+            json!({"source_domain":"bad domain","source_path":"*","target_url":"https://x.com","status_code":301}), // invalid domain
+            json!({"source_domain":"acme.com","source_path":"/old","target_url":"not a url","status_code":301}),     // invalid target
+        ];
+        let out = render_caddy_redirects(&rs);
+        assert!(out.contains("old.com {"), "{out}");
+        assert!(out.contains("redir https://new.com{uri} 301"), "{out}");
+        assert!(out.contains("acme.com {"), "{out}");
+        assert!(out.contains("redir /promo https://acme.com/sale 302"), "{out}");
+        assert!(!out.contains("bad domain"), "{out}");
+        assert!(!out.contains("not a url"), "{out}");
+        assert!(valid_redirect_target("https://x.com/a"));
+        assert!(valid_redirect_target("/local"));
+        assert!(!valid_redirect_target("ftp://x"));
     }
 
     #[test]

@@ -160,6 +160,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("dns.manage", "dns.create", "dns_record")).Post("/dns", s.handleCreateDNSRecord)
 			r.With(az.Require("dns.manage", "dns.delete", "dns_record")).Delete("/dns/{recordID}", s.handleDeleteDNSRecord)
 
+			// URL redirects (rendered into the Caddy config)
+			r.With(az.Require("domain.read", "redirect.list", "domain")).Get("/redirects", s.handleListRedirects)
+			r.With(az.Require("domain.create", "redirect.create", "domain")).Post("/redirects", s.handleCreateRedirect)
+			r.With(az.Require("domain.create", "redirect.delete", "domain")).Delete("/redirects/{redirectID}", s.handleDeleteRedirect)
+
 			// Databases (managed SQL/KV instances)
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)

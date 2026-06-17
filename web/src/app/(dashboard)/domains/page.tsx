@@ -9,7 +9,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import {
+  apiDelete,
   apiGet,
+  apiPost,
   createDnsRecord,
   createDomain,
   deleteDnsRecord,
@@ -25,12 +27,22 @@ interface Nameserver {
   label: string | null;
 }
 
+interface Redirect {
+  id: string;
+  source_domain: string;
+  source_path: string;
+  target_url: string;
+  status_code: number;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [records, setRecords] = useState<DnsRecord[]>([]);
   const [nameservers, setNameservers] = useState<Nameserver[]>([]);
+  const [redirects, setRedirects] = useState<Redirect[]>([]);
+  const [red, setRed] = useState({ source_domain: "", source_path: "*", target_url: "", status_code: "301" });
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -45,16 +57,18 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns] = await Promise.all([
+      const [d, r, ns, rd] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
           nameservers: [],
         })),
+        apiGet<{ redirects: Redirect[] }>("/api/v1/redirects").catch(() => ({ redirects: [] })),
       ]);
       setDomains(d);
       setRecords(r);
       setNameservers(ns.nameservers ?? []);
+      setRedirects(rd.redirects ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -110,6 +124,38 @@ export default function DomainsPage() {
     setError(null);
     try {
       await deleteDnsRecord(id);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onAddRedirect(e: FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/v1/redirects", {
+        source_domain: red.source_domain.trim(),
+        source_path: red.source_path.trim() || "*",
+        target_url: red.target_url.trim(),
+        status_code: Number(red.status_code) || 301,
+      });
+      setNotice("Redirect added; Caddy config re-applied on the node.");
+      setRed({ source_domain: "", source_path: "*", target_url: "", status_code: "301" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDeleteRedirect(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/redirects/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -296,6 +342,93 @@ export default function DomainsPage() {
               ))}
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Redirects ({redirects.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Send a domain (or a path under it) to another URL. Use{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">*</code> as the path for a
+            whole-domain redirect that preserves the original path.
+          </p>
+          <form onSubmit={onAddRedirect} className="grid gap-3 sm:grid-cols-6 sm:items-end">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="red-domain">Source domain</Label>
+              <Input
+                id="red-domain"
+                value={red.source_domain}
+                onChange={(e) => setRed({ ...red, source_domain: e.target.value })}
+                placeholder="old.acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="red-path">Path</Label>
+              <Input
+                id="red-path"
+                value={red.source_path}
+                onChange={(e) => setRed({ ...red, source_path: e.target.value })}
+                placeholder="*"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="red-target">Target URL</Label>
+              <Input
+                id="red-target"
+                value={red.target_url}
+                onChange={(e) => setRed({ ...red, target_url: e.target.value })}
+                placeholder="https://acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="red-code">Code</Label>
+              <select
+                id="red-code"
+                className={selectCls}
+                value={red.status_code}
+                onChange={(e) => setRed({ ...red, status_code: e.target.value })}
+              >
+                {["301", "302", "307", "308"].map((c) => (
+                  <option key={c} value={c} className="bg-card">
+                    {c}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <Button type="submit" disabled={busy} className="sm:col-span-6 sm:w-fit">
+              {busy ? "Adding…" : "Add redirect"}
+            </Button>
+          </form>
+
+          {redirects.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {redirects.map((rd) => (
+                <li key={rd.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">
+                    {rd.source_domain}
+                    {rd.source_path !== "*" ? rd.source_path : ""}
+                  </span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="font-mono text-xs text-muted-foreground">{rd.target_url}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px]">{rd.status_code}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteRedirect(rd.id)}
+                    aria-label="Delete redirect"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>
