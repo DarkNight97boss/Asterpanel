@@ -410,19 +410,23 @@ impl DockerExecutor {
                     .await
                     .map(|m| m.len())
                     .unwrap_or(0);
+                // Integrity checksum of the artifact (verified on restore).
+                let sha256 = sha256_file(&file).await;
                 // Off-site upload when an S3 bucket is configured (uses the aws CLI).
                 if let Ok(bucket) = std::env::var("AGENT_S3_BUCKET") {
                     let key = format!("backups/{backup_id}.tar.gz");
                     if let Ok(u) = run_cmd("aws", &s3_cp_args(&file, &bucket, &key)).await {
                         if u.status.success() {
                             return JobOutcome::succeeded(json!({
-                                "path": file, "size_bytes": size, "storage": "s3",
+                                "path": file, "size_bytes": size, "sha256": sha256, "storage": "s3",
                                 "s3": format!("s3://{bucket}/{key}"),
                             }));
                         }
                     }
                 }
-                JobOutcome::succeeded(json!({"path": file, "size_bytes": size, "storage": "local"}))
+                JobOutcome::succeeded(
+                    json!({"path": file, "size_bytes": size, "sha256": sha256, "storage": "local"}),
+                )
             }
             Ok(o) => JobOutcome::failed(format!(
                 "tar failed: {}",
@@ -1262,6 +1266,24 @@ fn render_postfix_virtual(address: &str) -> String {
     format!("{address}\t{address}\n")
 }
 
+/// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
+async fn sha256_file(path: &str) -> String {
+    match run_cmd("sha256sum", &[path.to_string()]).await {
+        Ok(o) if o.status.success() => {
+            parse_sha256sum(&String::from_utf8_lossy(&o.stdout)).unwrap_or_default()
+        }
+        _ => String::new(),
+    }
+}
+
+/// Extracts the 64-hex digest from `sha256sum` output (`<hex>  <file>`).
+fn parse_sha256sum(out: &str) -> Option<String> {
+    out.split_whitespace()
+        .next()
+        .filter(|h| h.len() == 64 && h.chars().all(|c| c.is_ascii_hexdigit()))
+        .map(|h| h.to_lowercase())
+}
+
 fn backup_tar_args(file: &str, target: &str) -> Vec<String> {
     vec![
         "-czf".into(),
@@ -1804,6 +1826,18 @@ mod tests {
             render_dovecot_user("info@acme.com", "pw"),
             "info@acme.com:{PLAIN}pw\n"
         );
+    }
+
+    #[test]
+    fn sha256sum_parsing() {
+        let line = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08  /b/x.tar.gz\n";
+        assert_eq!(
+            parse_sha256sum(line).unwrap(),
+            "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"
+        );
+        // short / non-hex digests are rejected
+        assert!(parse_sha256sum("deadbeef  f").is_none());
+        assert!(parse_sha256sum("").is_none());
     }
 
     #[test]

@@ -204,6 +204,7 @@ type Backup struct {
 	Status         string
 	StorageBackend string
 	SizeBytes      *int64
+	Checksum       *string
 	CreatedAt      time.Time
 }
 

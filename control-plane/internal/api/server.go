@@ -180,6 +180,9 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("backup.read", "backup.list", "backup")).Get("/backups", s.handleListBackups)
 			r.With(az.Require("backup.create", "backup.create", "backup")).Post("/backups", s.handleCreateBackup)
 			r.With(az.Require("backup.restore", "backup.restore", "backup")).Post("/backups/{backupID}/restore", s.handleRestoreBackup)
+			r.With(az.Require("backup.read", "backup.schedule.list", "backup")).Get("/backup-schedules", s.handleListBackupSchedules)
+			r.With(az.Require("backup.create", "backup.schedule.create", "backup")).Post("/backup-schedules", s.handleCreateBackupSchedule)
+			r.With(az.Require("backup.create", "backup.schedule.delete", "backup")).Delete("/backup-schedules/{scheduleID}", s.handleDeleteBackupSchedule)
 
 			// Cron jobs
 			r.With(az.Require("cron.read", "cron.list", "cron_job")).Get("/cron", s.handleListCron)

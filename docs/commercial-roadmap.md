@@ -12,7 +12,7 @@ Status legend: ✅ done · 🟡 in progress · ⬜ planned.
 1. ✅ **Domains & DNS** — domain CRUD, authoritative zones, records; `dns.apply` writes BIND zone files on the node. *(done; live DNS server reload is the next refinement)*
 2. ✅ **SSL/TLS** — `cert.issue` writes a Caddy site (automatic HTTPS via ACME). *(custom cert upload + renewal tracking next)*
 3. ✅ **Deploy from Git** — `app.deploy`: git clone → docker build → hardened run, prior image retained for rollback. *(buildpacks for static/node/php + atomic proxy swap next)*
-4. ✅ **Backups & Restore** — `backup.create`/`backup.restore` tar/untar the target. *(S3/B2 upload + checksums + scheduling next)*
+4. ✅ **Backups & Restore** — `backup.create`/`backup.restore` tar/untar the target, off-site S3 upload + **SHA-256 checksum** (callback finalizes the row), and **recurring daily/weekly schedules** with retention run by a control-plane runner. *(per-resource selective backup + restore-to-point next)*
 5. ✅ **Cron jobs** — `cron_jobs` schema + CRUD + `cron.apply` writes the node crontab.
 6. ✅ **FTP/SFTP** — `ftp_accounts` schema + CRUD + `ftp.account.create` writes a chrooted OpenSSH SFTP `Match` block.
 7. ✅ **File Manager** — site-scoped, sandboxed agent file API (`file.list`/`file.read`/`file.write`/`file.mkdir`/`file.delete`) with path-traversal & symlink-escape protection and read/write size caps; integrated browse/edit/upload/delete UI. *(multipart streaming upload + archive extract next)*

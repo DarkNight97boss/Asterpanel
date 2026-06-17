@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/audit"
+	"github.com/DarkNight97boss/asterpanel/control-plane/internal/jobs"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/middleware"
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
 )
@@ -22,7 +23,8 @@ func (s *Server) StartBackground(ctx context.Context) {
 	}
 	go s.healthSweepLoop(ctx)
 	go s.bruteForceLoop(ctx)
-	s.deps.Log.Info("background schedulers started", "health_sweep", "60s", "bruteforce_watch", "60s")
+	go s.backupScheduleLoop(ctx)
+	s.deps.Log.Info("background schedulers started", "health_sweep", "60s", "bruteforce_watch", "60s", "backup_schedules", "5m")
 }
 
 func (s *Server) healthSweepLoop(ctx context.Context) {
@@ -52,6 +54,45 @@ func (s *Server) runHealthSweep(ctx context.Context) {
 			s.deps.Log.Debug("health sweep: probe failed", "site", site.ID, "error", err)
 		}
 		cancel()
+	}
+}
+
+// backupScheduleLoop fires due recurring backups. A 5-minute tick is plenty —
+// schedules are daily/weekly, not minute-precise.
+func (s *Server) backupScheduleLoop(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runDueBackups(ctx)
+		}
+	}
+}
+
+func (s *Server) runDueBackups(ctx context.Context) {
+	due, err := s.deps.Store.DueBackupSchedules(ctx)
+	if err != nil {
+		s.deps.Log.Warn("backup schedules: query failed", "error", err)
+		return
+	}
+	for _, sch := range due {
+		node := s.firstNode(ctx, sch.OrgID)
+		if node == nil {
+			continue
+		}
+		b, err := s.deps.Store.CreateBackup(ctx, sch.OrgID, uuid.NullUUID{}, "full", "scheduled", "s3")
+		if err != nil {
+			continue
+		}
+		pr := &middleware.Principal{OrgID: sch.OrgID}
+		payload := map[string]any{"backup_id": b.ID, "type": "full", "target_path": "/var/asterpanel/sites"}
+		jobID, _, _ := s.signPersistDispatch(ctx, pr, jobs.TypeBackupCreate, node.ID, payload)
+		_ = s.deps.Store.SetBackupJob(ctx, b.ID, jobID)
+		_ = s.deps.Store.MarkBackupScheduleRun(ctx, sch.ID)
+		s.deps.Log.Info("scheduled backup dispatched", "org", sch.OrgID, "backup", b.ID, "frequency", sch.Frequency)
 	}
 }
 

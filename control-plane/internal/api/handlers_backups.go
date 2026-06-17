@@ -23,6 +23,7 @@ func backupView(b store.Backup) map[string]any {
 		"status":          b.Status,
 		"storage_backend": b.StorageBackend,
 		"size_bytes":      b.SizeBytes,
+		"checksum":        b.Checksum,
 		"created_at":      b.CreatedAt,
 	}
 }
@@ -79,6 +80,7 @@ func (s *Server) handleCreateBackup(w http.ResponseWriter, r *http.Request) {
 	}
 	payload := map[string]any{"backup_id": b.ID, "type": req.Type, "target_path": target}
 	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeBackupCreate, node.ID, payload)
+	_ = s.deps.Store.SetBackupJob(ctx, b.ID, jobID)
 
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "backup.create", "backup", b.ID.String(), audit.OutcomeSuccess, r,

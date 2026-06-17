@@ -381,6 +381,7 @@ export interface Backup {
   trigger: string;
   status: string;
   size_bytes: number | null;
+  checksum: string | null;
   storage_backend: string;
   created_at: string;
 }

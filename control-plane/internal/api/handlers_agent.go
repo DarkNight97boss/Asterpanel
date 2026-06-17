@@ -51,6 +51,16 @@ func (s *Server) handleAgentJobStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Finalize a backup linked to this job from its result (size + checksum).
+	if len(req.Result) > 0 {
+		var res struct {
+			SizeBytes int64  `json:"size_bytes"`
+			SHA256    string `json:"sha256"`
+		}
+		_ = json.Unmarshal(req.Result, &res)
+		_ = s.deps.Store.CompleteBackupForJob(ctx, jobID, req.Status, res.SizeBytes, res.SHA256)
+	}
+
 	outcome := audit.OutcomeSuccess
 	if req.Status == "failed" || req.Status == "expired" {
 		outcome = audit.OutcomeFailure
