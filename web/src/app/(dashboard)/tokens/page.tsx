@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { KeyRound } from "lucide-react";
 
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiGet } from "@/lib/api";
+import { listPasskeys, passkeysSupported, registerPasskey } from "@/lib/webauthn";
 
 interface ApiToken {
   id: string;
@@ -19,13 +22,36 @@ interface ApiToken {
 
 export default function TokensPage() {
   const [tokens, setTokens] = useState<ApiToken[]>([]);
+  const [passkeys, setPasskeys] = useState<{ id: string; name: string | null }[]>([]);
+  const [pkBusy, setPkBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     apiGet<{ api_tokens: ApiToken[] }>("/api/v1/api-tokens")
       .then((r) => setTokens(r.api_tokens))
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
+    listPasskeys()
+      .then(setPasskeys)
+      .catch(() => {});
   }, []);
+
+  async function addPasskey() {
+    const name = window.prompt("Name this passkey (e.g. MacBook Touch ID)") ?? "";
+    if (!name) return;
+    setPkBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await registerPasskey(name);
+      setPasskeys(await listPasskeys());
+      setNotice("Passkey registered.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Passkey registration failed");
+    } finally {
+      setPkBusy(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -37,6 +63,43 @@ export default function TokensPage() {
       </header>
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+      {notice && <p className="text-sm text-emerald-400">{notice}</p>}
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Passkeys ({passkeys.length})</CardTitle>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={pkBusy || !passkeysSupported()}
+            onClick={addPasskey}
+          >
+            <KeyRound className="h-4 w-4" />
+            Add passkey
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <p className="mb-3 text-sm text-muted-foreground">
+            Phishing-resistant second factor / passwordless sign-in (WebAuthn). Stored as a public
+            key — the private key never leaves your device.
+          </p>
+          {passkeys.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No passkeys registered yet.</p>
+          ) : (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {passkeys.map((pk) => (
+                <li key={pk.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <KeyRound className="h-4 w-4 text-primary" />
+                  <span className="font-medium">{pk.name || "Passkey"}</span>
+                  <span className="ml-auto font-mono text-xs text-muted-foreground">
+                    {pk.id.slice(0, 8)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

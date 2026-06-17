@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { ShieldCheck } from "lucide-react";
+import { KeyRound, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/lib/auth";
 import { ApiError } from "@/lib/api";
+import { loginWithPasskey, passkeysSupported } from "@/lib/webauthn";
 
 export default function LoginPage() {
   const { login, verifyMfa } = useAuth();
@@ -21,6 +22,19 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  async function onPasskey() {
+    setError(null);
+    setBusy(true);
+    try {
+      await loginWithPasskey(email);
+      // The finish call set the refresh cookie; a full reload re-bootstraps auth.
+      window.location.href = "/dashboard";
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Passkey sign-in failed");
+      setBusy(false);
+    }
+  }
 
   async function onPasswordSubmit(e: FormEvent) {
     e.preventDefault();
@@ -95,6 +109,18 @@ export default function LoginPage() {
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy ? "Signing in…" : "Sign in"}
               </Button>
+              {passkeysSupported() && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={busy}
+                  onClick={onPasskey}
+                >
+                  <KeyRound className="h-4 w-4" />
+                  Sign in with a passkey
+                </Button>
+              )}
             </form>
           ) : (
             <form onSubmit={onMfaSubmit} className="space-y-4">

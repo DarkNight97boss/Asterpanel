@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/agentcomm"
@@ -122,6 +123,17 @@ func runServe() {
 	}
 	log.Info("license loaded", "edition", license.Edition(), "features", license.Features())
 
+	// Passkeys (WebAuthn). A misconfigured RP just disables the passkey endpoints.
+	waInstance, waErr := webauthn.New(&webauthn.Config{
+		RPID:          cfg.WebAuthnRPID,
+		RPDisplayName: cfg.WebAuthnRPName,
+		RPOrigins:     []string{cfg.WebAuthnRPOrigin},
+	})
+	if waErr != nil {
+		log.Warn("webauthn disabled (bad RP config)", "error", waErr)
+		waInstance = nil
+	}
+
 	server := api.NewServer(api.Deps{
 		Cfg:               cfg,
 		Log:               log,
@@ -139,6 +151,7 @@ func runServe() {
 		RateLimiter:       rl,
 		Webmail:           webmailSvc,
 		Webhooks:          whpkg.NewDispatcher(st, log),
+		WebAuthn:          waInstance,
 		License:           license,
 		OpenAPIPath:       getenv("OPENAPI_PATH", "api/openapi.yaml"),
 		AgentBaseURL:      getenv("AGENT_DEV_BASE_URL", "https://node-agent:7443"),

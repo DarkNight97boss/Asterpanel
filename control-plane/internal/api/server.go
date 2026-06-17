@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/cors"
+	"github.com/go-webauthn/webauthn/webauthn"
 	"github.com/redis/go-redis/v9"
 
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/agentcomm"
@@ -44,6 +45,7 @@ type Deps struct {
 	RateLimiter       *middleware.RateLimiter
 	Webmail           *webmail.Service
 	Webhooks          *webhooks.Dispatcher
+	WebAuthn          *webauthn.WebAuthn
 	License           *licensing.Manager
 	OpenAPIPath       string
 	AgentBaseURL      string
@@ -94,6 +96,9 @@ func (s *Server) routes() http.Handler {
 			}
 			r.Post("/auth/login", s.handleLogin)
 			r.Post("/auth/mfa/verify", s.handleMFAVerify)
+			// Passkey (WebAuthn) login ceremony — public, rate-limited.
+			r.Post("/auth/webauthn/login/begin", s.handleWebAuthnLoginBegin)
+			r.Post("/auth/webauthn/login/finish", s.handleWebAuthnLoginFinish)
 			r.With(middleware.CSRF).Post("/auth/refresh", s.handleRefresh)
 			// Agent bootstrap: authenticated by the one-time enrollment token itself.
 			r.Post("/agents/enroll", s.handleAgentEnroll)
@@ -216,6 +221,11 @@ func (s *Server) routes() http.Handler {
 
 			// Edition / license (any authenticated user; drives the UI lock state)
 			r.Get("/license", s.handleLicense)
+
+			// Passkeys (WebAuthn) — self-service registration + listing.
+			r.Get("/auth/webauthn/passkeys", s.handleListPasskeys)
+			r.Post("/auth/webauthn/register/begin", s.handleWebAuthnRegisterBegin)
+			r.Post("/auth/webauthn/register/finish", s.handleWebAuthnRegisterFinish)
 
 			// Billing & usage. The plan/usage view stays in Community; the
 			// invoicing engine is a Pro (commercial) feature.
