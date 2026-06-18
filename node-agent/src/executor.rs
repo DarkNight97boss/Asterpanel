@@ -83,6 +83,7 @@ impl Executor for DockerExecutor {
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
             "redirect.apply" => self.redirect_apply(job).await,
+            "subdomain.apply" => self.subdomain_apply(job).await,
             "protection.apply" => self.protection_apply(job).await,
             "file.list" => self.file_list(job).await,
             "file.read" => self.file_read(job).await,
@@ -1272,6 +1273,29 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({"path": path, "redirects": redirects.len()}))
     }
 
+    /// Regenerates the Caddy subdomains snippet: a site block per subdomain/addon
+    /// (serving a document root) or alias (redirecting to a target URL).
+    async fn subdomain_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let subs = job
+            .payload
+            .get("subdomains")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_subdomains(subs);
+        let dir =
+            std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("subdomain.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/subdomains.caddy");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("subdomain.apply: write failed: {e}"));
+        }
+        let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
+        JobOutcome::succeeded(json!({"path": path, "subdomains": subs.len()}))
+    }
+
     /// Regenerates the Caddy directory-privacy snippet (HTTP basic-auth on a
     /// path) from the full rule set, grouped into one site block per domain.
     async fn protection_apply(&self, job: &Job) -> JobOutcome {
@@ -2387,6 +2411,42 @@ fn render_caddy_redirects(redirects: &[Value]) -> String {
         out.push_str("}\n");
     }
     out
+}
+
+/// Renders the Caddy snippet for subdomains/addon sites (serve a document root)
+/// and aliases (redirect to a target URL). One site block per fqdn; entries with
+/// an invalid hostname, document root or target are skipped.
+fn render_caddy_subdomains(subs: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel subdomains (generated — do not edit)\n");
+    for s in subs {
+        let fqdn = s.get("fqdn").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(fqdn) {
+            continue;
+        }
+        let kind = s.get("kind").and_then(Value::as_str).unwrap_or("subdomain");
+        if kind == "alias" {
+            let target = s.get("target_url").and_then(Value::as_str).unwrap_or("").trim();
+            if !valid_redirect_target(target) {
+                continue;
+            }
+            out.push_str(&format!("{fqdn} {{\n\tredir {target}{{uri}} permanent\n}}\n"));
+        } else {
+            let root = s.get("document_root").and_then(Value::as_str).unwrap_or("").trim();
+            if !valid_doc_root(root) {
+                continue;
+            }
+            out.push_str(&format!("{fqdn} {{\n\troot * {root}\n\tfile_server\n}}\n"));
+        }
+    }
+    out
+}
+
+/// An absolute document-root path: starts with `/`, no whitespace or shell/Caddy
+/// metacharacters, max 512 chars.
+fn valid_doc_root(s: &str) -> bool {
+    s.starts_with('/')
+        && s.len() <= 512
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
 }
 
 /// Renders the Caddy site-protection snippet: one site block per domain, merging
@@ -3789,6 +3849,27 @@ mod tests {
         assert!(valid_redirect_target("https://x.com/a"));
         assert!(valid_redirect_target("/local"));
         assert!(!valid_redirect_target("ftp://x"));
+    }
+
+    #[test]
+    fn caddy_subdomains_render() {
+        let subs = vec![
+            json!({"kind":"subdomain","fqdn":"blog.acme.com","document_root":"/var/www/blog","target_url":""}),
+            json!({"kind":"alias","fqdn":"www.acme.net","document_root":"","target_url":"https://acme.com"}),
+            json!({"kind":"subdomain","fqdn":"bad domain","document_root":"/var/www/x","target_url":""}), // invalid fqdn
+            json!({"kind":"subdomain","fqdn":"evil.acme.com","document_root":"/var/www; rm -rf /","target_url":""}), // unsafe root
+        ];
+        let out = render_caddy_subdomains(&subs);
+        assert!(out.contains("blog.acme.com {"), "{out}");
+        assert!(out.contains("root * /var/www/blog"), "{out}");
+        assert!(out.contains("file_server"), "{out}");
+        assert!(out.contains("www.acme.net {"), "{out}");
+        assert!(out.contains("redir https://acme.com{uri} permanent"), "{out}");
+        assert!(!out.contains("bad domain"), "{out}"); // invalid fqdn skipped
+        assert!(!out.contains("rm -rf"), "{out}"); // unsafe document root skipped
+        assert!(valid_doc_root("/var/www/site"));
+        assert!(!valid_doc_root("relative/path"));
+        assert!(!valid_doc_root("/has space"));
     }
 
     #[test]

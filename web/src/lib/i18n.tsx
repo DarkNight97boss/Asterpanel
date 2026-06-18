@@ -126,6 +126,7 @@ const it: Dict = {
   // in-page sub-tabs
   Domains: "Domini",
   "DNS Records": "Record DNS",
+  Subdomains: "Sottodomini",
   Redirects: "Redirect",
   "Directory Privacy": "Privacy directory",
   DNSSEC: "DNSSEC",

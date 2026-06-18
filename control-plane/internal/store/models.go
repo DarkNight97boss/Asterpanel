@@ -325,6 +325,17 @@ type DBUser struct {
 	CreatedAt           time.Time
 }
 
+type Subdomain struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Kind           string
+	FQDN           string
+	DocumentRoot   string
+	TargetURL      string
+	Status         string
+	CreatedAt      time.Time
+}
+
 type MailList struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

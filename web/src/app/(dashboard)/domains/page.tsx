@@ -6,6 +6,7 @@ import {
   Globe,
   HardDrive,
   ImageOff,
+  Layers,
   List,
   Lock,
   RefreshCw,
@@ -86,11 +87,21 @@ interface Webdav {
   root: string;
 }
 
+interface SubdomainRow {
+  id: string;
+  kind: string;
+  fqdn: string;
+  document_root: string;
+  target_url: string;
+  status: string;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 const TABS: PageTab[] = [
   { id: "domains", label: "Domains", icon: Globe },
   { id: "records", label: "DNS Records", icon: List },
+  { id: "subdomains", label: "Subdomains", icon: Layers },
   { id: "redirects", label: "Redirects", icon: Forward },
   { id: "privacy", label: "Directory Privacy", icon: Lock },
   { id: "dnssec", label: "DNSSEC", icon: ShieldCheck },
@@ -120,6 +131,9 @@ export default function DomainsPage() {
   const [webdav, setWebdav] = useState<Webdav[]>([]);
   const [wd, setWd] = useState({ domain: "", path: "/webdav/*", username: "", password: "", root: "" });
   const [wdBusy, setWdBusy] = useState(false);
+  const [subdomains, setSubdomains] = useState<SubdomainRow[]>([]);
+  const [sd, setSd] = useState({ kind: "subdomain", fqdn: "", document_root: "", target_url: "" });
+  const [sdBusy, setSdBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -135,7 +149,7 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd, pr, ds, hk, dd, wv] = await Promise.all([
+      const [d, r, ns, rd, pr, ds, hk, dd, wv, sb] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
@@ -149,6 +163,7 @@ export default function DomainsPage() {
         apiGet<{ hotlink: Hotlink[] }>("/api/v1/hotlink-protection").catch(() => ({ hotlink: [] })),
         apiGet<{ ddns: Ddns[] }>("/api/v1/ddns").catch(() => ({ ddns: [] })),
         apiGet<{ webdav: Webdav[] }>("/api/v1/webdav").catch(() => ({ webdav: [] })),
+        apiGet<{ subdomains: SubdomainRow[] }>("/api/v1/subdomains").catch(() => ({ subdomains: [] })),
       ]);
       setDomains(d);
       setRecords(r);
@@ -159,6 +174,7 @@ export default function DomainsPage() {
       setHotlink(hk.hotlink ?? []);
       setDdns(dd.ddns ?? []);
       setWebdav(wv.webdav ?? []);
+      setSubdomains(sb.subdomains ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
       if (!ddnsForm.domain_id && d.length) setDdnsForm((f) => ({ ...f, domain_id: d[0].id }));
     } catch (e) {
@@ -247,6 +263,38 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/redirects/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onAddSubdomain(e: FormEvent) {
+    e.preventDefault();
+    setSdBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/v1/subdomains", {
+        kind: sd.kind,
+        fqdn: sd.fqdn.trim(),
+        document_root: sd.document_root.trim(),
+        target_url: sd.target_url.trim(),
+      });
+      setNotice("Subdomain saved; Caddy config re-applied on the node.");
+      setSd({ kind: sd.kind, fqdn: "", document_root: "", target_url: "" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setSdBusy(false);
+    }
+  }
+
+  async function onDeleteSubdomain(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/subdomains/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -606,6 +654,105 @@ export default function DomainsPage() {
         </CardContent>
       </Card>
         </>
+      )}
+
+      {tab === "subdomains" && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Subdomains ({subdomains.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            <strong>Subdomain</strong> / <strong>addon</strong> serve a document root; an{" "}
+            <strong>alias</strong> redirects to another URL. Each renders a Caddy site block.
+          </p>
+          <form onSubmit={onAddSubdomain} className="grid gap-3 sm:grid-cols-6 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="sd-kind">Type</Label>
+              <select
+                id="sd-kind"
+                className={selectCls}
+                value={sd.kind}
+                onChange={(e) => setSd({ ...sd, kind: e.target.value })}
+              >
+                <option value="subdomain" className="bg-card">
+                  Subdomain
+                </option>
+                <option value="addon" className="bg-card">
+                  Addon domain
+                </option>
+                <option value="alias" className="bg-card">
+                  Alias (parked)
+                </option>
+              </select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="sd-fqdn">Hostname</Label>
+              <Input
+                id="sd-fqdn"
+                value={sd.fqdn}
+                onChange={(e) => setSd({ ...sd, fqdn: e.target.value })}
+                placeholder="blog.acme.com"
+                className="font-mono"
+                required
+              />
+            </div>
+            {sd.kind === "alias" ? (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="sd-target">Redirect to</Label>
+                <Input
+                  id="sd-target"
+                  value={sd.target_url}
+                  onChange={(e) => setSd({ ...sd, target_url: e.target.value })}
+                  placeholder="https://acme.com"
+                  required
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="sd-root">Document root</Label>
+                <Input
+                  id="sd-root"
+                  value={sd.document_root}
+                  onChange={(e) => setSd({ ...sd, document_root: e.target.value })}
+                  placeholder="/var/www/acme/blog"
+                  className="font-mono"
+                  required
+                />
+              </div>
+            )}
+            <Button type="submit" disabled={sdBusy} className="sm:col-span-6 sm:w-fit">
+              {sdBusy ? "Adding…" : "Add"}
+            </Button>
+          </form>
+
+          {subdomains.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {subdomains.map((x) => (
+                <li key={x.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[11px] capitalize text-muted-foreground">
+                    {x.kind}
+                  </span>
+                  <span className="font-mono">{x.fqdn}</span>
+                  <span className="text-muted-foreground">→</span>
+                  <span className="truncate font-mono text-xs text-muted-foreground">
+                    {x.kind === "alias" ? x.target_url : x.document_root}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteSubdomain(x.id)}
+                    aria-label="Delete subdomain"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
       )}
 
       {tab === "redirects" && (

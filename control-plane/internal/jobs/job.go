@@ -24,6 +24,7 @@ const (
 	TypeAppStop           Type = "app.stop"
 	TypeProxyApply        Type = "proxy.apply"
 	TypeRedirectApply     Type = "redirect.apply"
+	TypeSubdomainApply    Type = "subdomain.apply"
 	TypeProtectionApply   Type = "protection.apply"
 	TypeCertIssue         Type = "cert.issue"
 	TypeDNSApply          Type = "dns.apply"

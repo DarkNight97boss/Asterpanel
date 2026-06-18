@@ -180,6 +180,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("domain.create", "redirect.create", "domain")).Post("/redirects", s.handleCreateRedirect)
 			r.With(az.Require("domain.create", "redirect.delete", "domain")).Delete("/redirects/{redirectID}", s.handleDeleteRedirect)
 
+			// Subdomains / addon domains / aliases (rendered into the Caddy config)
+			r.With(az.Require("domain.read", "subdomain.list", "domain")).Get("/subdomains", s.handleListSubdomains)
+			r.With(az.Require("domain.create", "subdomain.create", "domain")).Post("/subdomains", s.handleCreateSubdomain)
+			r.With(az.Require("domain.create", "subdomain.delete", "domain")).Delete("/subdomains/{subID}", s.handleDeleteSubdomain)
+
 			// Directory privacy (Caddy HTTP basic-auth on a path)
 			r.With(az.Require("domain.read", "protection.list", "domain")).Get("/directory-privacy", s.handleListDirPrivacy)
 			r.With(az.Require("domain.create", "protection.create", "domain")).Post("/directory-privacy", s.handleCreateDirPrivacy)
