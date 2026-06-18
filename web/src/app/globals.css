@@ -1,5 +1,9 @@
 @import "tailwindcss";
 
+/* Drive the `dark:` variant from a .dark class on <html> (toggled by the theme
+   switcher) instead of the OS preference. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 /* Modern, light SaaS theme — clean canvas, soft depth, vibrant indigo accent.
    Tailwind v4 turns these into utilities: --color-card -> bg-card, etc. */
 @theme {
@@ -20,6 +24,20 @@
 
 :root {
   color-scheme: light;
+}
+
+/* Dark theme — re-defines the same custom properties so every bg-card /
+   text-foreground / border-border utility flips automatically. */
+.dark {
+  --color-background: #0f1320; /* deep navy canvas */
+  --color-foreground: #e7eaf3; /* primary text */
+  --color-card: #161c2b; /* panels — a touch lighter than the canvas */
+  --color-border: #262d40; /* hairline borders */
+  --color-muted: #1b2233; /* inputs / chips / code wells */
+  --color-muted-foreground: #99a2b5; /* secondary text */
+  --color-primary: #6366f1; /* indigo-500 — brighter on dark */
+  --color-primary-foreground: #ffffff;
+  color-scheme: dark;
 }
 
 body {

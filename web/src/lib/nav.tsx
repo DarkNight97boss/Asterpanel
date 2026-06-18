@@ -46,14 +46,14 @@ export type TileColor =
   | "indigo";
 
 export const tileColors: Record<TileColor, { chip: string; hover: string }> = {
-  sky: { chip: "bg-sky-500/10 text-sky-600", hover: "group-hover:bg-sky-500" },
-  violet: { chip: "bg-violet-500/10 text-violet-600", hover: "group-hover:bg-violet-500" },
-  rose: { chip: "bg-rose-500/10 text-rose-600", hover: "group-hover:bg-rose-500" },
-  emerald: { chip: "bg-emerald-500/10 text-emerald-600", hover: "group-hover:bg-emerald-500" },
-  amber: { chip: "bg-amber-500/10 text-amber-600", hover: "group-hover:bg-amber-500" },
-  teal: { chip: "bg-teal-500/10 text-teal-600", hover: "group-hover:bg-teal-500" },
-  red: { chip: "bg-red-500/10 text-red-600", hover: "group-hover:bg-red-500" },
-  indigo: { chip: "bg-indigo-500/10 text-indigo-600", hover: "group-hover:bg-indigo-500" },
+  sky: { chip: "bg-sky-500/10 text-sky-600 dark:text-sky-400", hover: "group-hover:bg-sky-500" },
+  violet: { chip: "bg-violet-500/10 text-violet-600 dark:text-violet-400", hover: "group-hover:bg-violet-500" },
+  rose: { chip: "bg-rose-500/10 text-rose-600 dark:text-rose-400", hover: "group-hover:bg-rose-500" },
+  emerald: { chip: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", hover: "group-hover:bg-emerald-500" },
+  amber: { chip: "bg-amber-500/10 text-amber-600 dark:text-amber-400", hover: "group-hover:bg-amber-500" },
+  teal: { chip: "bg-teal-500/10 text-teal-600 dark:text-teal-400", hover: "group-hover:bg-teal-500" },
+  red: { chip: "bg-red-500/10 text-red-600 dark:text-red-400", hover: "group-hover:bg-red-500" },
+  indigo: { chip: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400", hover: "group-hover:bg-indigo-500" },
 };
 
 export type NavItem = {
