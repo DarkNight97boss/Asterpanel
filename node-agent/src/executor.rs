@@ -908,17 +908,48 @@ impl DockerExecutor {
             .and_then(Value::as_str)
             .unwrap_or("unknown");
         let engine = job.payload.get("engine").and_then(Value::as_str).unwrap_or("postgres");
-        if engine != "postgres" {
-            return JobOutcome::failed(
-                "database.access.apply: only postgres remote access is supported here",
-            );
-        }
         let empty: Vec<Value> = Vec::new();
         let hosts = job
             .payload
             .get("hosts")
             .and_then(Value::as_array)
             .unwrap_or(&empty);
+
+        // MySQL/MariaDB: host-scoped CREATE USER + GRANT run inside the container.
+        if engine == "mysql" || engine == "mariadb" {
+            let database = job.payload.get("database").and_then(Value::as_str).unwrap_or("app");
+            let user = job.payload.get("user").and_then(Value::as_str).unwrap_or("").trim();
+            let password = job.payload.get("password").and_then(Value::as_str).unwrap_or("");
+            if user.is_empty() {
+                return JobOutcome::failed("database.access.apply: missing database user");
+            }
+            let sql = render_mysql_grants(database, user, password, hosts);
+            if sql.is_empty() {
+                return JobOutcome::succeeded(json!({"hosts": 0}));
+            }
+            let granted = sql.matches("CREATE USER").count();
+            let container = format!("astp_db_{db_id}");
+            return match run_docker(&[
+                "exec".into(),
+                container,
+                "mysql".into(),
+                "-uroot".into(),
+                "-e".into(),
+                sql,
+            ])
+            .await
+            {
+                Ok(o) if o.status.success() => JobOutcome::succeeded(json!({"hosts": granted})),
+                Ok(o) => JobOutcome::failed(format!(
+                    "grant failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                )),
+                Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+            };
+        }
+        if engine != "postgres" {
+            return JobOutcome::failed("database.access.apply: unsupported engine");
+        }
         let content = render_pg_hba(hosts);
         let dir = std::env::var("AGENT_DB_DIR").unwrap_or_else(|_| "/etc/asterpanel/db".into());
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -2654,6 +2685,40 @@ fn render_pg_hba(hosts: &[Value]) -> String {
     out
 }
 
+/// Renders MySQL host-scoped grants: `CREATE USER … @ host` + `GRANT ALL ON db`.
+/// Hosts that aren't injection-safe are skipped. The password is a control-plane
+/// generated credential (hex; no quotes).
+fn render_mysql_grants(database: &str, user: &str, password: &str, hosts: &[Value]) -> String {
+    let mut out = String::new();
+    if password.contains('\'') || password.contains('\\') {
+        return out; // never emit an unescaped credential
+    }
+    for h in hosts {
+        let host = h.as_str().unwrap_or("").trim();
+        if !valid_mysql_host(host) {
+            continue;
+        }
+        out.push_str(&format!(
+            "CREATE USER IF NOT EXISTS '{user}'@'{host}' IDENTIFIED BY '{password}';\n"
+        ));
+        out.push_str(&format!(
+            "GRANT ALL PRIVILEGES ON `{database}`.* TO '{user}'@'{host}';\n"
+        ));
+    }
+    if !out.is_empty() {
+        out.push_str("FLUSH PRIVILEGES;\n");
+    }
+    out
+}
+
+/// A MySQL host pattern: IP, CIDR/netmask, `%` wildcard or hostname. Quotes and
+/// semicolons are rejected to keep the rendered SQL injection-safe.
+fn valid_mysql_host(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 60
+        && s.chars().all(|c| c.is_ascii_alphanumeric() || ".%_-:/".contains(c))
+}
+
 /// Accepts an IPv4 address or CIDR (e.g. `203.0.113.0/24`). Structural check.
 fn valid_cidr_or_ip(s: &str) -> bool {
     let (addr, mask) = match s.split_once('/') {
@@ -3435,6 +3500,22 @@ mod tests {
         assert!(valid_cidr_or_ip("10.0.0.0/8"));
         assert!(!valid_cidr_or_ip("1.2.3"));
         assert!(!valid_cidr_or_ip("1.2.3.4/40"));
+    }
+
+    #[test]
+    fn mysql_grants_render() {
+        let hosts = vec![json!("203.0.113.5"), json!("%"), json!("bad'quote")];
+        let sql = render_mysql_grants("shopdb", "shop", "deadbeef00", &hosts);
+        assert!(
+            sql.contains("CREATE USER IF NOT EXISTS 'shop'@'203.0.113.5' IDENTIFIED BY 'deadbeef00'"),
+            "{sql}"
+        );
+        assert!(sql.contains("GRANT ALL PRIVILEGES ON `shopdb`.* TO 'shop'@'203.0.113.5'"), "{sql}");
+        assert!(sql.contains("'shop'@'%'"), "{sql}");
+        assert!(!sql.contains("bad'quote"), "{sql}"); // unsafe host skipped
+        assert!(sql.contains("FLUSH PRIVILEGES;"), "{sql}");
+        // a password with a quote is never emitted (no unescaped credential)
+        assert!(render_mysql_grants("d", "u", "p'x", &[json!("%")]).is_empty());
     }
 
     #[test]

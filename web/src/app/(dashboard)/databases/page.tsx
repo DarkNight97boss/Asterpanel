@@ -112,7 +112,7 @@ export default function DatabasesPage() {
 
   const queryableDbs = dbs.filter((d) => QUERYABLE.includes(d.engine));
   const selDb = queryableDbs.find((d) => d.id === (queryDbId || queryableDbs[0]?.id));
-  const pgDbs = dbs.filter((d) => d.engine === "postgres");
+  const pgDbs = dbs.filter((d) => ["postgres", "mysql", "mariadb"].includes(d.engine));
 
   async function loadRemoteHosts() {
     if (!remoteDbId) return;
@@ -426,11 +426,11 @@ export default function DatabasesPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-sm text-muted-foreground">
-            Allow external hosts to connect to a Postgres database (by IP or CIDR). Rules are
-            rendered into the database&apos;s <code>pg_hba.conf</code>.
+            Allow external hosts to connect to a database (by IP or CIDR). Postgres rules render
+            into <code>pg_hba.conf</code>; MySQL/MariaDB render host-scoped grants.
           </p>
           {pgDbs.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No Postgres databases.</p>
+            <p className="text-sm text-muted-foreground">No SQL databases.</p>
           ) : (
             <>
               <div className="flex items-center gap-3">

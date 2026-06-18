@@ -127,7 +127,24 @@ func (s *Server) applyDbAccess(ctx context.Context, p *middleware.Principal, db 
 	for _, h := range hosts {
 		list = append(list, h.Host)
 	}
-	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseAccess, db.ServerNodeID.UUID,
-		map[string]any{"database_id": db.ID.String(), "engine": db.Engine, "hosts": list})
+	payload := map[string]any{"database_id": db.ID.String(), "engine": db.Engine, "hosts": list}
+	// MySQL grants need the user + password; the password is unsealed from the
+	// stored credential and travels only inside the signed (mTLS) job body.
+	if db.Engine == "mysql" || db.Engine == "mariadb" {
+		user := db.Name
+		if db.DBUser != nil && *db.DBUser != "" {
+			user = *db.DBUser
+		}
+		payload["database"] = db.Name
+		payload["user"] = user
+		if db.CredentialsSecretID.Valid {
+			if ct, nonce, _, err := s.deps.Store.GetSecretByID(ctx, db.CredentialsSecretID.UUID); err == nil {
+				if pw, derr := s.deps.Envelope.Decrypt(ct, nonce, []byte("database:"+db.ID.String())); derr == nil {
+					payload["password"] = string(pw)
+				}
+			}
+		}
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseAccess, db.ServerNodeID.UUID, payload)
 	return jobID, dispatched
 }
