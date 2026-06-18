@@ -1170,7 +1170,12 @@ impl DockerExecutor {
             .get("hotlink")
             .and_then(Value::as_array)
             .unwrap_or(&empty);
-        let content = render_caddy_protection(basic_auth, hotlink);
+        let webdav = job
+            .payload
+            .get("webdav")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_protection(basic_auth, hotlink, webdav);
         let dir =
             std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -1181,7 +1186,9 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("protection.apply: write failed: {e}"));
         }
         let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
-        JobOutcome::succeeded(json!({"path": path, "rules": basic_auth.len(), "hotlink": hotlink.len()}))
+        JobOutcome::succeeded(json!({
+            "path": path, "rules": basic_auth.len(), "hotlink": hotlink.len(), "webdav": webdav.len(),
+        }))
     }
 
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
@@ -2234,10 +2241,12 @@ fn render_caddy_redirects(redirects: &[Value]) -> String {
 /// Renders the Caddy site-protection snippet: one site block per domain, merging
 /// `basic_auth` matchers (path-scoped, bcrypt-only) and hotlink protection (a
 /// referer-guarded asset matcher → 403). Invalid domains/hashes are skipped.
-fn render_caddy_protection(basic_auth: &[Value], hotlink: &[Value]) -> String {
+fn render_caddy_protection(basic_auth: &[Value], hotlink: &[Value], webdav: &[Value]) -> String {
     use std::collections::{BTreeMap, BTreeSet};
     let mut auth: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
     let mut links: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
+    // domain -> [(path, user, hash, root)]
+    let mut dav: BTreeMap<String, Vec<(String, String, String, String)>> = BTreeMap::new();
 
     for r in basic_auth {
         let domain = r.get("domain").and_then(Value::as_str).unwrap_or("").trim();
@@ -2296,7 +2305,35 @@ fn render_caddy_protection(basic_auth: &[Value], hotlink: &[Value]) -> String {
         links.insert(domain.to_string(), (referers, exts));
     }
 
-    let domains: BTreeSet<String> = auth.keys().chain(links.keys()).cloned().collect();
+    for d in webdav {
+        let domain = d.get("domain").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(domain) {
+            continue;
+        }
+        let user = d.get("username").and_then(Value::as_str).unwrap_or("").trim();
+        let hash = d.get("password_hash").and_then(Value::as_str).unwrap_or("").trim();
+        if user.is_empty() || !hash.starts_with("$2") {
+            continue;
+        }
+        let mut path = d.get("path").and_then(Value::as_str).unwrap_or("/webdav/*").trim().to_string();
+        if !path.starts_with('/') {
+            path = "/webdav/*".into();
+        }
+        let root = d.get("root").and_then(Value::as_str).unwrap_or("").trim();
+        if !root.starts_with('/') {
+            continue;
+        }
+        dav.entry(domain.to_string())
+            .or_default()
+            .push((path, user.to_string(), hash.to_string(), root.to_string()));
+    }
+
+    let domains: BTreeSet<String> = auth
+        .keys()
+        .chain(links.keys())
+        .chain(dav.keys())
+        .cloned()
+        .collect();
     let mut out = String::from("# AsterPanel site protection (generated — do not edit)\n");
     for domain in domains {
         out.push_str(&format!("{domain} {{\n"));
@@ -2326,6 +2363,13 @@ fn render_caddy_protection(basic_auth: &[Value], hotlink: &[Value]) -> String {
             ));
             out.push_str("\t}\n");
             out.push_str("\trespond @hotlink 403\n");
+        }
+        if let Some(accts) = dav.get(&domain) {
+            for (i, (path, user, hash, root)) in accts.iter().enumerate() {
+                out.push_str(&format!("\t@dav{i} path {path}\n"));
+                out.push_str(&format!("\tbasic_auth @dav{i} {{\n\t\t{user} {hash}\n\t}}\n"));
+                out.push_str(&format!("\twebdav @dav{i} {{\n\t\troot {root}\n\t}}\n"));
+            }
         }
         out.push_str("}\n");
     }
@@ -3369,7 +3413,7 @@ mod tests {
             json!({"domain":"bad dom","path":"/x","username":"u","password_hash":"$2a$14$x"}), // invalid domain
             json!({"domain":"acme.com","path":"/y","username":"u","password_hash":"plaintext"}), // not bcrypt
         ];
-        let out = render_caddy_protection(&rules, &[]);
+        let out = render_caddy_protection(&rules, &[], &[]);
         assert!(out.contains("acme.com {"), "{out}");
         assert!(out.contains("@priv0 path /admin/*"), "{out}");
         assert!(out.contains("basic_auth @priv0 {"), "{out}");
@@ -3385,7 +3429,7 @@ mod tests {
             json!({"domain":"acme.com","allowed_referers":["cdn.acme.com"],"extensions":["jpg","png"]}),
             json!({"domain":"shop.io","allowed_referers":[],"extensions":[]}), // defaults applied
         ];
-        let out = render_caddy_protection(&[], &hotlink);
+        let out = render_caddy_protection(&[], &hotlink, &[]);
         assert!(out.contains("acme.com {"), "{out}");
         assert!(out.contains("@hotlink {"), "{out}");
         assert!(out.contains("path *.jpg *.png"), "{out}");
@@ -3395,6 +3439,23 @@ mod tests {
         assert!(out.contains("respond @hotlink 403"), "{out}");
         // empty extensions fall back to the default image set
         assert!(out.contains("*.webp"), "{out}");
+    }
+
+    #[test]
+    fn caddy_protection_renders_webdav() {
+        let dav = vec![
+            json!({"domain":"acme.com","path":"/files/*","username":"dav","password_hash":"$2a$14$davhashxxxxxxxxxxxxxx","root":"/var/asterpanel/sites/acme"}),
+            json!({"domain":"acme.com","path":"bad","username":"x","password_hash":"$2a$14$y","root":""}), // bad root → skipped
+        ];
+        let out = render_caddy_protection(&[], &[], &dav);
+        assert!(out.contains("acme.com {"), "{out}");
+        assert!(out.contains("@dav0 path /files/*"), "{out}");
+        assert!(out.contains("basic_auth @dav0 {"), "{out}");
+        assert!(out.contains("dav $2a$14$davhashxxxxxxxxxxxxxx"), "{out}");
+        assert!(out.contains("webdav @dav0 {"), "{out}");
+        assert!(out.contains("root /var/asterpanel/sites/acme"), "{out}");
+        // the second account had no root → only one @dav block
+        assert!(!out.contains("@dav1"), "{out}");
     }
 
     #[test]

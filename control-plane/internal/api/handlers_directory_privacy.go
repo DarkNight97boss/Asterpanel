@@ -140,7 +140,16 @@ func (s *Server) applyProtection(ctx context.Context, p *middleware.Principal) (
 			"domain": h.Domain, "allowed_referers": h.AllowedReferers, "extensions": h.Extensions,
 		})
 	}
+	// WebDAV (Web Disk) accounts render into the same per-domain site block.
+	davs, _ := s.deps.Store.ListWebdav(ctx, p.OrgID)
+	davList := make([]map[string]any, 0, len(davs))
+	for _, d := range davs {
+		davList = append(davList, map[string]any{
+			"domain": d.Domain, "path": d.Path, "username": d.Username,
+			"password_hash": d.PasswordHash, "root": d.Root,
+		})
+	}
 	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeProtectionApply, node.ID,
-		map[string]any{"basic_auth": list, "hotlink": hlList})
+		map[string]any{"basic_auth": list, "hotlink": hlList, "webdav": davList})
 	return jobID, dispatched
 }

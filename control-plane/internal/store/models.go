@@ -333,6 +333,17 @@ type MailListForApply struct {
 	Members []string
 }
 
+type WebdavAccount struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Domain         string
+	Path           string
+	Username       string
+	PasswordHash   string
+	Root           string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

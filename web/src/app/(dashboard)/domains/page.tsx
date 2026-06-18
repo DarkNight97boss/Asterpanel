@@ -66,6 +66,14 @@ interface Ddns {
   update_url: string;
 }
 
+interface Webdav {
+  id: string;
+  domain: string;
+  path: string;
+  username: string;
+  root: string;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
@@ -86,6 +94,9 @@ export default function DomainsPage() {
   const [ddns, setDdns] = useState<Ddns[]>([]);
   const [ddnsForm, setDdnsForm] = useState({ domain_id: "", name: "" });
   const [ddnsBusy, setDdnsBusy] = useState(false);
+  const [webdav, setWebdav] = useState<Webdav[]>([]);
+  const [wd, setWd] = useState({ domain: "", path: "/webdav/*", username: "", password: "", root: "" });
+  const [wdBusy, setWdBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -100,7 +111,7 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd, pr, ds, hk, dd] = await Promise.all([
+      const [d, r, ns, rd, pr, ds, hk, dd, wv] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
@@ -113,6 +124,7 @@ export default function DomainsPage() {
         apiGet<{ dnssec: DnssecEntry[] }>("/api/v1/dns/dnssec").catch(() => ({ dnssec: [] })),
         apiGet<{ hotlink: Hotlink[] }>("/api/v1/hotlink-protection").catch(() => ({ hotlink: [] })),
         apiGet<{ ddns: Ddns[] }>("/api/v1/ddns").catch(() => ({ ddns: [] })),
+        apiGet<{ webdav: Webdav[] }>("/api/v1/webdav").catch(() => ({ webdav: [] })),
       ]);
       setDomains(d);
       setRecords(r);
@@ -122,6 +134,7 @@ export default function DomainsPage() {
       setDnssec(ds.dnssec ?? []);
       setHotlink(hk.hotlink ?? []);
       setDdns(dd.ddns ?? []);
+      setWebdav(wv.webdav ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
       if (!ddnsForm.domain_id && d.length) setDdnsForm((f) => ({ ...f, domain_id: d[0].id }));
     } catch (e) {
@@ -337,6 +350,39 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/ddns/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onAddWebdav(e: FormEvent) {
+    e.preventDefault();
+    setWdBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/v1/webdav", {
+        domain: wd.domain.trim(),
+        path: wd.path.trim() || "/webdav/*",
+        username: wd.username.trim(),
+        password: wd.password,
+        root: wd.root.trim(),
+      });
+      setNotice("Web Disk created; Caddy config re-applied on the node.");
+      setWd({ domain: "", path: "/webdav/*", username: "", password: "", root: "" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setWdBusy(false);
+    }
+  }
+
+  async function onDeleteWebdav(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/webdav/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -889,6 +935,97 @@ export default function DomainsPage() {
                   <code className="block break-all rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
                     {h.update_url}
                   </code>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Web Disk (WebDAV) ({webdav.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Serve a folder over WebDAV behind HTTP basic-auth — mount it as a network drive. The
+            password is stored only as a bcrypt hash.
+          </p>
+          <form onSubmit={onAddWebdav} className="grid gap-3 sm:grid-cols-6 sm:items-end">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="wd-domain">Domain</Label>
+              <Input
+                id="wd-domain"
+                value={wd.domain}
+                onChange={(e) => setWd({ ...wd, domain: e.target.value })}
+                placeholder="acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wd-path">Path</Label>
+              <Input
+                id="wd-path"
+                value={wd.path}
+                onChange={(e) => setWd({ ...wd, path: e.target.value })}
+                placeholder="/webdav/*"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wd-user">Username</Label>
+              <Input
+                id="wd-user"
+                value={wd.username}
+                onChange={(e) => setWd({ ...wd, username: e.target.value })}
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="wd-pass">Password</Label>
+              <Input
+                id="wd-pass"
+                type="password"
+                value={wd.password}
+                onChange={(e) => setWd({ ...wd, password: e.target.value })}
+                placeholder="min 6 chars"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={wdBusy}>
+              {wdBusy ? "Creating…" : "Create"}
+            </Button>
+            <div className="space-y-1.5 sm:col-span-6">
+              <Label htmlFor="wd-root">Served folder (absolute path on the node)</Label>
+              <Input
+                id="wd-root"
+                value={wd.root}
+                onChange={(e) => setWd({ ...wd, root: e.target.value })}
+                placeholder="/var/asterpanel/sites/acme"
+                required
+              />
+            </div>
+          </form>
+
+          {webdav.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {webdav.map((a) => (
+                <li key={a.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">
+                    {a.domain}
+                    {a.path}
+                  </span>
+                  <span className="text-xs text-muted-foreground">
+                    {a.username} · {a.root}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteWebdav(a.id)}
+                    aria-label="Delete web disk"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
                 </li>
               ))}
             </ul>

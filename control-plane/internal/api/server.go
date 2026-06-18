@@ -190,6 +190,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("dns.manage", "ddns.create", "dns_record")).Post("/ddns", s.handleCreateDdns)
 			r.With(az.Require("dns.manage", "ddns.delete", "dns_record")).Delete("/ddns/{ddnsID}", s.handleDeleteDdns)
 
+			// Web Disk (WebDAV accounts rendered into the Caddy site block)
+			r.With(az.Require("domain.read", "webdav.list", "domain")).Get("/webdav", s.handleListWebdav)
+			r.With(az.Require("domain.create", "webdav.create", "domain")).Post("/webdav", s.handleCreateWebdav)
+			r.With(az.Require("domain.create", "webdav.delete", "domain")).Delete("/webdav/{webdavID}", s.handleDeleteWebdav)
+
 			// Hotlink protection (Caddy referer block on asset paths)
 			r.With(az.Require("domain.read", "hotlink.list", "domain")).Get("/hotlink-protection", s.handleListHotlink)
 			r.With(az.Require("domain.create", "hotlink.create", "domain")).Post("/hotlink-protection", s.handleCreateHotlink)
