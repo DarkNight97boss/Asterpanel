@@ -8,15 +8,22 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { Trash2 } from "lucide-react";
+import { Database, Network, Terminal, Trash2 } from "lucide-react";
 
 import { apiDelete, apiGet, apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { PageTabs, type PageTab } from "@/components/page-tabs";
 
 const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
 const QUERYABLE = ["postgres", "mysql", "mariadb"];
 const selectCls =
   "flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+
+const TABS: PageTab[] = [
+  { id: "instances", label: "Instances", icon: Database },
+  { id: "query", label: "SQL Query", icon: Terminal },
+  { id: "remote", label: "Remote Access", icon: Network },
+];
 
 interface QueryResult {
   columns: string[];
@@ -54,6 +61,7 @@ export default function DatabasesPage() {
   const [remoteBusy, setRemoteBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [exporting, setExporting] = useState<Record<string, boolean>>({});
+  const [tab, setTab] = useState("instances");
 
   async function onExport(dbId: string) {
     setExporting((s) => ({ ...s, [dbId]: true }));
@@ -226,6 +234,10 @@ export default function DatabasesPage() {
         </Card>
       )}
 
+      <PageTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {tab === "instances" && (
+        <>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">New database</CardTitle>
@@ -307,7 +319,10 @@ export default function DatabasesPage() {
           </table>
         </CardContent>
       </Card>
+        </>
+      )}
 
+      {tab === "query" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">SQL query</CardTitle>
@@ -419,7 +434,9 @@ export default function DatabasesPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "remote" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Remote access</CardTitle>
@@ -487,6 +504,7 @@ export default function DatabasesPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }

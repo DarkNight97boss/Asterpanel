@@ -141,6 +141,8 @@ const it: Dict = {
   Filters: "Filtri",
   "Mailing Lists": "Liste email",
   Calendars: "Calendari",
+  Deliverability: "Recapito",
+  Spam: "Spam",
 };
 
 const DICTS: Record<Locale, Dict> = { en: {}, it };

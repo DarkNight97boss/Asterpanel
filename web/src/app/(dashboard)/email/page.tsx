@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Calendar, Filter, Forward, Mail, Reply, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { PageTabs, type PageTab } from "@/components/page-tabs";
 
 interface Mailbox {
   id: string;
@@ -82,11 +83,23 @@ interface CaldavAccount {
   username: string;
 }
 
+const TABS: PageTab[] = [
+  { id: "mailboxes", label: "Mailboxes", icon: Mail },
+  { id: "deliverability", label: "Deliverability", icon: ShieldCheck },
+  { id: "forwarders", label: "Forwarders", icon: Forward },
+  { id: "autoresponders", label: "Autoresponders", icon: Reply },
+  { id: "filters", label: "Filters", icon: Filter },
+  { id: "spam", label: "Spam", icon: ShieldAlert },
+  { id: "lists", label: "Mailing Lists", icon: Users },
+  { id: "caldav", label: "Calendars", icon: Calendar },
+];
+
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [address, setAddress] = useState("");
   const [quota, setQuota] = useState("1024");
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState("mailboxes");
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
   const [dkimDomain, setDkimDomain] = useState("");
@@ -485,6 +498,9 @@ export default function EmailPage() {
         </Card>
       )}
 
+      <PageTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {tab === "deliverability" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Deliverability — DKIM / SPF / DMARC</CardTitle>
@@ -531,7 +547,10 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "mailboxes" && (
+        <>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">New mailbox</CardTitle>
@@ -590,7 +609,10 @@ export default function EmailPage() {
           </table>
         </CardContent>
       </Card>
+        </>
+      )}
 
+      {tab === "forwarders" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Forwarders &amp; aliases ({forwarders.length})</CardTitle>
@@ -658,7 +680,9 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "autoresponders" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Autoresponders ({autoresponders.length})</CardTitle>
@@ -765,7 +789,9 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "filters" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Filters ({filters.length})</CardTitle>
@@ -901,7 +927,9 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "spam" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Spam filter (Rspamd)</CardTitle>
@@ -1005,7 +1033,9 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "lists" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Mailing lists ({lists.length})</CardTitle>
@@ -1092,7 +1122,9 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "caldav" && (
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Calendars &amp; Contacts ({caldav.length})</CardTitle>
@@ -1155,6 +1187,7 @@ export default function EmailPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
