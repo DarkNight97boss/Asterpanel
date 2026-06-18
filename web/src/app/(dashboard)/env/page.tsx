@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { listEnv, listSecrets, type EnvVar, type SecretMeta } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 export default function EnvPage() {
   const [vars, setVars] = useState<EnvVar[]>([]);
@@ -21,13 +22,7 @@ export default function EnvPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Env &amp; Secrets</h1>
-        <p className="text-sm text-muted-foreground">
-          Plain environment variables and encrypted secrets (AES-256-GCM at rest — values never
-          leave the server).
-        </p>
-      </header>
+      <PageHeader title={"Env & Secrets"} description={"Plain environment variables and encrypted secrets (AES-256-GCM at rest — values never leave the server)."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiGet } from "@/lib/api";
 import { listPasskeys, passkeysSupported, registerPasskey } from "@/lib/webauthn";
+import { PageHeader } from "@/components/page-header";
 
 interface ApiToken {
   id: string;
@@ -55,12 +56,7 @@ export default function TokensPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">API Tokens</h1>
-        <p className="text-sm text-muted-foreground">
-          Scoped machine credentials (`astp_…`). A token can only carry scopes its creator holds.
-        </p>
-      </header>
+      <PageHeader title={"API Tokens"} description={"Scoped machine credentials (`astp_…`). A token can only carry scopes its creator holds."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}

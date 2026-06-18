@@ -151,3 +151,20 @@ export const groups: NavGroup[] = [
     ],
   },
 ];
+
+/** Resolve the nav entry (and its accent colour) for a pathname, matching the
+ *  longest href prefix so nested routes like /email/filters still resolve to
+ *  their top-level section. Returns null for unknown paths. */
+export function navItemFor(pathname: string): { item: NavItem; color: TileColor } | null {
+  let best: { item: NavItem; color: TileColor } | null = null;
+  for (const group of groups) {
+    for (const item of group.items) {
+      if (pathname === item.href || pathname.startsWith(`${item.href}/`)) {
+        if (!best || item.href.length > best.item.href.length) {
+          best = { item, color: group.color };
+        }
+      }
+    }
+  }
+  return best;
+}

@@ -5,6 +5,7 @@ import { Activity, Cpu, Database, Gauge, Wifi } from "lucide-react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiGet } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Metrics {
   cpu_pct: number;
@@ -50,12 +51,7 @@ export default function MetricsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Metrics</h1>
-        <p className="text-sm text-muted-foreground">
-          Fleet resource usage. Backed by Prometheus / OpenTelemetry in production.
-        </p>
-      </header>
+      <PageHeader title={"Metrics"} description={"Fleet resource usage. Backed by Prometheus / OpenTelemetry in production."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {!m ? (

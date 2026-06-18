@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
 import { Feature, ProGate } from "@/lib/license";
+import { PageHeader } from "@/components/page-header";
 
 interface PlanDomain {
   fqdn: string;
@@ -143,13 +144,7 @@ export default function MigrationsPage() {
   return (
     <ProGate feature={Feature.Migration}>
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Migrations</h1>
-        <p className="text-sm text-muted-foreground">
-          Import accounts from cPanel/Plesk. Paste a normalized account manifest, review the plan,
-          then run the import.
-        </p>
-      </header>
+      <PageHeader title={"Migrations"} description={"Import accounts from cPanel/Plesk. Paste a normalized account manifest, review the plan, then run the import."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Health {
   website_id: string;
@@ -111,12 +112,14 @@ export default function HealthPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Health</h1>
-          <p className="text-sm text-muted-foreground">
-            Per-site liveness probes. {down > 0 ? `${down} site(s) down.` : "All monitored sites are up."}
-          </p>
-        </div>
+        <PageHeader
+          title="Health"
+          description={
+            <>
+              Per-site liveness probes. {down > 0 ? `${down} site(s) down.` : "All monitored sites are up."}
+            </>
+          }
+        />
         <Button variant="outline" size="sm" disabled={sites.length === 0} onClick={checkAll}>
           <RefreshCw className="h-4 w-4" />
           Check all

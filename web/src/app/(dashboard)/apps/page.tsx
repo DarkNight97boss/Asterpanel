@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface CatalogApp {
   slug: string;
@@ -59,12 +60,7 @@ export default function AppsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">One-Click Apps</h1>
-        <p className="text-sm text-muted-foreground">
-          Install signed app recipes onto a site in one click — WordPress, Ghost, Nextcloud…
-        </p>
-      </header>
+      <PageHeader title={"One-Click Apps"} description={"Install signed app recipes onto a site in one click — WordPress, Ghost, Nextcloud…"} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

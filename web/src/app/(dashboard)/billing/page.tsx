@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
 import { Feature, ProGate, useLicense } from "@/lib/license";
+import { PageHeader } from "@/components/page-header";
 
 interface Billing {
   plan: string;
@@ -109,12 +110,14 @@ export default function BillingPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Billing</h1>
-          <p className="text-sm text-muted-foreground">
-            Plan <span className="font-medium capitalize text-foreground">{billing?.plan ?? "—"}</span>, usage and invoices.
-          </p>
-        </div>
+        <PageHeader
+          title="Billing"
+          description={
+            <>
+              Plan <span className="font-medium capitalize text-foreground">{billing?.plan ?? "—"}</span>, usage and invoices.
+            </>
+          }
+        />
         {hasFeature(Feature.Billing) && (
           <Button size="sm" disabled={busy} onClick={generate}>
             <Receipt className="h-4 w-4" />

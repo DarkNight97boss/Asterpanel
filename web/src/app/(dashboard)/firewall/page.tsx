@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Rule {
   id: string;
@@ -56,12 +57,7 @@ export default function FirewallPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Firewall</h1>
-        <p className="text-sm text-muted-foreground">
-          Per-tenant network rules. Default-deny inbound; only the control plane reaches the agent.
-        </p>
-      </header>
+      <PageHeader title={"Firewall"} description={"Per-tenant network rules. Default-deny inbound; only the control plane reaches the agent."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

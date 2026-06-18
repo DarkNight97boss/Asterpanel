@@ -6,6 +6,7 @@ import { RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { apiGet, listWebsites, type Website } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 const TAIL_OPTIONS = [100, 200, 500, 1000];
 
@@ -65,12 +66,7 @@ export default function LogsPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">Logs</h1>
-          <p className="text-sm text-muted-foreground">
-            Live container logs for a site, tailed from the node.
-          </p>
-        </div>
+        <PageHeader title="Logs" description="Live container logs for a site, tailed from the node." />
         <div className="flex items-center gap-2">
           <select
             value={siteId}

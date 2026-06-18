@@ -19,6 +19,7 @@ import {
   type WebmailHeader,
   type WebmailMessage,
 } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 function msg(e: unknown) {
   return e instanceof Error ? e.message : "error";
@@ -113,10 +114,7 @@ export default function WebmailPage() {
   if (mailboxes.length === 0) {
     return (
       <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold">Webmail</h1>
-          <p className="text-sm text-muted-foreground">Native IMAP/SMTP client built into the panel.</p>
-        </header>
+        <PageHeader title={"Webmail"} description={"Native IMAP/SMTP client built into the panel."} />
         {error && <p className="text-sm text-red-600">{error}</p>}
         <Card className="p-10 text-center text-sm text-muted-foreground">
           No mailbox yet — create one in <span className="text-foreground">Mailboxes</span> first.
@@ -129,7 +127,7 @@ export default function WebmailPage() {
     <div className="flex h-[calc(100vh-7rem)] flex-col gap-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-semibold">Webmail</h1>
+          <PageHeader title="Webmail" />
           <select
             value={mailboxId}
             onChange={(e) => setMailboxId(e.target.value)}

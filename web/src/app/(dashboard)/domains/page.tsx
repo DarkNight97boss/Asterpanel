@@ -20,6 +20,7 @@ import {
   type DnsRecord,
   type Domain,
 } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Nameserver {
   hostname: string;
@@ -394,13 +395,15 @@ export default function DomainsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Domains &amp; DNS</h1>
-        <p className="text-sm text-muted-foreground">
-          Adding a domain creates an authoritative zone; every record change dispatches a signed
-          <code className="mx-1 rounded bg-muted px-1 text-xs">dns.apply</code> job to the node.
-        </p>
-      </header>
+      <PageHeader
+        title="Domains & DNS"
+        description={
+          <>
+            Adding a domain creates an authoritative zone; every record change dispatches a signed
+            <code className="mx-1 rounded bg-muted px-1 text-xs">dns.apply</code> job to the node.
+          </>
+        }
+      />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}

@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import { createWebsite, listNodes, listWebsites, type ServerNode, type Website } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 const RUNTIMES = ["static", "node", "php", "docker", "proxy"];
 
@@ -62,12 +63,7 @@ export default function SitesPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Websites</h1>
-        <p className="text-sm text-muted-foreground">
-          Creating a site signs an Ed25519 job and dispatches it to the target node over mTLS.
-        </p>
-      </header>
+      <PageHeader title={"Websites"} description={"Creating a site signs an Ed25519 job and dispatches it to the target node over mTLS."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}

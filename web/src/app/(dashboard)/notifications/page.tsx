@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Notification {
   id: string;
@@ -35,10 +36,7 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Notifications</h1>
-        <p className="text-sm text-muted-foreground">Deploys, backups, security alerts and renewals.</p>
-      </header>
+      <PageHeader title={"Notifications"} description={"Deploys, backups, security alerts and renewals."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

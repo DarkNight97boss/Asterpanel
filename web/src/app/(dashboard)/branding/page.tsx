@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { apiPut } from "@/lib/api";
 import { useBranding, type Branding } from "@/lib/branding";
 import { Feature, ProGate } from "@/lib/license";
+import { PageHeader } from "@/components/page-header";
 
 export default function BrandingPage() {
   const { branding, setBranding } = useBranding();
@@ -45,13 +46,7 @@ export default function BrandingPage() {
   return (
     <ProGate feature={Feature.WhiteLabel}>
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Branding</h1>
-        <p className="text-sm text-muted-foreground">
-          White-label the panel for your organization. Sub-accounts inherit your brand unless they
-          set their own.
-        </p>
-      </header>
+      <PageHeader title={"Branding"} description={"White-label the panel for your organization. Sub-accounts inherit your brand unless they set their own."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
       {saved && <p className="text-sm text-emerald-600">Branding saved and applied.</p>}

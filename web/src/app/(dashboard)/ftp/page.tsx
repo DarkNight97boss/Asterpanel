@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import { createFtpAccount, listFtpAccounts, type FtpAccount } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 const PROTOCOLS = ["SFTP", "FTPS"];
 
@@ -49,12 +50,7 @@ export default function FtpPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">FTP / SFTP</h1>
-        <p className="text-sm text-muted-foreground">
-          Chrooted SFTP/FTPS accounts scoped to a site directory. Keys or passwords, never shared.
-        </p>
-      </header>
+      <PageHeader title={"FTP / SFTP"} description={"Chrooted SFTP/FTPS accounts scoped to a site directory. Keys or passwords, never shared."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

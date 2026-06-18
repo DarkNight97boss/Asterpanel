@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface AuditEvent {
   id: string;
@@ -34,12 +35,7 @@ export default function AuditPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Audit Log</h1>
-        <p className="text-sm text-muted-foreground">
-          Append-only, hash-chained record of every privileged action (tamper-evident).
-        </p>
-      </header>
+      <PageHeader title={"Audit Log"} description={"Append-only, hash-chained record of every privileged action (tamper-evident)."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

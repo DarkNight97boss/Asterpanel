@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Rule {
   id: string;
@@ -75,14 +76,16 @@ export default function WafPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">WAF</h1>
-        <p className="text-sm text-muted-foreground">
-          Application-layer rules. Matching requests get a 403 at the edge proxy; every change
-          dispatches a signed <code className="mx-1 rounded bg-muted px-1 text-xs">waf.apply</code>{" "}
-          job that regenerates the Caddy ruleset.
-        </p>
-      </header>
+      <PageHeader
+        title="WAF"
+        description={
+          <>
+            Application-layer rules. Matching requests get a 403 at the edge proxy; every change
+            dispatches a signed <code className="mx-1 rounded bg-muted px-1 text-xs">waf.apply</code>{" "}
+            job that regenerates the Caddy ruleset.
+          </>
+        }
+      />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 

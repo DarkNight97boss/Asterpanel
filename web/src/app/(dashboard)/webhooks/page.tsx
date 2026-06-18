@@ -10,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { Feature, ProGate } from "@/lib/license";
+import { PageHeader } from "@/components/page-header";
 
 interface Webhook {
   id: string;
@@ -100,14 +101,16 @@ export default function WebhooksPage() {
   return (
     <ProGate feature={Feature.WhiteLabel}>
       <div className="space-y-6">
-        <header>
-          <h1 className="text-2xl font-semibold">Webhooks</h1>
-          <p className="text-sm text-muted-foreground">
-            Outbound HTTPS callbacks for your platform events. Each delivery is signed
-            <code className="mx-1 rounded bg-muted px-1 text-xs">HMAC-SHA256</code>
-            in <code className="rounded bg-muted px-1 text-xs">X-AsterPanel-Signature</code>.
-          </p>
-        </header>
+        <PageHeader
+          title="Webhooks"
+          description={
+            <>
+              Outbound HTTPS callbacks for your platform events. Each delivery is signed
+              <code className="mx-1 rounded bg-muted px-1 text-xs">HMAC-SHA256</code>
+              in <code className="rounded bg-muted px-1 text-xs">X-AsterPanel-Signature</code>.
+            </>
+          }
+        />
 
         {error && <p className="text-sm text-red-600">{error}</p>}
 

@@ -18,6 +18,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { apiDelete, apiGet, apiPost, apiPut, listWebsites, type Website } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Entry {
   name: string;
@@ -226,12 +227,7 @@ export default function FilesPage() {
   return (
     <div className="space-y-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">File Manager</h1>
-          <p className="text-sm text-muted-foreground">
-            Browse and manage files inside a site&apos;s document root.
-          </p>
-        </div>
+        <PageHeader title="File Manager" description="Browse and manage files inside a site's document root." />
         <div className="flex items-center gap-2">
           <select
             value={siteId}
