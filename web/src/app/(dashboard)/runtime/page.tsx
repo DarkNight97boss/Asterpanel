@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Runtime {
   site_id: string;
@@ -119,12 +120,10 @@ export default function RuntimePage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Runtime</h1>
-        <p className="text-sm text-muted-foreground">
-          Per-site runtime and language version (PHP, Node…). Changing it redeploys the container.
-        </p>
-      </header>
+      <PageHeader
+        title="Runtime"
+        description="Per-site runtime and language version (PHP, Node…). Changing it redeploys the container."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

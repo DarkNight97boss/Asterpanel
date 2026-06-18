@@ -9,6 +9,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
 const QUERYABLE = ["postgres", "mysql", "mariadb"];
@@ -124,12 +125,10 @@ export default function DatabasesPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Databases</h1>
-        <p className="text-sm text-muted-foreground">
-          Provision managed database instances on your nodes (Postgres, MySQL, Redis…).
-        </p>
-      </header>
+      <PageHeader
+        title="Databases"
+        description="Provision managed database instances on your nodes (Postgres, MySQL, Redis…)."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

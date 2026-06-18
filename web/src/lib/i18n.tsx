@@ -68,6 +68,26 @@ const it: Dict = {
   "Login failed": "Accesso non riuscito",
   "Invalid code": "Codice non valido",
   "Passkey sign-in failed": "Accesso con passkey non riuscito",
+  // page titles + descriptions
+  "Server nodes": "Nodi server",
+  "Web analytics": "Analitiche web",
+  "Fleet status at a glance.": "Stato della flotta a colpo d'occhio.",
+  "Register hosting nodes and issue one-time agent enrollment tokens.":
+    "Registra nodi di hosting ed emetti token di enrollment monouso per l'agent.",
+  "Manual and scheduled backups to object storage (S3/B2), encrypted, with one-click restore.":
+    "Backup manuali e schedulati su object storage (S3/B2), cifrati, con ripristino in un clic.",
+  "Automatic certificates via Let's Encrypt (ACME). Auto-renewed before expiry.":
+    "Certificati automatici via Let's Encrypt (ACME). Rinnovati prima della scadenza.",
+  "Scheduled commands run in the site's container with resource limits.":
+    "Comandi schedulati eseguiti nel container del sito con limiti di risorse.",
+  "Provision managed database instances on your nodes (Postgres, MySQL, Redis…).":
+    "Provisiona istanze di database gestite sui tuoi nodi (Postgres, MySQL, Redis…).",
+  "Per-site runtime and language version (PHP, Node…). Changing it redeploys the container.":
+    "Versione runtime e linguaggio per sito (PHP, Node…). Cambiarla ridistribuisce il container.",
+  "Per-site traffic from the access log: requests, unique visitors, bandwidth and top pages.":
+    "Traffico per sito dal log accessi: richieste, visitatori unici, banda e pagine più viste.",
+  "IMAP/SMTP mailboxes with quotas, SPF/DKIM signing and spam filtering.":
+    "Caselle IMAP/SMTP con quote, firma SPF/DKIM e filtro antispam.",
 };
 
 const DICTS: Record<Locale, Dict> = { en: {}, it };

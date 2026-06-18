@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiGet, apiPost } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface CronJob {
   id: string;
@@ -54,12 +55,10 @@ export default function CronPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Cron Jobs</h1>
-        <p className="text-sm text-muted-foreground">
-          Scheduled commands run in the site&apos;s container with resource limits.
-        </p>
-      </header>
+      <PageHeader
+        title="Cron Jobs"
+        description="Scheduled commands run in the site's container with resource limits."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

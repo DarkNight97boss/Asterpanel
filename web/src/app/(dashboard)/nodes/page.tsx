@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
 import { createEnrollment, createNode, listNodes, type ServerNode } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 export default function NodesPage() {
   const [nodes, setNodes] = useState<ServerNode[]>([]);
@@ -59,12 +60,10 @@ export default function NodesPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Server nodes</h1>
-        <p className="text-sm text-muted-foreground">
-          Register hosting nodes and issue one-time agent enrollment tokens.
-        </p>
-      </header>
+      <PageHeader
+        title="Server nodes"
+        description="Register hosting nodes and issue one-time agent enrollment tokens."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

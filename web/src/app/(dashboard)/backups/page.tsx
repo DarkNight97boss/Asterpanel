@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiDelete, apiGet, apiPost, createBackup, listBackups, type Backup } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 const TYPES = ["full", "files", "database"];
 
@@ -95,12 +96,10 @@ export default function BackupsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Backups</h1>
-        <p className="text-sm text-muted-foreground">
-          Manual and scheduled backups to object storage (S3/B2), encrypted, with one-click restore.
-        </p>
-      </header>
+      <PageHeader
+        title="Backups"
+        description="Manual and scheduled backups to object storage (S3/B2), encrypted, with one-click restore."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
 

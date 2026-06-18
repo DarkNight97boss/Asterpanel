@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { apiGet, listWebsites, type Website } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Analytics {
   requests: number;
@@ -66,12 +67,10 @@ export default function AnalyticsPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Web analytics</h1>
-        <p className="text-sm text-muted-foreground">
-          Per-site traffic from the access log: requests, unique visitors, bandwidth and top pages.
-        </p>
-      </header>
+      <PageHeader
+        title="Web analytics"
+        description="Per-site traffic from the access log: requests, unique visitors, bandwidth and top pages."
+      />
 
       <div className="flex items-center gap-3">
         <label htmlFor="site" className="text-sm text-muted-foreground">

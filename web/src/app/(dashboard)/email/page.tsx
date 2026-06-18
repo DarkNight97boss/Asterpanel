@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
+import { PageHeader } from "@/components/page-header";
 
 interface Mailbox {
   id: string;
@@ -332,12 +333,10 @@ export default function EmailPage() {
 
   return (
     <div className="space-y-6">
-      <header>
-        <h1 className="text-2xl font-semibold">Mailboxes</h1>
-        <p className="text-sm text-muted-foreground">
-          IMAP/SMTP mailboxes with quotas, SPF/DKIM signing and spam filtering.
-        </p>
-      </header>
+      <PageHeader
+        title="Mailboxes"
+        description="IMAP/SMTP mailboxes with quotas, SPF/DKIM signing and spam filtering."
+      />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
       {password && (
