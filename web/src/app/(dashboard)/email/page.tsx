@@ -65,6 +65,18 @@ interface SpamRule {
   value: string;
 }
 
+interface ListMember {
+  id: string;
+  email: string;
+}
+
+interface MailList {
+  id: string;
+  address: string;
+  members: ListMember[];
+  member_count: number;
+}
+
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [address, setAddress] = useState("");
@@ -282,6 +294,65 @@ export default function EmailPage() {
     }
   }
 
+  const [lists, setLists] = useState<MailList[]>([]);
+  const [listAddress, setListAddress] = useState("");
+  const [listBusy, setListBusy] = useState(false);
+  const [memberInputs, setMemberInputs] = useState<Record<string, string>>({});
+
+  async function refreshLists() {
+    try {
+      const { lists } = await apiGet<{ lists: MailList[] }>("/api/v1/email/lists");
+      setLists(lists);
+    } catch {
+      /* keep the section empty if the backend is unreachable */
+    }
+  }
+
+  async function onCreateList(e: FormEvent) {
+    e.preventDefault();
+    setListBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/v1/email/lists", { address: listAddress.trim() });
+      setListAddress("");
+      await refreshLists();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create list");
+    } finally {
+      setListBusy(false);
+    }
+  }
+
+  async function onDeleteList(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/lists/${id}`);
+      await refreshLists();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete list");
+    }
+  }
+
+  async function onAddMember(listId: string) {
+    const email = (memberInputs[listId] || "").trim();
+    if (!email) return;
+    try {
+      await apiPost(`/api/v1/email/lists/${listId}/members`, { email });
+      setMemberInputs({ ...memberInputs, [listId]: "" });
+      await refreshLists();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add member");
+    }
+  }
+
+  async function onDeleteMember(memberId: string) {
+    try {
+      await apiDelete(`/api/v1/email/lists/members/${memberId}`);
+      await refreshLists();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove member");
+    }
+  }
+
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
     setDkimBusy(true);
@@ -310,6 +381,7 @@ export default function EmailPage() {
     refreshAutoresponders();
     refreshFilters();
     refreshSpam();
+    refreshLists();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -870,6 +942,93 @@ export default function EmailPage() {
                 </li>
               ))}
             </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Mailing lists ({lists.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            A list address fans out to its members — mail sent to it is delivered to everyone
+            subscribed.
+          </p>
+          <form onSubmit={onCreateList} className="flex flex-wrap items-end gap-3">
+            <div className="grow space-y-1.5">
+              <Label htmlFor="list-address">List address</Label>
+              <Input
+                id="list-address"
+                value={listAddress}
+                onChange={(e) => setListAddress(e.target.value)}
+                placeholder="team@acme.com"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={listBusy}>
+              {listBusy ? "Creating…" : "Create list"}
+            </Button>
+          </form>
+
+          {lists.length > 0 && (
+            <div className="space-y-3">
+              {lists.map((l) => (
+                <div key={l.id} className="rounded-md border border-border/60 p-3">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-sm">{l.address}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {l.member_count} member{l.member_count === 1 ? "" : "s"}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-auto h-7 w-7"
+                      onClick={() => onDeleteList(l.id)}
+                      aria-label="Delete list"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  {l.members.length > 0 && (
+                    <ul className="mt-2 flex flex-wrap gap-1.5">
+                      {l.members.map((m) => (
+                        <li
+                          key={m.id}
+                          className="flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-xs"
+                        >
+                          <span className="font-mono">{m.email}</span>
+                          <button
+                            type="button"
+                            onClick={() => onDeleteMember(m.id)}
+                            aria-label="Remove member"
+                            className="text-muted-foreground hover:text-red-400"
+                          >
+                            ×
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  <div className="mt-2 flex items-end gap-2">
+                    <Input
+                      value={memberInputs[l.id] ?? ""}
+                      onChange={(e) => setMemberInputs({ ...memberInputs, [l.id]: e.target.value })}
+                      placeholder="member@acme.com"
+                      className="h-8"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onAddMember(l.id)}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
           )}
         </CardContent>
       </Card>

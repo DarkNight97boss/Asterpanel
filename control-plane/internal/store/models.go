@@ -314,6 +314,25 @@ type DBRemoteHost struct {
 	CreatedAt      time.Time
 }
 
+type MailList struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Address        string
+	CreatedAt      time.Time
+}
+
+type MailListMember struct {
+	ID        uuid.UUID
+	ListID    uuid.UUID
+	Email     string
+	CreatedAt time.Time
+}
+
+type MailListForApply struct {
+	Address string
+	Members []string
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

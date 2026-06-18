@@ -141,6 +141,16 @@ func (s *Server) applyForwarders(ctx context.Context, p *middleware.Principal) (
 	for _, f := range fwds {
 		list = append(list, map[string]any{"source": f.Source, "destinations": f.Destinations})
 	}
+	// Mailing lists render into the same virtual-alias map: the list address
+	// fans out to its members.
+	if lists, err := s.deps.Store.ListsForApply(ctx, p.OrgID); err == nil {
+		for _, l := range lists {
+			if len(l.Members) == 0 {
+				continue
+			}
+			list = append(list, map[string]any{"source": l.Address, "destinations": l.Members})
+		}
+	}
 	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeMailAliasApply, node.ID, map[string]any{"forwarders": list})
 	return jobID, dispatched
 }

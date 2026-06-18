@@ -229,6 +229,13 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/filters", s.handleCreateFilter)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/filters/{filterID}", s.handleDeleteFilter)
 
+			// Mailing lists (fan-out aliases with member management)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/lists", s.handleListMailLists)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/lists", s.handleCreateMailList)
+			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/lists/{listID}", s.handleDeleteMailList)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/lists/{listID}/members", s.handleAddListMember)
+			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/lists/members/{memberID}", s.handleDeleteListMember)
+
 			// Spam management (Rspamd thresholds + allow/deny lists)
 			r.With(az.Require("email.read", "email.spam", "mailbox")).Get("/email/spam", s.handleGetSpam)
 			r.With(az.Require("email.manage", "email.spam", "mailbox")).Put("/email/spam/settings", s.handleUpdateSpamSettings)
