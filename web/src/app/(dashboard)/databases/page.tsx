@@ -8,22 +8,63 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { Database, Network, Terminal, Trash2 } from "lucide-react";
+import { Database, Network, Terminal, Trash2, Users } from "lucide-react";
 
-import { apiDelete, apiGet, apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
+import { apiDelete, apiGet, apiPost, apiPut, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 import { PageTabs, type PageTab } from "@/components/page-tabs";
+import { cn } from "@/lib/utils";
 
 const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
 const QUERYABLE = ["postgres", "mysql", "mariadb"];
+const PRIVILEGES = ["ALL", "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX", "EXECUTE", "REFERENCES"];
 const selectCls =
   "flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
 const TABS: PageTab[] = [
   { id: "instances", label: "Instances", icon: Database },
+  { id: "users", label: "DB Users", icon: Users },
   { id: "query", label: "SQL Query", icon: Terminal },
   { id: "remote", label: "Remote Access", icon: Network },
 ];
+
+interface DBUserRow {
+  id: string;
+  username: string;
+  host: string;
+  privileges: string[];
+  created_at: string;
+}
+
+// Toggle-chip privilege selector. "ALL" is exclusive; picking another clears it.
+function PrivChips({ value, onChange }: { value: string[]; onChange: (v: string[]) => void }) {
+  function toggle(p: string) {
+    if (p === "ALL") return onChange(["ALL"]);
+    const base = value.filter((x) => x !== "ALL");
+    const next = base.includes(p) ? base.filter((x) => x !== p) : [...base, p];
+    onChange(next.length ? next : ["ALL"]);
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {PRIVILEGES.map((p) => {
+        const on = value.includes(p);
+        return (
+          <button
+            key={p}
+            type="button"
+            onClick={() => toggle(p)}
+            className={cn(
+              "rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+              on ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {p}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 interface QueryResult {
   columns: string[];
@@ -62,6 +103,17 @@ export default function DatabasesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [exporting, setExporting] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState("instances");
+  const [userDbId, setUserDbId] = useState("");
+  const [dbUsers, setDbUsers] = useState<DBUserRow[]>([]);
+  const [uForm, setUForm] = useState<{ username: string; host: string; privileges: string[] }>({
+    username: "",
+    host: "%",
+    privileges: ["ALL"],
+  });
+  const [uBusy, setUBusy] = useState(false);
+  const [newUserPw, setNewUserPw] = useState<string | null>(null);
+  const [editUser, setEditUser] = useState<string | null>(null);
+  const [editPrivs, setEditPrivs] = useState<string[]>([]);
 
   async function onExport(dbId: string) {
     setExporting((s) => ({ ...s, [dbId]: true }));
@@ -101,6 +153,16 @@ export default function DatabasesPage() {
     loadRemoteHosts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [remoteDbId]);
+
+  useEffect(() => {
+    if (!userDbId && pgDbs.length) setUserDbId(pgDbs[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbs]);
+
+  useEffect(() => {
+    loadDBUsers();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userDbId]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -206,6 +268,61 @@ export default function DatabasesPage() {
       setQueryBusy(false);
     }
   }
+
+  async function loadDBUsers() {
+    if (!userDbId) return;
+    try {
+      const r = await apiGet<{ users: DBUserRow[] }>(`/api/v1/databases/${userDbId}/users`);
+      setDbUsers(r.users ?? []);
+    } catch {
+      setDbUsers([]);
+    }
+  }
+
+  async function onCreateUser(e: FormEvent) {
+    e.preventDefault();
+    setUBusy(true);
+    setError(null);
+    setNewUserPw(null);
+    try {
+      const r = await apiPost<{ password: string }>(`/api/v1/databases/${userDbId}/users`, {
+        username: uForm.username.trim(),
+        host: uForm.host.trim() || "%",
+        privileges: uForm.privileges,
+      });
+      setNewUserPw(r.password);
+      setUForm({ username: "", host: "%", privileges: ["ALL"] });
+      await loadDBUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create user");
+    } finally {
+      setUBusy(false);
+    }
+  }
+
+  async function onDeleteUser(uid: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/databases/${userDbId}/users/${uid}`);
+      await loadDBUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete user");
+    }
+  }
+
+  async function onSavePrivileges(uid: string) {
+    setError(null);
+    try {
+      await apiPut(`/api/v1/databases/${userDbId}/users/${uid}/privileges`, { privileges: editPrivs });
+      setEditUser(null);
+      await loadDBUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not update privileges");
+    }
+  }
+
+  const userDb = pgDbs.find((d) => d.id === userDbId);
+  const userIsMysql = userDb?.engine === "mysql" || userDb?.engine === "mariadb";
 
   return (
     <div className="space-y-6">
@@ -320,6 +437,147 @@ export default function DatabasesPage() {
         </CardContent>
       </Card>
         </>
+      )}
+
+      {tab === "users" && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Database users</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Named login users on a database with a specific privilege set. The password is shown
+            once and stored only as an envelope-encrypted secret; grants are applied on the node.
+          </p>
+          {pgDbs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No SQL databases.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <label htmlFor="u-db" className="text-sm text-muted-foreground">
+                  Database
+                </label>
+                <select
+                  id="u-db"
+                  className={selectCls}
+                  value={userDbId}
+                  onChange={(e) => setUserDbId(e.target.value)}
+                >
+                  {pgDbs.map((d) => (
+                    <option key={d.id} value={d.id} className="bg-card">
+                      {d.name} ({d.engine})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {newUserPw && (
+                <div className="space-y-2 rounded-md border border-primary/40 bg-primary/5 p-3">
+                  <p className="text-xs text-muted-foreground">New user password (shown once):</p>
+                  <code className="block break-all font-mono text-sm">{newUserPw}</code>
+                  <Button variant="outline" size="sm" onClick={() => setNewUserPw(null)}>
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+
+              <form onSubmit={onCreateUser} className="space-y-3 rounded-md border border-border/60 p-3">
+                <div className="grid gap-3 sm:grid-cols-3 sm:items-end">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="u-name">Username</Label>
+                    <Input
+                      id="u-name"
+                      value={uForm.username}
+                      onChange={(e) => setUForm({ ...uForm, username: e.target.value })}
+                      placeholder="app_user"
+                      required
+                    />
+                  </div>
+                  {userIsMysql && (
+                    <div className="space-y-1.5">
+                      <Label htmlFor="u-host">Host</Label>
+                      <Input
+                        id="u-host"
+                        value={uForm.host}
+                        onChange={(e) => setUForm({ ...uForm, host: e.target.value })}
+                        placeholder="%"
+                        className="font-mono"
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Privileges</Label>
+                  <PrivChips value={uForm.privileges} onChange={(v) => setUForm({ ...uForm, privileges: v })} />
+                </div>
+                <Button type="submit" disabled={uBusy}>
+                  {uBusy ? "Creating…" : "Create user"}
+                </Button>
+              </form>
+
+              {dbUsers.length > 0 && (
+                <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+                  {dbUsers.map((u) => (
+                    <li key={u.id} className="space-y-2 px-4 py-3 text-sm">
+                      <div className="flex items-center gap-3">
+                        <span className="font-mono">
+                          {u.username}
+                          {userIsMysql ? `@${u.host}` : ""}
+                        </span>
+                        {editUser !== u.id && (
+                          <div className="flex flex-wrap gap-1">
+                            {u.privileges.map((pr) => (
+                              <span
+                                key={pr}
+                                className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                              >
+                                {pr}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                        <div className="ml-auto flex items-center gap-1">
+                          {editUser === u.id ? (
+                            <>
+                              <Button size="sm" onClick={() => onSavePrivileges(u.id)}>
+                                Save
+                              </Button>
+                              <Button variant="ghost" size="sm" onClick={() => setEditUser(null)}>
+                                Cancel
+                              </Button>
+                            </>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setEditUser(u.id);
+                                setEditPrivs(u.privileges);
+                              }}
+                            >
+                              Edit privileges
+                            </Button>
+                          )}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7"
+                            onClick={() => onDeleteUser(u.id)}
+                            aria-label="Delete user"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                      {editUser === u.id && <PrivChips value={editPrivs} onChange={setEditPrivs} />}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
       )}
 
       {tab === "query" && (

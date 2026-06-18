@@ -133,6 +133,7 @@ const it: Dict = {
   "Dynamic DNS": "DNS dinamico",
   "Web Disk": "Web Disk",
   Instances: "Istanze",
+  "DB Users": "Utenti DB",
   "SQL Query": "Query SQL",
   "Remote Access": "Accesso remoto",
   Export: "Esporta",

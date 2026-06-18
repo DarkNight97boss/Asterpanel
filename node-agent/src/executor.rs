@@ -74,6 +74,8 @@ impl Executor for DockerExecutor {
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
+            "database.user.privileges" => self.database_user_privileges(job).await,
+            "database.user.delete" => self.database_user_delete(job).await,
             "database.query" => self.database_query(job).await,
             "database.access.apply" => self.database_access_apply(job).await,
             "database.dump" => self.database_dump(job).await,
@@ -822,36 +824,77 @@ impl DockerExecutor {
     }
 
     async fn database_user_create(&self, job: &Job) -> JobOutcome {
+        self.database_user_apply(job, true).await
+    }
+
+    async fn database_user_privileges(&self, job: &Job) -> JobOutcome {
+        self.database_user_apply(job, false).await
+    }
+
+    /// Creates (when `with_password`) or re-grants a database user. The CREATE
+    /// USER / GRANT SQL is rendered from an allowlist (privileges, username, host
+    /// and password are all validated) and run inside the DB container.
+    async fn database_user_apply(&self, job: &Job, with_password: bool) -> JobOutcome {
         let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
         let db_id = pv("database_id").unwrap_or("unknown");
         let engine = pv("engine").unwrap_or("postgres");
         let database = pv("database").unwrap_or("app");
         let owner = pv("owner").unwrap_or(database);
         let username = pv("username").unwrap_or("");
+        let host = pv("host").unwrap_or("%");
         let password = pv("password").unwrap_or("");
+        let empty: Vec<Value> = Vec::new();
+        let privileges = job
+            .payload
+            .get("privileges")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
         if username.is_empty() {
-            return JobOutcome::failed("database.user.create: missing username");
+            return JobOutcome::failed("database.user: missing username");
         }
+        let pw = if with_password { Some(password) } else { None };
+        let sql = match render_db_user_grant(engine, database, username, host, pw, privileges) {
+            Some(s) => s,
+            None => {
+                return JobOutcome::failed(
+                    "database.user: unsafe input, bad privilege or unsupported engine",
+                )
+            }
+        };
         let container = format!("astp_db_{db_id}");
-        let args = match db_user_exec_args(engine, &container, database, owner, username, password)
-        {
+        let args = match db_user_apply_args(engine, &container, owner, database, &sql) {
+            Some(a) => a,
+            None => {
+                return JobOutcome::failed(format!("database.user: unsupported engine {engine}"))
+            }
+        };
+        apply_admin_sql(&args, json!({"username": username, "database": database})).await
+    }
+
+    async fn database_user_delete(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let db_id = pv("database_id").unwrap_or("unknown");
+        let engine = pv("engine").unwrap_or("postgres");
+        let database = pv("database").unwrap_or("app");
+        let owner = pv("owner").unwrap_or(database);
+        let username = pv("username").unwrap_or("");
+        let host = pv("host").unwrap_or("%");
+        let sql = match render_db_user_drop(engine, username, host) {
+            Some(s) => s,
+            None => {
+                return JobOutcome::failed("database.user.delete: unsafe input or unsupported engine")
+            }
+        };
+        let container = format!("astp_db_{db_id}");
+        let args = match db_user_apply_args(engine, &container, owner, database, &sql) {
             Some(a) => a,
             None => {
                 return JobOutcome::failed(format!(
-                    "database.user.create: unsupported engine {engine}"
+                    "database.user.delete: unsupported engine {engine}"
                 ))
             }
         };
-        match run_docker(&args).await {
-            Ok(o) if o.status.success() => {
-                JobOutcome::succeeded(json!({"username": username, "database": database}))
-            }
-            Ok(o) => JobOutcome::failed(format!(
-                "create user failed: {}",
-                String::from_utf8_lossy(&o.stderr).trim()
-            )),
-            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
-        }
+        apply_admin_sql(&args, json!({"username": username, "deleted": true})).await
     }
 
     /// Runs an ad-hoc SQL statement inside the database container and returns the
@@ -2581,32 +2624,174 @@ fn render_sftp_match(username: &str, home: &str) -> String {
 }
 
 /// docker exec argv that creates a database user. Postgres only for the MVP.
-fn db_user_exec_args(
+/// Privilege keywords accepted from the control plane. Anything outside this set
+/// makes the renderer refuse, so a GRANT clause can never carry injected SQL.
+fn db_privilege_clause(engine: &str, privileges: &[Value]) -> Option<String> {
+    const ALLOWED: &[&str] = &[
+        "ALL", "SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "ALTER", "INDEX",
+        "EXECUTE", "REFERENCES",
+    ];
+    let all = || -> String {
+        if engine == "postgres" {
+            "ALL".into()
+        } else {
+            "ALL PRIVILEGES".into()
+        }
+    };
+    let mut toks: Vec<String> = Vec::new();
+    for p in privileges {
+        let t = p.as_str().unwrap_or("").trim().to_ascii_uppercase();
+        if t.is_empty() {
+            continue;
+        }
+        if !ALLOWED.contains(&t.as_str()) {
+            return None; // unknown privilege → refuse the whole grant
+        }
+        if t == "ALL" {
+            return Some(all());
+        }
+        if !toks.contains(&t) {
+            toks.push(t);
+        }
+    }
+    if toks.is_empty() {
+        return Some(all());
+    }
+    if engine == "postgres" {
+        // Postgres table grants only accept this subset; fall back to ALL otherwise.
+        let pg: Vec<String> = toks
+            .iter()
+            .filter(|t| matches!(t.as_str(), "SELECT" | "INSERT" | "UPDATE" | "DELETE" | "REFERENCES"))
+            .cloned()
+            .collect();
+        return Some(if pg.is_empty() { "ALL".into() } else { pg.join(", ") });
+    }
+    Some(toks.join(", "))
+}
+
+/// A DB role name: letters, digits and `_`, at most 32 chars.
+fn valid_db_username(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 32 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+/// Renders the SQL to create-or-regrant a database user. With `password = Some`
+/// the user is created (MySQL `CREATE USER … IDENTIFIED BY`, Postgres `CREATE ROLE
+/// … LOGIN PASSWORD`); with `None` only the grants are re-applied. Returns None if
+/// any input is not injection-safe or the engine is unsupported.
+fn render_db_user_grant(
     engine: &str,
-    container: &str,
     database: &str,
-    owner: &str,
-    user: &str,
-    pass: &str,
-) -> Option<Vec<String>> {
+    username: &str,
+    host: &str,
+    password: Option<&str>,
+    privileges: &[Value],
+) -> Option<String> {
+    if !valid_db_username(username) {
+        return None;
+    }
+    if let Some(pw) = password {
+        if pw.contains('\'') || pw.contains('\\') {
+            return None; // never emit an unescaped credential
+        }
+    }
+    let clause = db_privilege_clause(engine, privileges)?;
     match engine {
+        "mysql" | "mariadb" => {
+            if !valid_mysql_host(host) {
+                return None;
+            }
+            let mut out = String::new();
+            if let Some(pw) = password {
+                out.push_str(&format!(
+                    "CREATE USER IF NOT EXISTS '{username}'@'{host}' IDENTIFIED BY '{pw}';\n"
+                ));
+            }
+            out.push_str(&format!(
+                "REVOKE ALL PRIVILEGES ON `{database}`.* FROM '{username}'@'{host}';\n"
+            ));
+            out.push_str(&format!(
+                "GRANT {clause} ON `{database}`.* TO '{username}'@'{host}';\n"
+            ));
+            out.push_str("FLUSH PRIVILEGES;\n");
+            Some(out)
+        }
         "postgres" => {
-            let sql = format!(
-                "CREATE USER \"{user}\" WITH PASSWORD '{pass}'; GRANT ALL PRIVILEGES ON DATABASE \"{database}\" TO \"{user}\";"
-            );
-            Some(vec![
-                "exec".into(),
-                container.into(),
-                "psql".into(),
-                "-U".into(),
-                owner.into(),
-                "-d".into(),
-                database.into(),
-                "-c".into(),
-                sql,
-            ])
+            let mut out = String::new();
+            if let Some(pw) = password {
+                out.push_str(&format!("CREATE ROLE \"{username}\" WITH LOGIN PASSWORD '{pw}';\n"));
+            }
+            out.push_str(&format!(
+                "GRANT CONNECT ON DATABASE \"{database}\" TO \"{username}\";\n"
+            ));
+            out.push_str(&format!(
+                "GRANT {clause} ON ALL TABLES IN SCHEMA public TO \"{username}\";\n"
+            ));
+            Some(out)
         }
         _ => None,
+    }
+}
+
+/// Renders the SQL to drop a database user.
+fn render_db_user_drop(engine: &str, username: &str, host: &str) -> Option<String> {
+    if !valid_db_username(username) {
+        return None;
+    }
+    match engine {
+        "mysql" | "mariadb" => {
+            if !valid_mysql_host(host) {
+                return None;
+            }
+            Some(format!(
+                "DROP USER IF EXISTS '{username}'@'{host}';\nFLUSH PRIVILEGES;\n"
+            ))
+        }
+        "postgres" => Some(format!("DROP ROLE IF EXISTS \"{username}\";\n")),
+        _ => None,
+    }
+}
+
+/// Builds the `docker exec` argv that runs DB-user admin SQL inside the container.
+fn db_user_apply_args(
+    engine: &str,
+    container: &str,
+    owner: &str,
+    database: &str,
+    sql: &str,
+) -> Option<Vec<String>> {
+    match engine {
+        "mysql" | "mariadb" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "mysql".into(),
+            "-uroot".into(),
+            "-e".into(),
+            sql.into(),
+        ]),
+        "postgres" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "psql".into(),
+            "-U".into(),
+            owner.into(),
+            "-d".into(),
+            database.into(),
+            "-c".into(),
+            sql.into(),
+        ]),
+        _ => None,
+    }
+}
+
+/// Runs DB-admin SQL via `docker exec` and maps the result to a JobOutcome.
+async fn apply_admin_sql(args: &[String], ok: Value) -> JobOutcome {
+    match run_docker(args).await {
+        Ok(o) if o.status.success() => JobOutcome::succeeded(ok),
+        Ok(o) => JobOutcome::failed(format!(
+            "db user op failed: {}",
+            String::from_utf8_lossy(&o.stderr).trim()
+        )),
+        Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
     }
 }
 
@@ -3344,12 +3529,55 @@ mod tests {
     }
 
     #[test]
-    fn db_user_exec_postgres_only() {
-        let a = db_user_exec_args("postgres", "astp_db_1", "app", "app", "u", "pw").unwrap();
-        let s = a.join(" ");
-        assert!(s.contains("exec astp_db_1 psql -U app -d app -c"), "{s}");
-        assert!(s.contains("CREATE USER \"u\""), "{s}");
-        assert!(db_user_exec_args("mysql", "c", "d", "o", "u", "p").is_none());
+    fn db_user_grant_mysql_create_and_privileges() {
+        let privs = vec![json!("SELECT"), json!("INSERT")];
+        let sql =
+            render_db_user_grant("mysql", "shopdb", "shop_ro", "%", Some("deadbeef"), &privs).unwrap();
+        assert!(
+            sql.contains("CREATE USER IF NOT EXISTS 'shop_ro'@'%' IDENTIFIED BY 'deadbeef'"),
+            "{sql}"
+        );
+        assert!(sql.contains("REVOKE ALL PRIVILEGES ON `shopdb`.* FROM 'shop_ro'@'%'"), "{sql}");
+        assert!(sql.contains("GRANT SELECT, INSERT ON `shopdb`.* TO 'shop_ro'@'%'"), "{sql}");
+        assert!(sql.contains("FLUSH PRIVILEGES;"), "{sql}");
+        // grant-only (no password) omits CREATE USER and uses ALL PRIVILEGES
+        let regrant =
+            render_db_user_grant("mysql", "shopdb", "shop_ro", "%", None, &[json!("ALL")]).unwrap();
+        assert!(!regrant.contains("CREATE USER"), "{regrant}");
+        assert!(regrant.contains("GRANT ALL PRIVILEGES ON `shopdb`.* TO 'shop_ro'@'%'"), "{regrant}");
+    }
+
+    #[test]
+    fn db_user_grant_rejects_unsafe() {
+        // unknown privilege token → refuse the whole grant
+        assert!(
+            render_db_user_grant("mysql", "d", "u", "%", Some("p"), &[json!("DROP; DELETE")]).is_none()
+        );
+        // password carrying a quote → never emitted
+        assert!(render_db_user_grant("mysql", "d", "u", "%", Some("p'x"), &[json!("ALL")]).is_none());
+        // invalid username / host
+        assert!(render_db_user_grant("mysql", "d", "bad name", "%", Some("p"), &[json!("ALL")]).is_none());
+        assert!(render_db_user_grant("mysql", "d", "u", "ho'st", Some("p"), &[json!("ALL")]).is_none());
+        // unsupported engine
+        assert!(render_db_user_grant("redis", "d", "u", "%", Some("p"), &[json!("ALL")]).is_none());
+    }
+
+    #[test]
+    fn db_user_grant_postgres_and_drop() {
+        let sql =
+            render_db_user_grant("postgres", "appdb", "reader", "%", Some("hexpw"), &[json!("SELECT")])
+                .unwrap();
+        assert!(sql.contains("CREATE ROLE \"reader\" WITH LOGIN PASSWORD 'hexpw'"), "{sql}");
+        assert!(sql.contains("GRANT CONNECT ON DATABASE \"appdb\" TO \"reader\""), "{sql}");
+        assert!(sql.contains("GRANT SELECT ON ALL TABLES IN SCHEMA public TO \"reader\""), "{sql}");
+        // drops: Postgres role vs MySQL host-scoped user
+        assert!(render_db_user_drop("postgres", "reader", "%")
+            .unwrap()
+            .contains("DROP ROLE IF EXISTS \"reader\""));
+        assert!(render_db_user_drop("mysql", "shop_ro", "10.0.0.5")
+            .unwrap()
+            .contains("DROP USER IF EXISTS 'shop_ro'@'10.0.0.5'"));
+        assert!(render_db_user_drop("mysql", "bad name", "%").is_none());
     }
 
     #[test]

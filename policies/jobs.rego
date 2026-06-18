@@ -25,6 +25,8 @@ allowed_types := {
 	"database.create",
 	"database.delete",
 	"database.user.create",
+	"database.user.privileges",
+	"database.user.delete",
 	"database.query",
 	"database.access.apply",
 	"database.dump",

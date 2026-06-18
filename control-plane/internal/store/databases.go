@@ -88,3 +88,73 @@ func scanDatabase(row rowScanner) (*DatabaseInstance, error) {
 	}
 	return &d, nil
 }
+
+// --- Database users (named login roles with a privilege set) ---
+
+type CreateDBUserParams struct {
+	ID                  uuid.UUID
+	OrgID               uuid.UUID
+	DatabaseID          uuid.UUID
+	Username            string
+	HostScope           string
+	Privileges          []string
+	CredentialsSecretID uuid.NullUUID
+}
+
+func (s *Store) CreateDBUser(ctx context.Context, p CreateDBUserParams) (*DBUser, error) {
+	const q = `
+		INSERT INTO db_users (id, organization_id, database_id, username, host_scope, privileges, credentials_secret_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		RETURNING id, organization_id, database_id, username, host_scope, privileges, credentials_secret_id, created_at`
+	return scanDBUser(s.pool.QueryRow(ctx, q,
+		p.ID, p.OrgID, p.DatabaseID, p.Username, p.HostScope, p.Privileges, p.CredentialsSecretID))
+}
+
+func (s *Store) ListDBUsers(ctx context.Context, orgID, databaseID uuid.UUID) ([]DBUser, error) {
+	const q = `
+		SELECT id, organization_id, database_id, username, host_scope, privileges, credentials_secret_id, created_at
+		FROM db_users WHERE organization_id = $1 AND database_id = $2
+		ORDER BY created_at`
+	rows, err := s.pool.Query(ctx, q, orgID, databaseID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []DBUser
+	for rows.Next() {
+		u, err := scanDBUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, *u)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) GetDBUser(ctx context.Context, orgID, id uuid.UUID) (*DBUser, error) {
+	const q = `
+		SELECT id, organization_id, database_id, username, host_scope, privileges, credentials_secret_id, created_at
+		FROM db_users WHERE id = $1 AND organization_id = $2`
+	return scanDBUser(s.pool.QueryRow(ctx, q, id, orgID))
+}
+
+func (s *Store) UpdateDBUserPrivileges(ctx context.Context, orgID, id uuid.UUID, privileges []string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE db_users SET privileges = $3, updated_at = now() WHERE id = $1 AND organization_id = $2`,
+		id, orgID, privileges)
+	return err
+}
+
+func (s *Store) DeleteDBUser(ctx context.Context, orgID, id uuid.UUID) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM db_users WHERE id = $1 AND organization_id = $2`, id, orgID)
+	return err
+}
+
+func scanDBUser(row rowScanner) (*DBUser, error) {
+	var u DBUser
+	if err := row.Scan(&u.ID, &u.OrganizationID, &u.DatabaseID, &u.Username, &u.HostScope,
+		&u.Privileges, &u.CredentialsSecretID, &u.CreatedAt); err != nil {
+		return nil, norows(err)
+	}
+	return &u, nil
+}

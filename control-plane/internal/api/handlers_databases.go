@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -191,13 +192,91 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-type createDBUserRequest struct {
-	Username string `json:"username"`
+// validDBPrivileges is the privilege allowlist, mirrored by the agent's renderer
+// so a grant can never carry arbitrary SQL.
+var validDBPrivileges = map[string]bool{
+	"ALL": true, "SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true,
+	"CREATE": true, "DROP": true, "ALTER": true, "INDEX": true, "EXECUTE": true, "REFERENCES": true,
 }
 
-// handleCreateDBUser provisions an additional user/role on a database instance
-// by dispatching a database.user.create job (the agent runs the engine's CREATE
-// USER inside the DB container).
+func validDBUsername(s string) bool {
+	if len(s) == 0 || len(s) > 32 {
+		return false
+	}
+	for _, c := range s {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizePrivileges upper-cases, de-dupes and validates a privilege list.
+// Empty defaults to ["ALL"]; "ALL" collapses the set; an unknown token is rejected.
+func normalizePrivileges(in []string) ([]string, bool) {
+	seen := map[string]bool{}
+	out := make([]string, 0, len(in))
+	for _, p := range in {
+		t := strings.ToUpper(strings.TrimSpace(p))
+		if t == "" {
+			continue
+		}
+		if !validDBPrivileges[t] {
+			return nil, false
+		}
+		if t == "ALL" {
+			return []string{"ALL"}, true
+		}
+		if !seen[t] {
+			seen[t] = true
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return []string{"ALL"}, true
+	}
+	return out, true
+}
+
+func dbUserView(u store.DBUser) map[string]any {
+	return map[string]any{
+		"id":         u.ID,
+		"username":   u.Username,
+		"host":       u.HostScope,
+		"privileges": u.Privileges,
+		"created_at": u.CreatedAt,
+	}
+}
+
+func (s *Server) handleListDBUsers(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	users, err := s.deps.Store.ListDBUsers(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list users")
+		return
+	}
+	views := make([]map[string]any, 0, len(users))
+	for _, u := range users {
+		views = append(views, dbUserView(u))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"users": views})
+}
+
+type createDBUserRequest struct {
+	Username   string   `json:"username"`
+	Host       string   `json:"host"`
+	Privileges []string `json:"privileges"`
+}
+
+// handleCreateDBUser creates a named login role on a database, sealing its
+// generated password and dispatching a database.user.create job (CREATE USER +
+// GRANT, run inside the DB container). The password is returned exactly once.
 func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
@@ -207,9 +286,18 @@ func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req createDBUserRequest
-	if e := httpx.Decode(w, r, &req); e != nil || strings.TrimSpace(req.Username) == "" {
-		httpx.Error(w, http.StatusBadRequest, "invalid_request", "username is required")
+	if e := httpx.Decode(w, r, &req); e != nil || !validDBUsername(strings.TrimSpace(req.Username)) {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "username must be 1–32 chars (letters, digits, underscore)")
 		return
+	}
+	privs, ok := normalizePrivileges(req.Privileges)
+	if !ok {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "unknown privilege")
+		return
+	}
+	host := strings.TrimSpace(req.Host)
+	if host == "" {
+		host = "%"
 	}
 	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
 	if err != nil {
@@ -231,22 +319,174 @@ func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	password, _ := crypto.RandomHex(16)
+	// Generate + seal the user's password (AAD scoped to the new user id).
+	password, err := crypto.RandomHex(16)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not generate password")
+		return
+	}
+	userID := uuid.New()
+	ct, nonce, err := s.deps.Envelope.Encrypt([]byte(password), []byte("database_user:"+userID.String()))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not seal credentials")
+		return
+	}
+	secretID, err := s.deps.Store.CreateSecret(ctx, p.OrgID, uuid.NullUUID{}, "database_user:"+userID.String(), ct, nonce, s.deps.Envelope.KeyID())
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not store credentials")
+		return
+	}
+	u, err := s.deps.Store.CreateDBUser(ctx, store.CreateDBUserParams{
+		ID:                  userID,
+		OrgID:               p.OrgID,
+		DatabaseID:          dbID,
+		Username:            strings.TrimSpace(req.Username),
+		HostScope:           host,
+		Privileges:          privs,
+		CredentialsSecretID: uuid.NullUUID{UUID: secretID, Valid: true},
+	})
+	if err != nil {
+		httpx.Error(w, http.StatusConflict, "create_failed", "could not create user (name may already exist)")
+		return
+	}
+
+	owner := db.Name
+	if db.DBUser != nil && *db.DBUser != "" {
+		owner = *db.DBUser
+	}
 	payload := map[string]any{
-		"database_id": dbID, "engine": db.Engine, "database": db.Name,
-		"username": req.Username, "password": password,
+		"database_id": dbID, "engine": db.Engine, "database": db.Name, "owner": owner,
+		"username": u.Username, "host": host, "privileges": privs, "password": password,
 	}
 	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseUser, nodeID, payload)
 
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "database.user.create", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
-		map[string]any{"username": req.Username, "job_id": jobID.String()})
+		map[string]any{"username": u.Username, "job_id": jobID.String()})
 
 	httpx.JSON(w, http.StatusCreated, map[string]any{
-		"user":     map[string]any{"username": req.Username, "host": db.Host, "port": db.Port, "database": db.Name},
+		"user":     dbUserView(*u),
 		"password": password,
 		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
 	})
+}
+
+type setDBUserPrivilegesRequest struct {
+	Privileges []string `json:"privileges"`
+}
+
+// handleSetDBUserPrivileges re-applies a DB user's grants (REVOKE ALL + GRANT the
+// new set) via a database.user.privileges job and records the new set.
+func (s *Server) handleSetDBUserPrivileges(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid user id")
+		return
+	}
+	var req setDBUserPrivilegesRequest
+	if e := httpx.Decode(w, r, &req); e != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	privs, ok := normalizePrivileges(req.Privileges)
+	if !ok {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "unknown privilege")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	u, err := s.deps.Store.GetDBUser(ctx, p.OrgID, userID)
+	if err != nil || u.DatabaseID != dbID {
+		httpx.Error(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if err := s.deps.Store.UpdateDBUserPrivileges(ctx, p.OrgID, userID, privs); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not update privileges")
+		return
+	}
+	jobID, dispatched := s.applyDBUserGrant(ctx, p, db, u, privs)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.user.privileges", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"username": u.Username, "privileges": privs, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"user":     map[string]any{"id": u.ID, "username": u.Username, "host": u.HostScope, "privileges": privs},
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
+// handleDeleteDBUser dispatches a database.user.delete job (DROP USER) and removes the row.
+func (s *Server) handleDeleteDBUser(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid user id")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	u, err := s.deps.Store.GetDBUser(ctx, p.OrgID, userID)
+	if err != nil || u.DatabaseID != dbID {
+		httpx.Error(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if db.ServerNodeID.Valid {
+		if ok, _ := s.jobPolicyAllows(ctx, p, jobs.TypeDatabaseUserDrop, db.ServerNodeID.UUID); ok {
+			owner := db.Name
+			if db.DBUser != nil && *db.DBUser != "" {
+				owner = *db.DBUser
+			}
+			s.signPersistDispatch(ctx, p, jobs.TypeDatabaseUserDrop, db.ServerNodeID.UUID, map[string]any{
+				"database_id": dbID, "engine": db.Engine, "database": db.Name, "owner": owner,
+				"username": u.Username, "host": u.HostScope,
+			})
+		}
+	}
+	if err := s.deps.Store.DeleteDBUser(ctx, p.OrgID, userID); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not delete user")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.user.delete", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"username": u.Username})
+	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
+// applyDBUserGrant dispatches a database.user.privileges job to re-apply a user's grants.
+func (s *Server) applyDBUserGrant(ctx context.Context, p *middleware.Principal, db *store.DatabaseInstance, u *store.DBUser, privs []string) (uuid.UUID, bool) {
+	if !db.ServerNodeID.Valid {
+		return uuid.Nil, false
+	}
+	if ok, _ := s.jobPolicyAllows(ctx, p, jobs.TypeDatabaseUserGrant, db.ServerNodeID.UUID); !ok {
+		return uuid.Nil, false
+	}
+	owner := db.Name
+	if db.DBUser != nil && *db.DBUser != "" {
+		owner = *db.DBUser
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseUserGrant, db.ServerNodeID.UUID, map[string]any{
+		"database_id": db.ID, "engine": db.Engine, "database": db.Name, "owner": owner,
+		"username": u.Username, "host": u.HostScope, "privileges": privs,
+	})
+	return jobID, dispatched
 }
 
 type databaseQueryRequest struct {
