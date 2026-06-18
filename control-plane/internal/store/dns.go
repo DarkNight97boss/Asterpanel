@@ -137,6 +137,28 @@ func (s *Store) DeleteDNSRecord(ctx context.Context, orgID, recordID uuid.UUID) 
 	return zoneID, norows(err)
 }
 
+// SetARecord upserts the A record for (zone, name) to ip and bumps the zone
+// serial. Used by the dynamic-DNS update endpoint (one A record per host).
+func (s *Store) SetARecord(ctx context.Context, zoneID, orgID uuid.UUID, name, ip string, ttl int) error {
+	return s.withTx(ctx, func(tx pgx.Tx) error {
+		tag, err := tx.Exec(ctx, `
+			UPDATE dns_records SET content = $1, ttl = $2, updated_at = now()
+			WHERE dns_zone_id = $3 AND name = $4 AND type = 'A'`, ip, ttl, zoneID, name)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			if _, err := tx.Exec(ctx, `
+				INSERT INTO dns_records (dns_zone_id, organization_id, name, type, content, ttl)
+				VALUES ($1, $2, $3, 'A', $4, $5)`, zoneID, orgID, name, ip, ttl); err != nil {
+				return err
+			}
+		}
+		_, err = tx.Exec(ctx, `UPDATE dns_zones SET serial = serial + 1 WHERE id = $1`, zoneID)
+		return err
+	})
+}
+
 // ZoneApply bundles everything the agent needs to render a zone file.
 type ZoneApply struct {
 	Name    string

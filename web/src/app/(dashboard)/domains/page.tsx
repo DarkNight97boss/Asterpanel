@@ -57,6 +57,15 @@ interface Hotlink {
   extensions: string[];
 }
 
+interface Ddns {
+  id: string;
+  domain_id: string;
+  name: string;
+  token: string;
+  last_ip: string | null;
+  update_url: string;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
@@ -74,6 +83,9 @@ export default function DomainsPage() {
   const [hotlink, setHotlink] = useState<Hotlink[]>([]);
   const [hl, setHl] = useState({ domain: "", allowed_referers: "", extensions: "" });
   const [hlBusy, setHlBusy] = useState(false);
+  const [ddns, setDdns] = useState<Ddns[]>([]);
+  const [ddnsForm, setDdnsForm] = useState({ domain_id: "", name: "" });
+  const [ddnsBusy, setDdnsBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -88,7 +100,7 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd, pr, ds, hk] = await Promise.all([
+      const [d, r, ns, rd, pr, ds, hk, dd] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
@@ -100,6 +112,7 @@ export default function DomainsPage() {
         })),
         apiGet<{ dnssec: DnssecEntry[] }>("/api/v1/dns/dnssec").catch(() => ({ dnssec: [] })),
         apiGet<{ hotlink: Hotlink[] }>("/api/v1/hotlink-protection").catch(() => ({ hotlink: [] })),
+        apiGet<{ ddns: Ddns[] }>("/api/v1/ddns").catch(() => ({ ddns: [] })),
       ]);
       setDomains(d);
       setRecords(r);
@@ -108,7 +121,9 @@ export default function DomainsPage() {
       setProtections(pr.protections ?? []);
       setDnssec(ds.dnssec ?? []);
       setHotlink(hk.hotlink ?? []);
+      setDdns(dd.ddns ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
+      if (!ddnsForm.domain_id && d.length) setDdnsForm((f) => ({ ...f, domain_id: d[0].id }));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
     }
@@ -292,6 +307,36 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/hotlink-protection/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onCreateDdns(e: FormEvent) {
+    e.preventDefault();
+    setDdnsBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost("/api/v1/ddns", {
+        domain_id: ddnsForm.domain_id || domains[0]?.id,
+        name: ddnsForm.name.trim(),
+      });
+      setNotice("Dynamic DNS host created — use its update URL from a client.");
+      setDdnsForm({ ...ddnsForm, name: "" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setDdnsBusy(false);
+    }
+  }
+
+  async function onDeleteDdns(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/ddns/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -774,6 +819,76 @@ export default function DomainsPage() {
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Dynamic DNS ({ddns.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Keep an A record pointed at a changing IP. A client (router, script) calls the host&apos;s
+            update URL with its token; the record follows the caller&apos;s IP.
+          </p>
+          <form onSubmit={onCreateDdns} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="ddns-domain">Domain</Label>
+              <select
+                id="ddns-domain"
+                className={selectCls}
+                value={ddnsForm.domain_id}
+                onChange={(e) => setDdnsForm({ ...ddnsForm, domain_id: e.target.value })}
+              >
+                {domains.length === 0 && <option value="">Add a domain first</option>}
+                {domains.map((d) => (
+                  <option key={d.id} value={d.id} className="bg-card">
+                    {d.fqdn}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ddns-name">Record name</Label>
+              <Input
+                id="ddns-name"
+                value={ddnsForm.name}
+                onChange={(e) => setDdnsForm({ ...ddnsForm, name: e.target.value })}
+                placeholder="home"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={ddnsBusy || domains.length === 0}>
+              {ddnsBusy ? "Creating…" : "Create host"}
+            </Button>
+          </form>
+
+          {ddns.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {ddns.map((h) => (
+                <li key={h.id} className="space-y-1 px-4 py-2 text-sm">
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono">{h.name}</span>
+                    <span className="text-xs text-muted-foreground">
+                      → {h.last_ip ?? "not updated yet"}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="ml-auto h-7 w-7"
+                      onClick={() => onDeleteDdns(h.id)}
+                      aria-label="Delete dynamic DNS host"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                  <code className="block break-all rounded bg-muted px-2 py-1 text-[11px] text-muted-foreground">
+                    {h.update_url}
+                  </code>
                 </li>
               ))}
             </ul>

@@ -102,6 +102,9 @@ func (s *Server) routes() http.Handler {
 			r.With(middleware.CSRF).Post("/auth/refresh", s.handleRefresh)
 			// Agent bootstrap: authenticated by the one-time enrollment token itself.
 			r.Post("/agents/enroll", s.handleAgentEnroll)
+			// Dynamic DNS update: authenticated by the per-host update token.
+			r.Get("/ddns/update", s.handleDdnsUpdate)
+			r.Post("/ddns/update", s.handleDdnsUpdate)
 		})
 
 		// --- Authenticated endpoints ---
@@ -181,6 +184,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("domain.read", "protection.list", "domain")).Get("/directory-privacy", s.handleListDirPrivacy)
 			r.With(az.Require("domain.create", "protection.create", "domain")).Post("/directory-privacy", s.handleCreateDirPrivacy)
 			r.With(az.Require("domain.create", "protection.delete", "domain")).Delete("/directory-privacy/{protectionID}", s.handleDeleteDirPrivacy)
+
+			// Dynamic DNS hosts (management; the update endpoint is public above)
+			r.With(az.Require("dns.read", "ddns.list", "dns_record")).Get("/ddns", s.handleListDdns)
+			r.With(az.Require("dns.manage", "ddns.create", "dns_record")).Post("/ddns", s.handleCreateDdns)
+			r.With(az.Require("dns.manage", "ddns.delete", "dns_record")).Delete("/ddns/{ddnsID}", s.handleDeleteDdns)
 
 			// Hotlink protection (Caddy referer block on asset paths)
 			r.With(az.Require("domain.read", "hotlink.list", "domain")).Get("/hotlink-protection", s.handleListHotlink)

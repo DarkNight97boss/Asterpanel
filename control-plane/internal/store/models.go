@@ -295,6 +295,17 @@ type HotlinkProtection struct {
 	CreatedAt       time.Time
 }
 
+type DdnsHost struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	DomainID       uuid.UUID
+	Name           string
+	Token          string
+	LastIP         *string
+	UpdatedAt      *time.Time
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID
