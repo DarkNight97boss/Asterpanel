@@ -91,7 +91,7 @@ export default function AnalyticsPage() {
         </select>
       </div>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {data && !data.log_present && (
         <p className="text-sm text-muted-foreground">

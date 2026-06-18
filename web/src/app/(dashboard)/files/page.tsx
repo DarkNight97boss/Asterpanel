@@ -273,7 +273,7 @@ export default function FilesPage() {
         </div>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {scan && (
         <div
@@ -282,8 +282,8 @@ export default function FilesPage() {
             !scan.engine_available
               ? "border-border text-muted-foreground"
               : scan.infected.length > 0
-                ? "border-red-500/40 text-red-400"
-                : "border-emerald-500/40 text-emerald-400",
+                ? "border-red-500/40 text-red-600"
+                : "border-emerald-500/40 text-emerald-600",
           )}
         >
           {!scan.engine_available
@@ -356,7 +356,7 @@ export default function FilesPage() {
                   </td>
                   <td className="px-6 py-3 text-right">
                     <button
-                      className="text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-red-400"
+                      className="text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-red-600"
                       onClick={() => remove(e)}
                       aria-label={`Delete ${e.name}`}
                     >

@@ -117,7 +117,7 @@ export default function WebmailPage() {
           <h1 className="text-2xl font-semibold">Webmail</h1>
           <p className="text-sm text-muted-foreground">Native IMAP/SMTP client built into the panel.</p>
         </header>
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
         <Card className="p-10 text-center text-sm text-muted-foreground">
           No mailbox yet — create one in <span className="text-foreground">Mailboxes</span> first.
         </Card>
@@ -143,7 +143,7 @@ export default function WebmailPage() {
           </select>
         </div>
         <div className="flex items-center gap-2">
-          {sent && <span className="text-sm text-emerald-400">Sent ✓</span>}
+          {sent && <span className="text-sm text-emerald-600">Sent ✓</span>}
           <Button variant="outline" size="icon" onClick={() => loadMessages(mailboxId, folder)} title="Refresh">
             <RefreshCw className="h-4 w-4" />
           </Button>
@@ -154,7 +154,7 @@ export default function WebmailPage() {
         </div>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card className="flex flex-1 overflow-hidden p-0">
         {/* folders */}

@@ -53,8 +53,8 @@ export default function BrandingPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {saved && <p className="text-sm text-emerald-400">Branding saved and applied.</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {saved && <p className="text-sm text-emerald-600">Branding saved and applied.</p>}
 
       <div className="grid gap-6 lg:grid-cols-[1fr_320px]">
         <Card>

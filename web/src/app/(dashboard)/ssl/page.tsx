@@ -59,7 +59,7 @@ export default function SslPage() {
         description="Automatic certificates via Let's Encrypt (ACME). Auto-renewed before expiry."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>

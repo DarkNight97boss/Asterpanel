@@ -107,7 +107,7 @@ export default function LoginPage() {
                   required
                 />
               </div>
-              {error && <p className="text-sm text-red-400">{error}</p>}
+              {error && <p className="text-sm text-red-600">{error}</p>}
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy ? t("Signing in…") : t("Sign in")}
               </Button>
@@ -139,7 +139,7 @@ export default function LoginPage() {
                   required
                 />
               </div>
-              {error && <p className="text-sm text-red-400">{error}</p>}
+              {error && <p className="text-sm text-red-600">{error}</p>}
               <Button type="submit" className="w-full" disabled={busy}>
                 {busy ? t("Verifying…") : t("Verify")}
               </Button>

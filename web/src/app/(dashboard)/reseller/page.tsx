@@ -28,8 +28,8 @@ interface Created {
 }
 
 const statusBadge: Record<string, string> = {
-  active: "bg-emerald-500/15 text-emerald-400",
-  suspended: "bg-amber-500/15 text-amber-400",
+  active: "bg-emerald-500/15 text-emerald-600",
+  suspended: "bg-amber-500/15 text-amber-600",
   deleted: "bg-muted text-muted-foreground",
 };
 
@@ -96,13 +96,13 @@ export default function ResellerPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {created && (
         <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-sm">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <p className="font-medium text-emerald-400">
+              <p className="font-medium text-emerald-600">
                 Sub-account “{created.account.name}” created.
               </p>
               <p className="mt-1 text-muted-foreground">

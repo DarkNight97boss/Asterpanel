@@ -30,7 +30,7 @@ export default function DashboardPage() {
         <p className="text-sm text-muted-foreground">Fleet status at a glance.</p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Stat icon={Server} label="Server nodes" value={nodes.length} sub={`${onlineNodes} online`} />

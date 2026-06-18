@@ -39,8 +39,8 @@ const sym: Record<string, string> = { EUR: "€", USD: "$", GBP: "£" };
 const money = (cents: number, cur: string) => `${sym[cur] ?? cur + " "}${(cents / 100).toFixed(2)}`;
 
 const statusBadge: Record<Invoice["status"], string> = {
-  paid: "bg-emerald-500/15 text-emerald-400",
-  open: "bg-amber-500/15 text-amber-400",
+  paid: "bg-emerald-500/15 text-emerald-600",
+  open: "bg-amber-500/15 text-amber-600",
   draft: "bg-muted text-muted-foreground",
   void: "bg-muted text-muted-foreground",
 };
@@ -123,7 +123,7 @@ export default function BillingPage() {
         )}
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {Object.keys(limits).length > 0 && (
         <Card>

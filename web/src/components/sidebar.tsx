@@ -116,7 +116,7 @@ export function Sidebar() {
   const { t } = useT();
 
   return (
-    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-card/40">
+    <aside className="flex h-screen w-60 shrink-0 flex-col border-r border-border bg-card">
       <div className="flex items-center gap-2 px-6 py-5">
         {branding.logo_url ? (
           // eslint-disable-next-line @next/next/no-img-element
@@ -154,7 +154,7 @@ export function Sidebar() {
                   <span className="flex-1">{t(item.label)}</span>
                   {locked && (
                     <span
-                      className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-400"
+                      className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600"
                       title="Pro feature — requires a license"
                     >
                       Pro

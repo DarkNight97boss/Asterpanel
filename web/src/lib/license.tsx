@@ -69,7 +69,7 @@ export function ProGate({ feature, children }: { feature: string; children: Reac
   return (
     <div className="mx-auto max-w-md rounded-lg border border-amber-500/30 bg-amber-500/5 p-8 text-center">
       <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-amber-500/15">
-        <Lock className="h-6 w-6 text-amber-400" />
+        <Lock className="h-6 w-6 text-amber-600" />
       </div>
       <h2 className="text-lg font-semibold">This is a Pro feature</h2>
       <p className="mt-1 text-sm text-muted-foreground">

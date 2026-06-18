@@ -1,20 +1,25 @@
 @import "tailwindcss";
 
-/* Dark, indigo-accented theme. Tailwind v4 turns these into utilities:
+/* Light, flat, Plesk-style theme. Tailwind v4 turns these into utilities:
    --color-card -> bg-card/text-card/border-card, etc. */
 @theme {
-  --color-background: #09090b;
-  --color-foreground: #e4e4e7;
-  --color-card: #111114;
-  --color-border: #27272a;
-  --color-muted: #18181b;
-  --color-muted-foreground: #a1a1aa;
-  --color-primary: #6366f1;
+  --color-background: #f3f5f9; /* content area — light blue-grey */
+  --color-foreground: #2b303b; /* primary text — dark slate */
+  --color-card: #ffffff; /* panels */
+  --color-border: #e2e7ef; /* hairline borders */
+  --color-muted: #eef1f6; /* inputs / chips / code wells */
+  --color-muted-foreground: #6a717f; /* secondary text */
+  --color-primary: #0a6ed1; /* Plesk azure */
   --color-primary-foreground: #ffffff;
+
+  /* flatter, Plesk-like corners */
+  --radius-md: 5px;
+  --radius-lg: 6px;
+  --radius-xl: 8px;
 }
 
 :root {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {

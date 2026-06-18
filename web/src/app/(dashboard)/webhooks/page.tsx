@@ -109,13 +109,13 @@ export default function WebhooksPage() {
           </p>
         </header>
 
-        {error && <p className="text-sm text-red-400">{error}</p>}
+        {error && <p className="text-sm text-red-600">{error}</p>}
 
         {created && (
           <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-sm">
             <div className="flex items-start justify-between gap-3">
               <div>
-                <p className="font-medium text-emerald-400">Webhook created.</p>
+                <p className="font-medium text-emerald-600">Webhook created.</p>
                 <p className="mt-1 text-muted-foreground">
                   Save this signing secret — it is shown <strong>only once</strong>:
                 </p>
@@ -235,8 +235,8 @@ export default function WebhooksPage() {
                           className={cn(
                             "rounded px-1.5 py-0.5 font-mono",
                             h.last_status >= 200 && h.last_status < 300
-                              ? "bg-emerald-500/15 text-emerald-400"
-                              : "bg-red-500/15 text-red-400",
+                              ? "bg-emerald-500/15 text-emerald-600"
+                              : "bg-red-500/15 text-red-600",
                           )}
                           title={h.last_delivered_at ?? ""}
                         >
@@ -255,7 +255,7 @@ export default function WebhooksPage() {
                         Test
                       </Button>
                       <button
-                        className="ml-2 text-muted-foreground hover:text-red-400"
+                        className="ml-2 text-muted-foreground hover:text-red-600"
                         onClick={() => remove(h.id)}
                         aria-label="Delete webhook"
                       >

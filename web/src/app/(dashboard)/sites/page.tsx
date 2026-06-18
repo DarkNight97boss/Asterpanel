@@ -69,8 +69,8 @@ export default function SitesPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {notice && <p className="text-sm text-emerald-400">{notice}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       <Card>
         <CardHeader>

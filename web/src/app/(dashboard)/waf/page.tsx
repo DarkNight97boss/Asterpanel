@@ -84,7 +84,7 @@ export default function WafPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
@@ -160,7 +160,7 @@ export default function WafPage() {
               {rules.map((r) => (
                 <tr key={r.id} className="border-b border-border/60 last:border-0">
                   <td className="px-6 py-3">
-                    <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-400">
+                    <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs font-medium text-red-600">
                       {MATCH_LABEL[r.match_type]}
                     </span>
                   </td>
@@ -168,7 +168,7 @@ export default function WafPage() {
                   <td className="px-6 py-3 text-muted-foreground">{r.note}</td>
                   <td className="px-6 py-3 text-right">
                     <button
-                      className="text-muted-foreground hover:text-red-400"
+                      className="text-muted-foreground hover:text-red-600"
                       onClick={() => remove(r.id)}
                       aria-label="Delete rule"
                     >

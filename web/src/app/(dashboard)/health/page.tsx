@@ -41,8 +41,8 @@ function duration(from: string, to: string | null) {
 }
 
 const badge: Record<Health["status"], string> = {
-  up: "bg-emerald-500/15 text-emerald-400",
-  down: "bg-red-500/15 text-red-400",
+  up: "bg-emerald-500/15 text-emerald-600",
+  down: "bg-red-500/15 text-red-600",
   unknown: "bg-muted text-muted-foreground",
 };
 
@@ -123,7 +123,7 @@ export default function HealthPage() {
         </Button>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardContent className="p-0">
@@ -210,8 +210,8 @@ export default function HealthPage() {
                       className={cn(
                         "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
                         sv.state === "running"
-                          ? "bg-emerald-500/15 text-emerald-400"
-                          : "bg-red-500/15 text-red-400",
+                          ? "bg-emerald-500/15 text-emerald-600"
+                          : "bg-red-500/15 text-red-600",
                       )}
                     >
                       {sv.state}
@@ -268,7 +268,7 @@ export default function HealthPage() {
                 <span
                   className={cn(
                     "ml-auto rounded-full px-2 py-0.5 text-xs",
-                    i.ongoing ? "bg-red-500/15 text-red-400" : "bg-muted text-muted-foreground",
+                    i.ongoing ? "bg-red-500/15 text-red-600" : "bg-muted text-muted-foreground",
                   )}
                 >
                   {i.ongoing ? `ongoing · ${duration(i.opened_at, null)}` : `resolved · ${duration(i.opened_at, i.closed_at)}`}

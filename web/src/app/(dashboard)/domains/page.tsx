@@ -402,8 +402,8 @@ export default function DomainsPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {notice && <p className="text-sm text-emerald-400">{notice}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       {nameservers.length > 0 && (
         <Card>
@@ -771,7 +771,7 @@ export default function DomainsPage() {
               </p>
               {dnssecResult.map((d) => (
                 <div key={d.rdata} className="break-all">
-                  <span className="text-emerald-400">DS</span> {d.rdata}
+                  <span className="text-emerald-600">DS</span> {d.rdata}
                 </div>
               ))}
             </div>
@@ -782,7 +782,7 @@ export default function DomainsPage() {
               {dnssec.map((d) => (
                 <li key={d.id} className="flex items-center gap-3 px-4 py-2 text-sm">
                   <span className="font-mono">{d.domain}</span>
-                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
+                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-600">
                     signed
                   </span>
                   <span className="truncate font-mono text-xs text-muted-foreground">

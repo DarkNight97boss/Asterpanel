@@ -63,7 +63,7 @@ export default function FirewallPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
@@ -124,8 +124,8 @@ export default function FirewallPage() {
                       className={cn(
                         "rounded-full border px-2 py-0.5 text-xs font-medium",
                         r.action === "allow"
-                          ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-400"
-                          : "border-red-500/30 bg-red-500/15 text-red-400",
+                          ? "border-emerald-500/30 bg-emerald-500/15 text-emerald-600"
+                          : "border-red-500/30 bg-red-500/15 text-red-600",
                       )}
                     >
                       {r.action}
@@ -136,7 +136,7 @@ export default function FirewallPage() {
                   <td className="px-6 py-3 text-muted-foreground">
                     {r.note?.startsWith("auto-ban") ? (
                       <span className="inline-flex items-center gap-1.5">
-                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-400">
+                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-xs font-medium text-amber-600">
                           auto
                         </span>
                         {r.note}

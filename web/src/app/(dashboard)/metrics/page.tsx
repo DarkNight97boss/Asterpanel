@@ -57,7 +57,7 @@ export default function MetricsPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
       {!m ? (
         <p className="text-sm text-muted-foreground">Loading…</p>
       ) : (

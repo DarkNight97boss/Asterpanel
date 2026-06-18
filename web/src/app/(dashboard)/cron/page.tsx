@@ -60,7 +60,7 @@ export default function CronPage() {
         description="Scheduled commands run in the site's container with resource limits."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>

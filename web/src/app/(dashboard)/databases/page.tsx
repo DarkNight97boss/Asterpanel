@@ -206,8 +206,8 @@ export default function DatabasesPage() {
         description="Provision managed database instances on your nodes (Postgres, MySQL, Redis…)."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
-      {notice && <p className="break-all text-sm text-emerald-400">{notice}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="break-all text-sm text-emerald-600">{notice}</p>}
 
       {creds && (
         <Card className="border-primary/40">
@@ -381,7 +381,7 @@ export default function DatabasesPage() {
             </div>
           )}
 
-          {queryError && <p className="text-sm text-red-400">{queryError}</p>}
+          {queryError && <p className="text-sm text-red-600">{queryError}</p>}
 
           {queryResult && (
             <div className="space-y-2">

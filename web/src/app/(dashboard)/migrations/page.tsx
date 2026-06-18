@@ -64,10 +64,10 @@ const SAMPLE = JSON.stringify(
 );
 
 const statusBadge: Record<Migration["status"], string> = {
-  planned: "bg-amber-500/15 text-amber-400",
+  planned: "bg-amber-500/15 text-amber-600",
   importing: "bg-primary/15 text-primary",
-  completed: "bg-emerald-500/15 text-emerald-400",
-  failed: "bg-red-500/15 text-red-400",
+  completed: "bg-emerald-500/15 text-emerald-600",
+  failed: "bg-red-500/15 text-red-600",
 };
 
 export default function MigrationsPage() {
@@ -151,7 +151,7 @@ export default function MigrationsPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
@@ -304,9 +304,9 @@ export default function MigrationsPage() {
                           className={cn(
                             "rounded px-1.5 py-0.5 text-xs",
                             l.result === "imported"
-                              ? "bg-emerald-500/15 text-emerald-400"
+                              ? "bg-emerald-500/15 text-emerald-600"
                               : l.result === "skipped"
-                                ? "bg-amber-500/15 text-amber-400"
+                                ? "bg-amber-500/15 text-amber-600"
                                 : "bg-muted text-muted-foreground",
                           )}
                         >

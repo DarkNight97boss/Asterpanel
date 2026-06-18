@@ -51,7 +51,7 @@ interface Filter {
 }
 
 const selectCls =
-  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+  "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
 
 interface SpamSettings {
   reject_score: number;
@@ -470,7 +470,7 @@ export default function EmailPage() {
         description="IMAP/SMTP mailboxes with quotas, SPF/DKIM signing and spam filtering."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
       {password && (
         <Card className="border-primary/40">
           <CardHeader>
@@ -515,16 +515,16 @@ export default function EmailPage() {
                 Publish these records at your registrar:
               </p>
               <div>
-                <span className="text-emerald-400">DKIM</span> {dkim.record.name}{" "}
+                <span className="text-emerald-600">DKIM</span> {dkim.record.name}{" "}
                 <span className="text-muted-foreground">TTL {3600}</span>
                 <div className="break-all">{dkim.record.content || <em>see node logs</em>}</div>
               </div>
               <div>
-                <span className="text-emerald-400">SPF </span> {dkim.spf.name} ·{" "}
+                <span className="text-emerald-600">SPF </span> {dkim.spf.name} ·{" "}
                 {dkim.spf.content}
               </div>
               <div>
-                <span className="text-emerald-400">DMARC</span> {dkim.dmarc.name} ·{" "}
+                <span className="text-emerald-600">DMARC</span> {dkim.dmarc.name} ·{" "}
                 {dkim.dmarc.content}
               </div>
             </div>
@@ -983,8 +983,8 @@ export default function EmailPage() {
                   <span
                     className={`rounded px-1.5 py-0.5 text-[11px] ${
                       rl.kind === "allow"
-                        ? "bg-emerald-500/15 text-emerald-400"
-                        : "bg-red-500/15 text-red-400"
+                        ? "bg-emerald-500/15 text-emerald-600"
+                        : "bg-red-500/15 text-red-600"
                     }`}
                   >
                     {rl.kind}
@@ -1062,7 +1062,7 @@ export default function EmailPage() {
                             type="button"
                             onClick={() => onDeleteMember(m.id)}
                             aria-label="Remove member"
-                            className="text-muted-foreground hover:text-red-400"
+                            className="text-muted-foreground hover:text-red-600"
                           >
                             ×
                           </button>
@@ -1108,7 +1108,7 @@ export default function EmailPage() {
             </code>{" "}
             with the account credentials.
           </p>
-          {caldavNotice && <p className="text-sm text-emerald-400">{caldavNotice}</p>}
+          {caldavNotice && <p className="text-sm text-emerald-600">{caldavNotice}</p>}
           <form onSubmit={onCreateCaldav} className="grid gap-3 sm:grid-cols-3 sm:items-end">
             <div className="space-y-1.5">
               <Label htmlFor="cd-user">Username</Label>

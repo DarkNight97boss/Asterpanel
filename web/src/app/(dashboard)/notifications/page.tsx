@@ -40,7 +40,7 @@ export default function NotificationsPage() {
         <p className="text-sm text-muted-foreground">Deploys, backups, security alerts and renewals.</p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardContent className="divide-y divide-border/60 p-0">

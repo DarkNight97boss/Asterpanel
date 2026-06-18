@@ -65,7 +65,7 @@ export default function NodesPage() {
         description="Register hosting nodes and issue one-time agent enrollment tokens."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       {enrollment && (
         <Card className="border-primary/40">

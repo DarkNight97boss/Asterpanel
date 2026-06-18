@@ -101,7 +101,7 @@ export default function BackupsPage() {
         description="Manual and scheduled backups to object storage (S3/B2), encrypted, with one-click restore."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
@@ -184,7 +184,7 @@ export default function BackupsPage() {
                     last run {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : "never"}
                   </span>
                   <button
-                    className="ml-auto text-muted-foreground hover:text-red-400"
+                    className="ml-auto text-muted-foreground hover:text-red-600"
                     onClick={() => deleteSchedule(s.id)}
                     aria-label="Delete schedule"
                   >

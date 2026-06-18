@@ -3,13 +3,13 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const tones: Record<string, string> = {
-  active: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  online: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
-  provisioning: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  pending: "bg-amber-500/15 text-amber-400 border-amber-500/30",
-  error: "bg-red-500/15 text-red-400 border-red-500/30",
-  offline: "bg-zinc-500/15 text-zinc-400 border-zinc-500/30",
-  default: "bg-zinc-500/15 text-zinc-300 border-zinc-500/30",
+  active: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
+  online: "bg-emerald-500/10 text-emerald-700 border-emerald-500/25",
+  provisioning: "bg-amber-500/10 text-amber-700 border-amber-500/25",
+  pending: "bg-amber-500/10 text-amber-700 border-amber-500/25",
+  error: "bg-red-500/10 text-red-700 border-red-500/25",
+  offline: "bg-zinc-500/10 text-zinc-600 border-zinc-500/25",
+  default: "bg-zinc-500/10 text-zinc-600 border-zinc-500/25",
 };
 
 export function StatusBadge({ status }: { status: string }) {

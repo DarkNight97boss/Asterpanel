@@ -125,7 +125,7 @@ export default function RuntimePage() {
         description="Per-site runtime and language version (PHP, Node…). Changing it redeploys the container."
       />
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
@@ -173,9 +173,9 @@ export default function RuntimePage() {
                       )}
                     </td>
                     <td className="px-6 py-3 text-sm">
-                      {st === "switching" && <span className="text-amber-400">redeploying…</span>}
-                      {st === "done" && <span className="text-emerald-400">✓ redeployed</span>}
-                      {st === "error" && <span className="text-red-400">failed</span>}
+                      {st === "switching" && <span className="text-amber-600">redeploying…</span>}
+                      {st === "done" && <span className="text-emerald-600">✓ redeployed</span>}
+                      {st === "error" && <span className="text-red-600">failed</span>}
                       {st === "idle" && <span className="text-muted-foreground">—</span>}
                     </td>
                   </tr>

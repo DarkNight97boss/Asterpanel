@@ -17,9 +17,9 @@ interface AuditEvent {
 }
 
 const outcomeTone: Record<string, string> = {
-  success: "border-emerald-500/30 bg-emerald-500/15 text-emerald-400",
-  failure: "border-red-500/30 bg-red-500/15 text-red-400",
-  denied: "border-amber-500/30 bg-amber-500/15 text-amber-400",
+  success: "border-emerald-500/30 bg-emerald-500/15 text-emerald-600",
+  failure: "border-red-500/30 bg-red-500/15 text-red-600",
+  denied: "border-amber-500/30 bg-amber-500/15 text-amber-600",
 };
 
 export default function AuditPage() {
@@ -41,7 +41,7 @@ export default function AuditPage() {
         </p>
       </header>
 
-      {error && <p className="text-sm text-red-400">{error}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
 
       <Card>
         <CardHeader>
