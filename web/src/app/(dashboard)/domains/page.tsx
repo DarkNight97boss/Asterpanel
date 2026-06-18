@@ -50,6 +50,13 @@ interface DnssecEntry {
   enabled: boolean;
 }
 
+interface Hotlink {
+  id: string;
+  domain: string;
+  allowed_referers: string[];
+  extensions: string[];
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
@@ -64,6 +71,9 @@ export default function DomainsPage() {
   const [dnssecDomain, setDnssecDomain] = useState("");
   const [dnssecBusy, setDnssecBusy] = useState(false);
   const [dnssecResult, setDnssecResult] = useState<{ rdata: string }[] | null>(null);
+  const [hotlink, setHotlink] = useState<Hotlink[]>([]);
+  const [hl, setHl] = useState({ domain: "", allowed_referers: "", extensions: "" });
+  const [hlBusy, setHlBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -78,7 +88,7 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd, pr, ds] = await Promise.all([
+      const [d, r, ns, rd, pr, ds, hk] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
@@ -89,6 +99,7 @@ export default function DomainsPage() {
           protections: [],
         })),
         apiGet<{ dnssec: DnssecEntry[] }>("/api/v1/dns/dnssec").catch(() => ({ dnssec: [] })),
+        apiGet<{ hotlink: Hotlink[] }>("/api/v1/hotlink-protection").catch(() => ({ hotlink: [] })),
       ]);
       setDomains(d);
       setRecords(r);
@@ -96,6 +107,7 @@ export default function DomainsPage() {
       setRedirects(rd.redirects ?? []);
       setProtections(pr.protections ?? []);
       setDnssec(ds.dnssec ?? []);
+      setHotlink(hk.hotlink ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -244,6 +256,42 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/dns/dnssec/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onAddHotlink(e: FormEvent) {
+    e.preventDefault();
+    setHlBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const split = (v: string) =>
+        v
+          .split(/[\s,]+/)
+          .map((s) => s.trim())
+          .filter(Boolean);
+      await apiPost("/api/v1/hotlink-protection", {
+        domain: hl.domain.trim(),
+        allowed_referers: split(hl.allowed_referers),
+        extensions: split(hl.extensions),
+      });
+      setNotice("Hotlink protection saved; Caddy config re-applied on the node.");
+      setHl({ domain: "", allowed_referers: "", extensions: "" });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setHlBusy(false);
+    }
+  }
+
+  async function onDeleteHotlink(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/hotlink-protection/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -655,6 +703,74 @@ export default function DomainsPage() {
                     className="ml-auto h-7 w-7 shrink-0"
                     onClick={() => onDisableDnssec(d.id)}
                     aria-label="Disable DNSSEC"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Hotlink protection ({hotlink.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Block other sites from embedding your assets (images, etc.). The domain itself is always
+            allowed; add extra referers (e.g. a CDN). Leave extensions empty for the image defaults.
+          </p>
+          <form onSubmit={onAddHotlink} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="hl-domain">Domain</Label>
+              <Input
+                id="hl-domain"
+                value={hl.domain}
+                onChange={(e) => setHl({ ...hl, domain: e.target.value })}
+                placeholder="acme.com"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hl-ref">Allowed referers</Label>
+              <Input
+                id="hl-ref"
+                value={hl.allowed_referers}
+                onChange={(e) => setHl({ ...hl, allowed_referers: e.target.value })}
+                placeholder="cdn.acme.com"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="hl-ext">Extensions</Label>
+              <Input
+                id="hl-ext"
+                value={hl.extensions}
+                onChange={(e) => setHl({ ...hl, extensions: e.target.value })}
+                placeholder="jpg, png, gif"
+              />
+            </div>
+            <Button type="submit" disabled={hlBusy}>
+              {hlBusy ? "Saving…" : "Protect"}
+            </Button>
+          </form>
+
+          {hotlink.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {hotlink.map((h) => (
+                <li key={h.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">{h.domain}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {(h.extensions.length ? h.extensions : ["images"]).join(", ")}
+                    {h.allowed_referers.length ? ` · +${h.allowed_referers.join(", ")}` : ""}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteHotlink(h.id)}
+                    aria-label="Delete hotlink rule"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

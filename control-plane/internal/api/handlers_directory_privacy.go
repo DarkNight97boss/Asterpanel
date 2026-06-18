@@ -131,6 +131,16 @@ func (s *Server) applyProtection(ctx context.Context, p *middleware.Principal) (
 			"domain": d.Domain, "path": d.Path, "username": d.Username, "password_hash": d.PasswordHash,
 		})
 	}
-	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeProtectionApply, node.ID, map[string]any{"basic_auth": list})
+	// The same protection.apply job carries hotlink rules so both land in one
+	// Caddy site block per domain.
+	hotlinks, _ := s.deps.Store.ListHotlink(ctx, p.OrgID)
+	hlList := make([]map[string]any, 0, len(hotlinks))
+	for _, h := range hotlinks {
+		hlList = append(hlList, map[string]any{
+			"domain": h.Domain, "allowed_referers": h.AllowedReferers, "extensions": h.Extensions,
+		})
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeProtectionApply, node.ID,
+		map[string]any{"basic_auth": list, "hotlink": hlList})
 	return jobID, dispatched
 }

@@ -1061,7 +1061,12 @@ impl DockerExecutor {
             .get("basic_auth")
             .and_then(Value::as_array)
             .unwrap_or(&empty);
-        let content = render_caddy_protection(basic_auth);
+        let hotlink = job
+            .payload
+            .get("hotlink")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_caddy_protection(basic_auth, hotlink);
         let dir =
             std::env::var("AGENT_CADDY_DIR").unwrap_or_else(|_| "/etc/asterpanel/caddy".into());
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
@@ -1072,7 +1077,7 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("protection.apply: write failed: {e}"));
         }
         let _ = run_cmd("caddy", &["reload".into(), "--force".into()]).await;
-        JobOutcome::succeeded(json!({"path": path, "rules": basic_auth.len()}))
+        JobOutcome::succeeded(json!({"path": path, "rules": basic_auth.len(), "hotlink": hotlink.len()}))
     }
 
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
@@ -2122,12 +2127,14 @@ fn render_caddy_redirects(redirects: &[Value]) -> String {
     out
 }
 
-/// Renders the Caddy directory-privacy snippet: one site block per domain, each
-/// with `basic_auth` matchers scoped to a path. Only bcrypt hashes (`$2…`) are
-/// accepted; invalid domains/hashes are skipped.
-fn render_caddy_protection(basic_auth: &[Value]) -> String {
-    use std::collections::BTreeMap;
-    let mut by_domain: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+/// Renders the Caddy site-protection snippet: one site block per domain, merging
+/// `basic_auth` matchers (path-scoped, bcrypt-only) and hotlink protection (a
+/// referer-guarded asset matcher → 403). Invalid domains/hashes are skipped.
+fn render_caddy_protection(basic_auth: &[Value], hotlink: &[Value]) -> String {
+    use std::collections::{BTreeMap, BTreeSet};
+    let mut auth: BTreeMap<String, Vec<(String, String, String)>> = BTreeMap::new();
+    let mut links: BTreeMap<String, (Vec<String>, Vec<String>)> = BTreeMap::new();
+
     for r in basic_auth {
         let domain = r.get("domain").and_then(Value::as_str).unwrap_or("").trim();
         if !valid_mail_domain(domain) {
@@ -2143,20 +2150,78 @@ fn render_caddy_protection(basic_auth: &[Value]) -> String {
         if !path.starts_with('/') {
             path = "/*".into();
         }
-        by_domain
-            .entry(domain.to_string())
+        auth.entry(domain.to_string())
             .or_default()
             .push((path, user.to_string(), hash.to_string()));
     }
 
-    let mut out = String::from("# AsterPanel directory privacy (generated — do not edit)\n");
-    for (domain, rules) in by_domain {
+    for h in hotlink {
+        let domain = h.get("domain").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(domain) {
+            continue;
+        }
+        let referers: Vec<String> = h
+            .get("allowed_referers")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::trim)
+                    .filter(|d| valid_mail_domain(d))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut exts: Vec<String> = h
+            .get("extensions")
+            .and_then(Value::as_array)
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(|e| e.trim().trim_start_matches('.').to_ascii_lowercase())
+                    .filter(|e| !e.is_empty() && e.chars().all(|c| c.is_ascii_alphanumeric()))
+                    .collect()
+            })
+            .unwrap_or_default();
+        if exts.is_empty() {
+            exts = ["jpg", "jpeg", "png", "gif", "webp", "svg", "ico"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+        }
+        links.insert(domain.to_string(), (referers, exts));
+    }
+
+    let domains: BTreeSet<String> = auth.keys().chain(links.keys()).cloned().collect();
+    let mut out = String::from("# AsterPanel site protection (generated — do not edit)\n");
+    for domain in domains {
         out.push_str(&format!("{domain} {{\n"));
-        for (i, (path, user, hash)) in rules.iter().enumerate() {
-            out.push_str(&format!("\t@priv{i} path {path}\n"));
-            out.push_str(&format!("\tbasic_auth @priv{i} {{\n"));
-            out.push_str(&format!("\t\t{user} {hash}\n"));
+        if let Some(rules) = auth.get(&domain) {
+            for (i, (path, user, hash)) in rules.iter().enumerate() {
+                out.push_str(&format!("\t@priv{i} path {path}\n"));
+                out.push_str(&format!("\tbasic_auth @priv{i} {{\n"));
+                out.push_str(&format!("\t\t{user} {hash}\n"));
+                out.push_str("\t}\n");
+            }
+        }
+        if let Some((referers, exts)) = links.get(&domain) {
+            // The domain itself is always an allowed referer.
+            let mut hosts = vec![domain.clone()];
+            hosts.extend(referers.iter().cloned());
+            let pattern = hosts
+                .iter()
+                .map(|h| h.replace('.', "\\."))
+                .collect::<Vec<_>>()
+                .join("|");
+            let ext_globs = exts.iter().map(|e| format!("*.{e}")).collect::<Vec<_>>().join(" ");
+            out.push_str("\t@hotlink {\n");
+            out.push_str(&format!("\t\tpath {ext_globs}\n"));
+            out.push_str("\t\theader Referer *\n");
+            out.push_str(&format!(
+                "\t\tnot header_regexp Referer ^https?://([a-z0-9.-]+\\.)?({pattern})\n"
+            ));
             out.push_str("\t}\n");
+            out.push_str("\trespond @hotlink 403\n");
         }
         out.push_str("}\n");
     }
@@ -3103,7 +3168,7 @@ mod tests {
             json!({"domain":"bad dom","path":"/x","username":"u","password_hash":"$2a$14$x"}), // invalid domain
             json!({"domain":"acme.com","path":"/y","username":"u","password_hash":"plaintext"}), // not bcrypt
         ];
-        let out = render_caddy_protection(&rules);
+        let out = render_caddy_protection(&rules, &[]);
         assert!(out.contains("acme.com {"), "{out}");
         assert!(out.contains("@priv0 path /admin/*"), "{out}");
         assert!(out.contains("basic_auth @priv0 {"), "{out}");
@@ -3111,6 +3176,24 @@ mod tests {
         assert!(out.contains("qa $2a$14$"), "{out}");
         assert!(!out.contains("bad dom"), "{out}");
         assert!(!out.contains("plaintext"), "{out}");
+    }
+
+    #[test]
+    fn caddy_protection_renders_hotlink() {
+        let hotlink = vec![
+            json!({"domain":"acme.com","allowed_referers":["cdn.acme.com"],"extensions":["jpg","png"]}),
+            json!({"domain":"shop.io","allowed_referers":[],"extensions":[]}), // defaults applied
+        ];
+        let out = render_caddy_protection(&[], &hotlink);
+        assert!(out.contains("acme.com {"), "{out}");
+        assert!(out.contains("@hotlink {"), "{out}");
+        assert!(out.contains("path *.jpg *.png"), "{out}");
+        assert!(out.contains("header Referer *"), "{out}");
+        // the domain itself + the extra referer appear in the allow pattern (dots escaped)
+        assert!(out.contains("acme\\.com|cdn\\.acme\\.com"), "{out}");
+        assert!(out.contains("respond @hotlink 403"), "{out}");
+        // empty extensions fall back to the default image set
+        assert!(out.contains("*.webp"), "{out}");
     }
 
     #[test]

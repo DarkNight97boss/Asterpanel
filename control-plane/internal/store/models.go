@@ -286,6 +286,15 @@ type Dnssec struct {
 	CreatedAt      time.Time
 }
 
+type HotlinkProtection struct {
+	ID              uuid.UUID
+	OrganizationID  uuid.UUID
+	Domain          string
+	AllowedReferers []string
+	Extensions      []string
+	CreatedAt       time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

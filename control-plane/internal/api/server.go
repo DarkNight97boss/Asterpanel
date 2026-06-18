@@ -182,6 +182,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("domain.create", "protection.create", "domain")).Post("/directory-privacy", s.handleCreateDirPrivacy)
 			r.With(az.Require("domain.create", "protection.delete", "domain")).Delete("/directory-privacy/{protectionID}", s.handleDeleteDirPrivacy)
 
+			// Hotlink protection (Caddy referer block on asset paths)
+			r.With(az.Require("domain.read", "hotlink.list", "domain")).Get("/hotlink-protection", s.handleListHotlink)
+			r.With(az.Require("domain.create", "hotlink.create", "domain")).Post("/hotlink-protection", s.handleCreateHotlink)
+			r.With(az.Require("domain.create", "hotlink.delete", "domain")).Delete("/hotlink-protection/{hotlinkID}", s.handleDeleteHotlink)
+
 			// Databases (managed SQL/KV instances)
 			r.With(az.Require("database.read", "database.list", "database_instance")).Get("/databases", s.handleListDatabases)
 			r.With(az.Require("database.create", "database.create", "database_instance")).Post("/databases", s.handleCreateDatabase)
