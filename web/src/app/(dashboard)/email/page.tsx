@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { apiDelete, apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost, apiPut } from "@/lib/api";
 
 interface Mailbox {
   id: string;
@@ -51,6 +51,18 @@ interface Filter {
 
 const selectCls =
   "flex h-9 w-full rounded-md border border-border bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+
+interface SpamSettings {
+  reject_score: number;
+  add_header_score: number;
+  greylisting: boolean;
+}
+
+interface SpamRule {
+  id: string;
+  kind: string;
+  value: string;
+}
 
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
@@ -215,6 +227,60 @@ export default function EmailPage() {
     keep: "Keep (no-op)",
   };
 
+  const [spam, setSpam] = useState<SpamSettings>({
+    reject_score: 15,
+    add_header_score: 6,
+    greylisting: true,
+  });
+  const [spamRules, setSpamRules] = useState<SpamRule[]>([]);
+  const [spamRule, setSpamRule] = useState({ kind: "deny", value: "" });
+  const [spamBusy, setSpamBusy] = useState(false);
+
+  async function refreshSpam() {
+    try {
+      const r = await apiGet<{ settings: SpamSettings; rules: SpamRule[] }>("/api/v1/email/spam");
+      if (r.settings) setSpam(r.settings);
+      setSpamRules(r.rules ?? []);
+    } catch {
+      /* keep defaults if the backend is unreachable */
+    }
+  }
+
+  async function onSaveSpam(e: FormEvent) {
+    e.preventDefault();
+    setSpamBusy(true);
+    setError(null);
+    try {
+      await apiPut("/api/v1/email/spam/settings", spam);
+      await refreshSpam();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save spam settings");
+    } finally {
+      setSpamBusy(false);
+    }
+  }
+
+  async function onAddSpamRule(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    try {
+      await apiPost("/api/v1/email/spam/rules", { kind: spamRule.kind, value: spamRule.value.trim() });
+      setSpamRule({ kind: spamRule.kind, value: "" });
+      await refreshSpam();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add rule");
+    }
+  }
+
+  async function onDeleteSpamRule(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/spam/rules/${id}`);
+      await refreshSpam();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete rule");
+    }
+  }
+
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
     setDkimBusy(true);
@@ -242,6 +308,7 @@ export default function EmailPage() {
     refreshForwarders();
     refreshAutoresponders();
     refreshFilters();
+    refreshSpam();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -694,6 +761,110 @@ export default function EmailPage() {
                     className="ml-auto h-7 w-7"
                     onClick={() => onDeleteFilter(f.id)}
                     aria-label="Delete filter"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Spam filter (Rspamd)</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          <p className="text-sm text-muted-foreground">
+            Tune the spam scoring thresholds and maintain sender allow/deny lists. Higher score =
+            more aggressive.
+          </p>
+          <form onSubmit={onSaveSpam} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="sp-reject">Reject at score</Label>
+              <Input
+                id="sp-reject"
+                type="number"
+                min={1}
+                max={100}
+                value={spam.reject_score}
+                onChange={(e) => setSpam({ ...spam, reject_score: Number(e.target.value) })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="sp-header">Flag at score</Label>
+              <Input
+                id="sp-header"
+                type="number"
+                min={1}
+                max={100}
+                value={spam.add_header_score}
+                onChange={(e) => setSpam({ ...spam, add_header_score: Number(e.target.value) })}
+              />
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={spam.greylisting}
+                onChange={(e) => setSpam({ ...spam, greylisting: e.target.checked })}
+                className="h-4 w-4 rounded border-border"
+              />
+              Greylisting
+            </label>
+            <Button type="submit" disabled={spamBusy}>
+              {spamBusy ? "Saving…" : "Save thresholds"}
+            </Button>
+          </form>
+
+          <form onSubmit={onAddSpamRule} className="grid gap-3 sm:grid-cols-4 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="sp-kind">List</Label>
+              <select
+                id="sp-kind"
+                className={selectCls}
+                value={spamRule.kind}
+                onChange={(e) => setSpamRule({ ...spamRule, kind: e.target.value })}
+              >
+                <option value="allow">Allow (whitelist)</option>
+                <option value="deny">Deny (blacklist)</option>
+              </select>
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label htmlFor="sp-value">Sender or domain</Label>
+              <Input
+                id="sp-value"
+                value={spamRule.value}
+                onChange={(e) => setSpamRule({ ...spamRule, value: e.target.value })}
+                placeholder="newsletter@acme.com or spammy.example"
+                required
+              />
+            </div>
+            <Button type="submit" variant="outline">
+              Add
+            </Button>
+          </form>
+
+          {spamRules.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {spamRules.map((rl) => (
+                <li key={rl.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span
+                    className={`rounded px-1.5 py-0.5 text-[11px] ${
+                      rl.kind === "allow"
+                        ? "bg-emerald-500/15 text-emerald-400"
+                        : "bg-red-500/15 text-red-400"
+                    }`}
+                  >
+                    {rl.kind}
+                  </span>
+                  <span className="font-mono">{rl.value}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteSpamRule(rl.id)}
+                    aria-label="Delete spam rule"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>

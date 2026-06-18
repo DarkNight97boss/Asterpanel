@@ -30,6 +30,7 @@ allowed_types := {
 	"mail.alias.apply",
 	"mail.autoresponder.apply",
 	"mail.filter.apply",
+	"mail.spam.apply",
 	"cron.apply",
 	"ftp.account.create",
 	"cert.install",

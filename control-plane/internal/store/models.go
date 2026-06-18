@@ -261,6 +261,21 @@ type SitePhpSetting struct {
 	CreatedAt      time.Time
 }
 
+type SpamSettings struct {
+	OrganizationID uuid.UUID
+	RejectScore    int
+	AddHeaderScore int
+	Greylisting    bool
+}
+
+type SpamRule struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Kind           string
+	Value          string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

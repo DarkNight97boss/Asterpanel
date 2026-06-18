@@ -66,6 +66,7 @@ impl Executor for DockerExecutor {
             "mail.alias.apply" => self.mail_alias_apply(job).await,
             "mail.autoresponder.apply" => self.mail_autoresponder_apply(job).await,
             "mail.filter.apply" => self.mail_filter_apply(job).await,
+            "mail.spam.apply" => self.mail_spam_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -498,6 +499,67 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("mail.filter.apply: write failed: {e}"));
         }
         JobOutcome::succeeded(json!({"path": path, "filters": filters.len()}))
+    }
+
+    /// Writes the Rspamd spam configuration: action thresholds, greylisting
+    /// toggle, and allow/deny multimaps (sender whitelists/blacklists).
+    async fn mail_spam_apply(&self, job: &Job) -> JobOutcome {
+        let reject = job
+            .payload
+            .get("reject_score")
+            .and_then(Value::as_i64)
+            .unwrap_or(15)
+            .clamp(1, 100);
+        let add_header = job
+            .payload
+            .get("add_header_score")
+            .and_then(Value::as_i64)
+            .unwrap_or(6)
+            .clamp(1, 100);
+        let greylisting = job
+            .payload
+            .get("greylisting")
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+        let list = |k: &str| -> Vec<String> {
+            job.payload
+                .get(k)
+                .and_then(Value::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::trim)
+                        .filter(|v| !v.is_empty() && !v.contains(char::is_whitespace))
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        };
+        let allow = list("allow");
+        let deny = list("deny");
+
+        let dir = std::env::var("AGENT_RSPAMD_DIR").unwrap_or_else(|_| "/etc/asterpanel/rspamd".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mail.spam.apply: mkdir failed: {e}"));
+        }
+        let wl_path = format!("{dir}/allow.map");
+        let bl_path = format!("{dir}/deny.map");
+        let writes = [
+            (format!("{dir}/actions.conf"), render_rspamd_actions(reject, add_header)),
+            (format!("{dir}/greylist.conf"), render_rspamd_greylist(greylisting)),
+            (format!("{dir}/multimap.conf"), render_rspamd_multimap(&wl_path, &bl_path)),
+            (wl_path.clone(), format!("{}\n", allow.join("\n"))),
+            (bl_path.clone(), format!("{}\n", deny.join("\n"))),
+        ];
+        for (path, content) in &writes {
+            if let Err(e) = tokio::fs::write(path, content.as_bytes()).await {
+                return JobOutcome::failed(format!("mail.spam.apply: write {path} failed: {e}"));
+            }
+        }
+        JobOutcome::succeeded(json!({
+            "reject": reject, "add_header": add_header, "greylisting": greylisting,
+            "allow": allow.len(), "deny": deny.len(),
+        }))
     }
 
     async fn backup_create(&self, job: &Job) -> JobOutcome {
@@ -1751,6 +1813,25 @@ fn valid_email(s: &str) -> bool {
         && valid_mail_domain(domain)
 }
 
+/// Rspamd action thresholds (greylist sits a couple of points below add_header).
+fn render_rspamd_actions(reject: i64, add_header: i64) -> String {
+    let greylist = (add_header - 2).max(1);
+    format!("# AsterPanel (generated — do not edit)\nreject = {reject};\nadd_header = {add_header};\ngreylist = {greylist};\n")
+}
+
+fn render_rspamd_greylist(enabled: bool) -> String {
+    format!("# AsterPanel (generated — do not edit)\nenabled = {enabled};\n")
+}
+
+/// Rspamd multimap referencing the allow/deny sender map files.
+fn render_rspamd_multimap(allow_path: &str, deny_path: &str) -> String {
+    format!(
+        "# AsterPanel (generated — do not edit)\n\
+ASTERPANEL_ALLOW {{\n  type = \"from\";\n  map = \"{allow_path}\";\n  score = -10.0;\n  symbol = \"ASTERPANEL_ALLOW\";\n}}\n\
+ASTERPANEL_DENY {{\n  type = \"from\";\n  map = \"{deny_path}\";\n  score = 12.0;\n  symbol = \"ASTERPANEL_DENY\";\n}}\n"
+    )
+}
+
 /// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
 async fn sha256_file(path: &str) -> String {
     match run_cmd("sha256sum", &[path.to_string()]).await {
@@ -2881,6 +2962,22 @@ mod tests {
         assert!(out.contains("upload_max_filesize = 64M"), "{out}");
         assert!(!out.contains("evil_directive"), "{out}");
         assert!(!out.contains("[hack]"), "{out}");
+    }
+
+    #[test]
+    fn rspamd_config_renders() {
+        let a = render_rspamd_actions(15, 6);
+        assert!(a.contains("reject = 15;"), "{a}");
+        assert!(a.contains("add_header = 6;"), "{a}");
+        assert!(a.contains("greylist = 4;"), "{a}");
+        assert!(render_rspamd_greylist(false).contains("enabled = false;"));
+        assert!(render_rspamd_greylist(true).contains("enabled = true;"));
+        let mm = render_rspamd_multimap("/x/allow.map", "/x/deny.map");
+        assert!(mm.contains("ASTERPANEL_ALLOW"), "{mm}");
+        assert!(mm.contains("map = \"/x/allow.map\";"), "{mm}");
+        assert!(mm.contains("score = -10.0;"), "{mm}");
+        assert!(mm.contains("ASTERPANEL_DENY"), "{mm}");
+        assert!(mm.contains("score = 12.0;"), "{mm}");
     }
 
     #[test]

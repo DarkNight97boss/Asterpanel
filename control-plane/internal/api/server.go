@@ -204,6 +204,12 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/filters", s.handleCreateFilter)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/filters/{filterID}", s.handleDeleteFilter)
 
+			// Spam management (Rspamd thresholds + allow/deny lists)
+			r.With(az.Require("email.read", "email.spam", "mailbox")).Get("/email/spam", s.handleGetSpam)
+			r.With(az.Require("email.manage", "email.spam", "mailbox")).Put("/email/spam/settings", s.handleUpdateSpamSettings)
+			r.With(az.Require("email.manage", "email.spam", "mailbox")).Post("/email/spam/rules", s.handleCreateSpamRule)
+			r.With(az.Require("email.manage", "email.spam", "mailbox")).Delete("/email/spam/rules/{ruleID}", s.handleDeleteSpamRule)
+
 			// Native webmail client (IMAP/SMTP gateway)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/folders", s.handleWebmailFolders)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/webmail/{mailboxID}/messages", s.handleWebmailMessages)

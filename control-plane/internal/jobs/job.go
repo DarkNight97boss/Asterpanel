@@ -39,6 +39,7 @@ const (
 	TypeMailAliasApply    Type = "mail.alias.apply"
 	TypeMailAutoresponder Type = "mail.autoresponder.apply"
 	TypeMailFilterApply   Type = "mail.filter.apply"
+	TypeMailSpamApply     Type = "mail.spam.apply"
 	TypeCronApply         Type = "cron.apply"
 	TypeFTPAccountCreate  Type = "ftp.account.create"
 	TypeCertInstall       Type = "cert.install"
