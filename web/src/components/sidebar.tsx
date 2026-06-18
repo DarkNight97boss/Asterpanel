@@ -2,111 +2,14 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  Activity,
-  Archive,
-  BarChart3,
-  Bell,
-  Building2,
-  Clock,
-  Database,
-  DownloadCloud,
-  FileCode2,
-  FolderTree,
-  Globe,
-  HardDrive,
-  HeartPulse,
-  Inbox,
-  Key,
-  KeyRound,
-  LayoutDashboard,
-  Lock,
-  LogOut,
-  Mail,
-  Network,
-  Package,
-  Palette,
-  Receipt,
-  ScrollText,
-  Webhook,
-  Server,
-  Shield,
-  ShieldAlert,
-  Terminal,
-  ShieldCheck,
-  type LucideIcon,
-} from "lucide-react";
+import { LogOut, ShieldCheck } from "lucide-react";
 
+import { groups } from "@/lib/nav";
 import { useAuth } from "@/lib/auth";
 import { useBranding } from "@/lib/branding";
-import { Feature, useLicense } from "@/lib/license";
+import { useLicense } from "@/lib/license";
 import { LanguageSwitcher, useT } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-
-type Item = { href: string; label: string; icon: LucideIcon; feature?: string };
-type Group = { label: string | null; items: Item[] };
-
-const groups: Group[] = [
-  { label: null, items: [{ href: "/dashboard", label: "Overview", icon: LayoutDashboard }] },
-  {
-    label: "Infrastructure",
-    items: [
-      { href: "/nodes", label: "Nodes", icon: Server },
-      { href: "/metrics", label: "Metrics", icon: Activity },
-      { href: "/health", label: "Health", icon: HeartPulse },
-      { href: "/logs", label: "Logs", icon: Terminal },
-    ],
-  },
-  {
-    label: "Sites",
-    items: [
-      { href: "/sites", label: "Websites", icon: Globe },
-      { href: "/domains", label: "Domains & DNS", icon: Network },
-      { href: "/ssl", label: "SSL / TLS", icon: Lock },
-      { href: "/runtime", label: "Runtime", icon: FileCode2 },
-      { href: "/analytics", label: "Analytics", icon: BarChart3 },
-      { href: "/apps", label: "One-Click Apps", icon: Package },
-    ],
-  },
-  {
-    label: "Email",
-    items: [
-      { href: "/email", label: "Mailboxes", icon: Mail },
-      { href: "/webmail", label: "Webmail", icon: Inbox },
-    ],
-  },
-  {
-    label: "Data",
-    items: [
-      { href: "/databases", label: "Databases", icon: Database },
-      { href: "/files", label: "File Manager", icon: FolderTree },
-      { href: "/ftp", label: "FTP / SFTP", icon: HardDrive },
-      { href: "/backups", label: "Backups", icon: Archive },
-    ],
-  },
-  { label: "Automation", items: [{ href: "/cron", label: "Cron Jobs", icon: Clock }] },
-  { label: "Config", items: [{ href: "/env", label: "Env & Secrets", icon: KeyRound }] },
-  {
-    label: "Security",
-    items: [
-      { href: "/firewall", label: "Firewall", icon: Shield },
-      { href: "/waf", label: "WAF", icon: ShieldAlert },
-      { href: "/audit", label: "Audit Log", icon: ScrollText },
-      { href: "/tokens", label: "API Tokens", icon: Key },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
-      { href: "/reseller", label: "Reseller", icon: Building2, feature: Feature.Reseller },
-      { href: "/migrations", label: "Migrations", icon: DownloadCloud, feature: Feature.Migration },
-      { href: "/branding", label: "Branding", icon: Palette, feature: Feature.WhiteLabel },
-      { href: "/webhooks", label: "Webhooks", icon: Webhook, feature: Feature.WhiteLabel },
-      { href: "/billing", label: "Billing", icon: Receipt, feature: Feature.Billing },
-      { href: "/notifications", label: "Notifications", icon: Bell },
-    ],
-  },
-];
 
 export function Sidebar() {
   const pathname = usePathname();
