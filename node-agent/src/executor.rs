@@ -73,6 +73,7 @@ impl Executor for DockerExecutor {
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "database.query" => self.database_query(job).await,
+            "database.access.apply" => self.database_access_apply(job).await,
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
@@ -853,6 +854,57 @@ impl DockerExecutor {
             )),
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
+    }
+
+    /// Writes a pg_hba.conf access block for a database's allowed remote hosts and
+    /// best-effort reloads Postgres. Postgres only (the engine that runs live).
+    async fn database_access_apply(&self, job: &Job) -> JobOutcome {
+        let db_id = job
+            .payload
+            .get("database_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let engine = job.payload.get("engine").and_then(Value::as_str).unwrap_or("postgres");
+        if engine != "postgres" {
+            return JobOutcome::failed(
+                "database.access.apply: only postgres remote access is supported here",
+            );
+        }
+        let empty: Vec<Value> = Vec::new();
+        let hosts = job
+            .payload
+            .get("hosts")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_pg_hba(hosts);
+        let dir = std::env::var("AGENT_DB_DIR").unwrap_or_else(|_| "/etc/asterpanel/db".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("database.access.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/{db_id}-pg_hba.conf");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("database.access.apply: write failed: {e}"));
+        }
+        // Best-effort: drop the rules into the container and reload Postgres.
+        let container = format!("astp_db_{db_id}");
+        let _ = run_docker(&[
+            "cp".into(),
+            path.clone(),
+            format!("{container}:/var/lib/postgresql/data/asterpanel_hba.conf"),
+        ])
+        .await;
+        let _ = run_docker(&[
+            "exec".into(),
+            container,
+            "psql".into(),
+            "-U".into(),
+            "postgres".into(),
+            "-c".into(),
+            "SELECT pg_reload_conf();".into(),
+        ])
+        .await;
+        let count = content.lines().filter(|l| l.starts_with("host ")).count();
+        JobOutcome::succeeded(json!({"path": path, "hosts": count}))
     }
 
     /// Aggregates a site's Caddy JSON access log into web-analytics figures
@@ -2391,6 +2443,45 @@ fn db_query_args(
     }
 }
 
+/// Renders a pg_hba.conf access block from a list of host patterns (IP or CIDR).
+/// Invalid patterns are skipped; SCRAM password auth is required.
+fn render_pg_hba(hosts: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel remote access (generated — do not edit)\n");
+    for h in hosts {
+        let cidr = h.as_str().unwrap_or("").trim();
+        if !valid_cidr_or_ip(cidr) {
+            continue;
+        }
+        out.push_str(&format!("host all all {cidr} scram-sha-256\n"));
+    }
+    out
+}
+
+/// Accepts an IPv4 address or CIDR (e.g. `203.0.113.0/24`). Structural check.
+fn valid_cidr_or_ip(s: &str) -> bool {
+    let (addr, mask) = match s.split_once('/') {
+        Some((a, m)) => (a, Some(m)),
+        None => (s, None),
+    };
+    let octets: Vec<&str> = addr.split('.').collect();
+    if octets.len() != 4 {
+        return false;
+    }
+    for o in &octets {
+        match o.parse::<u16>() {
+            Ok(n) if n <= 255 && !o.is_empty() => {}
+            _ => return false,
+        }
+    }
+    if let Some(m) = mask {
+        match m.parse::<u8>() {
+            Ok(n) if n <= 32 => {}
+            _ => return false,
+        }
+    }
+    true
+}
+
 /// Parses a query result into (columns, rows). Postgres `--csv` is parsed as
 /// RFC-4180 CSV; MySQL `--batch` is tab-separated. The first record is the
 /// header row.
@@ -3113,6 +3204,27 @@ mod tests {
         assert!(args.contains(&"--csv".to_string()));
         assert!(args.iter().any(|a| a.contains("statement_timeout")));
         assert!(db_query_args("mongo", "c", "d", "o", "x").is_none());
+    }
+
+    #[test]
+    fn pg_hba_renders_valid_hosts_only() {
+        let hosts = vec![
+            json!("203.0.113.0/24"),
+            json!("198.51.100.7"),
+            json!("not-an-ip"),       // skipped
+            json!("10.0.0.0/99"),     // bad mask → skipped
+            json!("999.1.1.1"),       // bad octet → skipped
+        ];
+        let out = render_pg_hba(&hosts);
+        assert!(out.contains("host all all 203.0.113.0/24 scram-sha-256"), "{out}");
+        assert!(out.contains("host all all 198.51.100.7 scram-sha-256"), "{out}");
+        assert!(!out.contains("not-an-ip"), "{out}");
+        assert!(!out.contains("/99"), "{out}");
+        assert!(!out.contains("999"), "{out}");
+        assert!(valid_cidr_or_ip("1.2.3.4"));
+        assert!(valid_cidr_or_ip("10.0.0.0/8"));
+        assert!(!valid_cidr_or_ip("1.2.3"));
+        assert!(!valid_cidr_or_ip("1.2.3.4/40"));
     }
 
     #[test]

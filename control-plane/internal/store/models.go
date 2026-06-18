@@ -306,6 +306,14 @@ type DdnsHost struct {
 	CreatedAt      time.Time
 }
 
+type DBRemoteHost struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	DatabaseID     uuid.UUID
+	Host           string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

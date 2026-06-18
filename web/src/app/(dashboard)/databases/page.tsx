@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
+import { Trash2 } from "lucide-react";
+
+import { apiDelete, apiGet, apiPost, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 
 const ENGINES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
@@ -21,6 +23,11 @@ interface QueryResult {
   rows: string[][];
   row_count: number;
   truncated: boolean;
+}
+
+interface RemoteHost {
+  id: string;
+  host: string;
 }
 
 function fmtSize(mb: number | null) {
@@ -41,6 +48,10 @@ export default function DatabasesPage() {
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
   const [tables, setTables] = useState<string[]>([]);
+  const [remoteDbId, setRemoteDbId] = useState("");
+  const [remoteHosts, setRemoteHosts] = useState<RemoteHost[]>([]);
+  const [remoteHostInput, setRemoteHostInput] = useState("");
+  const [remoteBusy, setRemoteBusy] = useState(false);
 
   async function refresh() {
     try {
@@ -52,6 +63,16 @@ export default function DatabasesPage() {
   useEffect(() => {
     refresh();
   }, []);
+
+  useEffect(() => {
+    if (!remoteDbId && pgDbs.length) setRemoteDbId(pgDbs[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbs]);
+
+  useEffect(() => {
+    loadRemoteHosts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [remoteDbId]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -71,6 +92,41 @@ export default function DatabasesPage() {
 
   const queryableDbs = dbs.filter((d) => QUERYABLE.includes(d.engine));
   const selDb = queryableDbs.find((d) => d.id === (queryDbId || queryableDbs[0]?.id));
+  const pgDbs = dbs.filter((d) => d.engine === "postgres");
+
+  async function loadRemoteHosts() {
+    if (!remoteDbId) return;
+    try {
+      const r = await apiGet<{ hosts: RemoteHost[] }>(`/api/v1/databases/${remoteDbId}/remote-hosts`);
+      setRemoteHosts(r.hosts ?? []);
+    } catch {
+      setRemoteHosts([]);
+    }
+  }
+
+  async function onAddRemoteHost(e: FormEvent) {
+    e.preventDefault();
+    setRemoteBusy(true);
+    setError(null);
+    try {
+      await apiPost(`/api/v1/databases/${remoteDbId}/remote-hosts`, { host: remoteHostInput.trim() });
+      setRemoteHostInput("");
+      await loadRemoteHosts();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add host");
+    } finally {
+      setRemoteBusy(false);
+    }
+  }
+
+  async function onDeleteRemoteHost(id: string) {
+    try {
+      await apiDelete(`/api/v1/databases/${remoteDbId}/remote-hosts/${id}`);
+      await loadRemoteHosts();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not remove host");
+    }
+  }
 
   async function loadTables() {
     if (!selDb) return;
@@ -326,6 +382,74 @@ export default function DatabasesPage() {
                 </div>
               )}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Remote access</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Allow external hosts to connect to a Postgres database (by IP or CIDR). Rules are
+            rendered into the database&apos;s <code>pg_hba.conf</code>.
+          </p>
+          {pgDbs.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No Postgres databases.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <label htmlFor="rh-db" className="text-sm text-muted-foreground">
+                  Database
+                </label>
+                <select
+                  id="rh-db"
+                  className={selectCls}
+                  value={remoteDbId}
+                  onChange={(e) => setRemoteDbId(e.target.value)}
+                >
+                  {pgDbs.map((d) => (
+                    <option key={d.id} value={d.id} className="bg-card">
+                      {d.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <form onSubmit={onAddRemoteHost} className="flex items-end gap-3">
+                <div className="grow space-y-1.5">
+                  <Label htmlFor="rh-host">Host (IP or CIDR)</Label>
+                  <Input
+                    id="rh-host"
+                    value={remoteHostInput}
+                    onChange={(e) => setRemoteHostInput(e.target.value)}
+                    placeholder="203.0.113.0/24"
+                    required
+                  />
+                </div>
+                <Button type="submit" disabled={remoteBusy}>
+                  {remoteBusy ? "Adding…" : "Allow host"}
+                </Button>
+              </form>
+              {remoteHosts.length > 0 && (
+                <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+                  {remoteHosts.map((h) => (
+                    <li key={h.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                      <span className="font-mono">{h.host}</span>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="ml-auto h-7 w-7"
+                        onClick={() => onDeleteRemoteHost(h.id)}
+                        aria-label="Remove host"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
           )}
         </CardContent>
       </Card>
