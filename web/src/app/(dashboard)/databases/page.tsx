@@ -39,6 +39,7 @@ export default function DatabasesPage() {
   const [queryBusy, setQueryBusy] = useState(false);
   const [queryResult, setQueryResult] = useState<QueryResult | null>(null);
   const [queryError, setQueryError] = useState<string | null>(null);
+  const [tables, setTables] = useState<string[]>([]);
 
   async function refresh() {
     try {
@@ -68,6 +69,41 @@ export default function DatabasesPage() {
   }
 
   const queryableDbs = dbs.filter((d) => QUERYABLE.includes(d.engine));
+  const selDb = queryableDbs.find((d) => d.id === (queryDbId || queryableDbs[0]?.id));
+
+  async function loadTables() {
+    if (!selDb) return;
+    setQueryError(null);
+    const sql =
+      selDb.engine === "postgres"
+        ? "SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') ORDER BY table_name"
+        : "SELECT table_name FROM information_schema.tables WHERE table_schema = DATABASE() ORDER BY table_name";
+    try {
+      const r = await apiPost<QueryResult>(`/api/v1/databases/${selDb.id}/query`, { sql });
+      setTables(r.rows.map((row) => row[0]).filter(Boolean));
+    } catch (e) {
+      setQueryError(e instanceof Error ? e.message : "Failed to list tables");
+    }
+  }
+
+  async function browseTable(name: string) {
+    if (!selDb) return;
+    const safe = name.replace(/[^a-zA-Z0-9_]/g, "");
+    const quoted = selDb.engine === "postgres" ? `"${safe}"` : `\`${safe}\``;
+    setQueryBusy(true);
+    setQueryError(null);
+    setQueryResult(null);
+    try {
+      const res = await apiPost<QueryResult>(`/api/v1/databases/${selDb.id}/query`, {
+        sql: `SELECT * FROM ${quoted} LIMIT 100`,
+      });
+      setQueryResult(res);
+    } catch (e) {
+      setQueryError(e instanceof Error ? e.message : "Query failed");
+    } finally {
+      setQueryBusy(false);
+    }
+  }
 
   async function onRunQuery(e: FormEvent) {
     e.preventDefault();
@@ -203,7 +239,10 @@ export default function DatabasesPage() {
                     id="q-db"
                     className={selectCls}
                     value={queryDbId || queryableDbs[0]?.id}
-                    onChange={(e) => setQueryDbId(e.target.value)}
+                    onChange={(e) => {
+                      setQueryDbId(e.target.value);
+                      setTables([]);
+                    }}
                   >
                     {queryableDbs.map((d) => (
                       <option key={d.id} value={d.id} className="bg-card">
@@ -224,6 +263,33 @@ export default function DatabasesPage() {
                 {queryBusy ? "Running…" : "Run query"}
               </Button>
             </form>
+          )}
+
+          {queryableDbs.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={loadTables}>
+                  Browse tables
+                </Button>
+                {tables.length > 0 && (
+                  <span className="text-xs text-muted-foreground">{tables.length} tables</span>
+                )}
+              </div>
+              {tables.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {tables.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => browseTable(t)}
+                      className="rounded bg-muted px-2 py-0.5 font-mono text-xs transition-colors hover:bg-primary/15 hover:text-primary"
+                    >
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
 
           {queryError && <p className="text-sm text-red-400">{queryError}</p>}
