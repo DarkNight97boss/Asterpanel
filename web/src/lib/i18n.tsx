@@ -143,6 +143,9 @@ const it: Dict = {
   Calendars: "Calendari",
   Deliverability: "Recapito",
   Spam: "Spam",
+  "Run Backup": "Esegui backup",
+  Schedules: "Pianificazioni",
+  History: "Cronologia",
 };
 
 const DICTS: Record<Locale, Dict> = { en: {}, it };

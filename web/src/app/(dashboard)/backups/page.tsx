@@ -1,15 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Trash2 } from "lucide-react";
+import { CalendarClock, History, Play, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusBadge } from "@/components/ui/badge";
 import { apiDelete, apiGet, apiPost, createBackup, listBackups, type Backup } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { PageTabs, type PageTab } from "@/components/page-tabs";
 
 const TYPES = ["full", "files", "database"];
+
+const TABS: PageTab[] = [
+  { id: "run", label: "Run Backup", icon: Play },
+  { id: "schedules", label: "Schedules", icon: CalendarClock },
+  { id: "history", label: "History", icon: History },
+];
 
 interface Schedule {
   id: string;
@@ -39,6 +46,7 @@ export default function BackupsPage() {
   const [retention, setRetention] = useState("30");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState("run");
 
   async function refresh() {
     try {
@@ -103,6 +111,9 @@ export default function BackupsPage() {
 
       {error && <p className="text-sm text-red-600">{error}</p>}
 
+      <PageTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {tab === "run" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Run a backup</CardTitle>
@@ -132,7 +143,9 @@ export default function BackupsPage() {
           </div>
         </CardContent>
       </Card>
+      )}
 
+      {tab === "schedules" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Schedules ({schedules.length})</CardTitle>
@@ -196,7 +209,9 @@ export default function BackupsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "history" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">History ({backups.length})</CardTitle>
@@ -238,6 +253,7 @@ export default function BackupsPage() {
           </table>
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
