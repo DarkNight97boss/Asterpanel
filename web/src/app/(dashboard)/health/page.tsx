@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { RefreshCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
 
@@ -27,6 +27,12 @@ interface Incident {
   ongoing: boolean;
 }
 
+interface Service {
+  name: string;
+  state: string;
+  status: string;
+}
+
 function duration(from: string, to: string | null) {
   const ms = (to ? new Date(to).getTime() : Date.now()) - new Date(from).getTime();
   const m = Math.max(0, Math.round(ms / 60000));
@@ -43,19 +49,37 @@ const badge: Record<Health["status"], string> = {
 export default function HealthPage() {
   const [sites, setSites] = useState<Health[]>([]);
   const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [svcBusy, setSvcBusy] = useState<Record<string, boolean>>({});
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState<Record<string, boolean>>({});
 
   async function load() {
     try {
-      const [h, inc] = await Promise.all([
+      const [h, inc, svc] = await Promise.all([
         apiGet<{ sites: Health[] }>("/api/v1/health"),
         apiGet<{ incidents: Incident[] }>("/api/v1/health/incidents"),
+        apiGet<{ services: Service[] }>("/api/v1/services").catch(() => ({ services: [] })),
       ]);
       setSites(h.sites ?? []);
       setIncidents(inc.incidents ?? []);
+      setServices(svc.services ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load health");
+    }
+  }
+
+  async function onRestart(name: string) {
+    setSvcBusy((b) => ({ ...b, [name]: true }));
+    setError(null);
+    try {
+      await apiPost("/api/v1/services/restart", { name });
+      const svc = await apiGet<{ services: Service[] }>("/api/v1/services");
+      setServices(svc.services ?? []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Restart failed");
+    } finally {
+      setSvcBusy((b) => ({ ...b, [name]: false }));
     }
   }
 
@@ -155,6 +179,62 @@ export default function HealthPage() {
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
                     No sites to monitor yet.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Services ({services.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Container</th>
+                <th className="px-6 py-3 font-medium">State</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {services.map((sv) => (
+                <tr key={sv.name} className="border-b border-border/60 last:border-0">
+                  <td className="px-6 py-3 font-mono text-xs">{sv.name}</td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium capitalize",
+                        sv.state === "running"
+                          ? "bg-emerald-500/15 text-emerald-400"
+                          : "bg-red-500/15 text-red-400",
+                      )}
+                    >
+                      {sv.state}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">{sv.status}</td>
+                  <td className="px-6 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      disabled={svcBusy[sv.name]}
+                      onClick={() => onRestart(sv.name)}
+                    >
+                      <RefreshCw className={svcBusy[sv.name] ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+                      Restart
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {services.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                    No containers reported by the node.
                   </td>
                 </tr>
               )}

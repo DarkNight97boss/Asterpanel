@@ -45,6 +45,8 @@ INSERT INTO permissions (key, description, category) VALUES
   ('database.create',     'Provision databases',               'database'),
   ('database.delete',     'Delete databases',                  'database'),
   ('database.query',      'Run ad-hoc SQL queries',            'database'),
+  ('service.read',        'View node services/containers',     'node'),
+  ('service.manage',      'Restart node services/containers',  'node'),
   ('backup.read',         'View backups',                      'backup'),
   ('backup.create',       'Create backups',                    'backup'),
   ('backup.restore',      'Restore backups',                   'backup'),
@@ -84,6 +86,7 @@ SELECT r.id, p.id FROM roles r JOIN permissions p ON p.key IN (
   'deploy.read','deploy.create','deploy.rollback',
   'env.read','env.manage','secret.read','secret.manage',
   'database.read','database.create','database.delete','database.query',
+  'service.read','service.manage',
   'backup.read','backup.create','backup.restore'
 )
 WHERE r.is_system AND r.name = 'developer'

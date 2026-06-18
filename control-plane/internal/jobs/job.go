@@ -58,6 +58,7 @@ const (
 	TypeAntivirusScan     Type = "antivirus.scan"
 	TypeHealthCheck       Type = "health.check"
 	TypeAnalyticsCompute  Type = "analytics.compute"
+	TypeServiceControl    Type = "service.control"
 )
 
 // Job is the signed instruction envelope. Field order is irrelevant — the

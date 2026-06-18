@@ -139,6 +139,10 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("website.read", "logs.tail", "website")).Get("/sites/{siteID}/logs", s.handleSiteLogs)
 			r.With(az.Require("metrics.read", "analytics.read", "website")).Get("/sites/{siteID}/analytics", s.handleSiteAnalytics)
 
+			// Service manager (node containers: status + restart)
+			r.With(az.Require("service.read", "service.list", "node")).Get("/services", s.handleListServices)
+			r.With(az.Require("service.manage", "service.restart", "node")).Post("/services/restart", s.handleRestartService)
+
 			// Health checks (per-site probes + status)
 			r.With(az.Require("website.read", "health.list", "website")).Get("/health", s.handleListHealth)
 			r.With(az.Require("website.read", "health.incidents", "website")).Get("/health/incidents", s.handleListIncidents)

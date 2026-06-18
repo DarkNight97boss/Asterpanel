@@ -89,6 +89,7 @@ impl Executor for DockerExecutor {
             "antivirus.scan" => self.antivirus_scan(job).await,
             "health.check" => self.health_check(job).await,
             "analytics.compute" => self.analytics_compute(job).await,
+            "service.control" => self.service_control(job).await,
             "backup.create" => self.backup_create(job).await,
             "backup.restore" => self.backup_restore(job).await,
             other => JobOutcome::failed(format!("unsupported job type: {other}")),
@@ -891,6 +892,50 @@ impl DockerExecutor {
             obj.insert("log_present".into(), json!(true));
         }
         JobOutcome::succeeded(summary)
+    }
+
+    /// Lists or restarts the node's AsterPanel-managed containers. Restart is
+    /// hard-scoped to `astp_*` names so a tenant can never touch shared infra.
+    async fn service_control(&self, job: &Job) -> JobOutcome {
+        let action = job.payload.get("action").and_then(Value::as_str).unwrap_or("status");
+        match action {
+            "status" => {
+                match run_cmd(
+                    "docker",
+                    &[
+                        "ps".into(), "-a".into(), "--format".into(),
+                        "{{.Names}}\t{{.State}}\t{{.Status}}".into(),
+                    ],
+                )
+                .await
+                {
+                    Ok(o) if o.status.success() => {
+                        let services = parse_docker_services(&String::from_utf8_lossy(&o.stdout));
+                        JobOutcome::succeeded(json!({"services": services}))
+                    }
+                    Ok(o) => JobOutcome::failed(format!(
+                        "docker ps failed: {}",
+                        String::from_utf8_lossy(&o.stderr).trim()
+                    )),
+                    Err(_) => JobOutcome::failed("service.control: docker not available on the node"),
+                }
+            }
+            "restart" => {
+                let name = job.payload.get("name").and_then(Value::as_str).unwrap_or("").trim();
+                if !name.starts_with("astp_") || name.contains(char::is_whitespace) {
+                    return JobOutcome::failed("service.control: only astp_* containers can be restarted");
+                }
+                match run_cmd("docker", &["restart".into(), name.to_string()]).await {
+                    Ok(o) if o.status.success() => JobOutcome::succeeded(json!({"name": name, "restarted": true})),
+                    Ok(o) => JobOutcome::failed(format!(
+                        "restart failed: {}",
+                        String::from_utf8_lossy(&o.stderr).trim()
+                    )),
+                    Err(_) => JobOutcome::failed("service.control: docker not available on the node"),
+                }
+            }
+            _ => JobOutcome::failed("service.control: unknown action"),
+        }
     }
 
     async fn cert_install(&self, job: &Job) -> JobOutcome {
@@ -1932,6 +1977,23 @@ fn parse_ds_record(line: &str) -> Option<Value> {
         "digest": digest,
         "rdata": format!("{key_tag} {algorithm} {digest_type} {digest}"),
     }))
+}
+
+/// Parses `docker ps` lines formatted as `name<TAB>state<TAB>status`, keeping
+/// only AsterPanel-managed `astp_*` containers.
+fn parse_docker_services(out: &str) -> Vec<Value> {
+    out.lines()
+        .filter_map(|l| {
+            let mut f = l.split('\t');
+            let name = f.next()?.trim();
+            if !name.starts_with("astp_") {
+                return None;
+            }
+            let state = f.next().unwrap_or("").trim();
+            let status = f.next().unwrap_or("").trim();
+            Some(json!({"name": name, "state": state, "status": status}))
+        })
+        .collect()
 }
 
 /// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
@@ -3096,6 +3158,17 @@ mod tests {
         assert_eq!(parse_ds_record(split).unwrap()["digest"], "ABCDEF01");
         // a non-DS line returns None
         assert!(parse_ds_record("example.com. IN A 1.2.3.4").is_none());
+    }
+
+    #[test]
+    fn docker_services_filter_astp() {
+        let out = "astp_site_abc\trunning\tUp 3 hours\nastp_db_xyz\texited\tExited (0) 5 minutes ago\npostgres\trunning\tUp 1 day\n";
+        let v = parse_docker_services(out);
+        assert_eq!(v.len(), 2); // the non-astp `postgres` container is filtered out
+        assert_eq!(v[0]["name"], "astp_site_abc");
+        assert_eq!(v[0]["state"], "running");
+        assert_eq!(v[1]["name"], "astp_db_xyz");
+        assert_eq!(v[1]["state"], "exited");
     }
 
     #[test]

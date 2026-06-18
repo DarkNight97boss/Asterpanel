@@ -49,6 +49,7 @@ allowed_types := {
 	"antivirus.scan",
 	"health.check",
 	"analytics.compute",
+	"service.control",
 }
 
 default allow := false
