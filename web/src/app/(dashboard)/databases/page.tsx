@@ -52,6 +52,26 @@ export default function DatabasesPage() {
   const [remoteHosts, setRemoteHosts] = useState<RemoteHost[]>([]);
   const [remoteHostInput, setRemoteHostInput] = useState("");
   const [remoteBusy, setRemoteBusy] = useState(false);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<Record<string, boolean>>({});
+
+  async function onExport(dbId: string) {
+    setExporting((s) => ({ ...s, [dbId]: true }));
+    setError(null);
+    setNotice(null);
+    try {
+      const r = await apiPost<{ storage: string; s3?: string; path: string; size_bytes: number }>(
+        `/api/v1/databases/${dbId}/export`,
+        {},
+      );
+      const loc = r.s3 || r.path;
+      setNotice(`Export ready (${(r.size_bytes / 1024).toFixed(1)} KB) → ${loc}`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting((s) => ({ ...s, [dbId]: false }));
+    }
+  }
 
   async function refresh() {
     try {
@@ -187,6 +207,7 @@ export default function DatabasesPage() {
       />
 
       {error && <p className="text-sm text-red-400">{error}</p>}
+      {notice && <p className="break-all text-sm text-emerald-400">{notice}</p>}
 
       {creds && (
         <Card className="border-primary/40">
@@ -250,6 +271,7 @@ export default function DatabasesPage() {
                 <th className="px-6 py-3 font-medium">Host</th>
                 <th className="px-6 py-3 font-medium">Status</th>
                 <th className="px-6 py-3 font-medium">Size</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -267,6 +289,18 @@ export default function DatabasesPage() {
                     <StatusBadge status={d.status} />
                   </td>
                   <td className="px-6 py-3 text-muted-foreground">{fmtSize(d.size_mb)}</td>
+                  <td className="px-6 py-3 text-right">
+                    {QUERYABLE.includes(d.engine) && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={exporting[d.id]}
+                        onClick={() => onExport(d.id)}
+                      >
+                        {exporting[d.id] ? "Exporting…" : "Export"}
+                      </Button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

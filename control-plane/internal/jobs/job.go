@@ -36,6 +36,7 @@ const (
 	TypeDatabaseUser      Type = "database.user.create"
 	TypeDatabaseQuery     Type = "database.query"
 	TypeDatabaseAccess    Type = "database.access.apply"
+	TypeDatabaseDump      Type = "database.dump"
 	TypeMailboxCreate     Type = "mail.mailbox.create"
 	TypeMailServerEnsure  Type = "mail.server.ensure"
 	TypeMailDKIMGenerate  Type = "mail.dkim.generate"

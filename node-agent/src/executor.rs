@@ -74,6 +74,7 @@ impl Executor for DockerExecutor {
             "database.user.create" => self.database_user_create(job).await,
             "database.query" => self.database_query(job).await,
             "database.access.apply" => self.database_access_apply(job).await,
+            "database.dump" => self.database_dump(job).await,
             "cert.install" => self.cert_install(job).await,
             "firewall.apply" => self.firewall_apply(job).await,
             "waf.apply" => self.waf_apply(job).await,
@@ -905,6 +906,57 @@ impl DockerExecutor {
         .await;
         let count = content.lines().filter(|l| l.starts_with("host ")).count();
         JobOutcome::succeeded(json!({"path": path, "hosts": count}))
+    }
+
+    /// Dumps a database (pg_dump / mysqldump) from its container, gzips it and
+    /// uploads off-site to S3 when a bucket is configured — a phpMyAdmin-style
+    /// export.
+    async fn database_dump(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let db_id = pv("database_id").unwrap_or("unknown");
+        let engine = pv("engine").unwrap_or("postgres");
+        let database = pv("database").unwrap_or("app");
+        let owner = pv("owner").unwrap_or(database);
+        let key = pv("key").unwrap_or("");
+        let container = format!("astp_db_{db_id}");
+        let args = match db_dump_args(engine, &container, database, owner) {
+            Some(a) => a,
+            None => return JobOutcome::failed(format!("database.dump: unsupported engine {engine}")),
+        };
+        let out = match run_docker(&args).await {
+            Ok(o) if o.status.success() => o.stdout,
+            Ok(o) => {
+                return JobOutcome::failed(format!(
+                    "dump failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ))
+            }
+            Err(e) => return JobOutcome::failed(format!("could not exec docker: {e}")),
+        };
+        let dir = std::env::var("AGENT_BACKUP_DIR").unwrap_or_else(|_| "/var/asterpanel/backups".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("database.dump: mkdir failed: {e}"));
+        }
+        let sql = format!("{dir}/{db_id}.sql");
+        if let Err(e) = tokio::fs::write(&sql, &out).await {
+            return JobOutcome::failed(format!("database.dump: write failed: {e}"));
+        }
+        let _ = run_cmd("gzip", &["-f".into(), sql.clone()]).await;
+        let gz = format!("{sql}.gz");
+        let size = tokio::fs::metadata(&gz).await.map(|m| m.len()).unwrap_or(0);
+        if let Ok(bucket) = std::env::var("AGENT_S3_BUCKET") {
+            if !key.is_empty() {
+                if let Ok(u) = run_cmd("aws", &s3_cp_args(&gz, &bucket, key)).await {
+                    if u.status.success() {
+                        return JobOutcome::succeeded(json!({
+                            "path": gz, "size_bytes": size, "storage": "s3",
+                            "s3": format!("s3://{bucket}/{key}"),
+                        }));
+                    }
+                }
+            }
+        }
+        JobOutcome::succeeded(json!({"path": gz, "size_bytes": size, "storage": "local"}))
     }
 
     /// Aggregates a site's Caddy JSON access log into web-analytics figures
@@ -2443,6 +2495,30 @@ fn db_query_args(
     }
 }
 
+/// Builds the `docker exec` argv that dumps a database to stdout.
+fn db_dump_args(engine: &str, container: &str, database: &str, owner: &str) -> Option<Vec<String>> {
+    match engine {
+        "postgres" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "pg_dump".into(),
+            "-U".into(),
+            owner.into(),
+            "-d".into(),
+            database.into(),
+        ]),
+        "mysql" | "mariadb" => Some(vec![
+            "exec".into(),
+            container.into(),
+            "mysqldump".into(),
+            "--no-tablespaces".into(),
+            "--single-transaction".into(),
+            database.into(),
+        ]),
+        _ => None,
+    }
+}
+
 /// Renders a pg_hba.conf access block from a list of host patterns (IP or CIDR).
 /// Invalid patterns are skipped; SCRAM password auth is required.
 fn render_pg_hba(hosts: &[Value]) -> String {
@@ -3204,6 +3280,19 @@ mod tests {
         assert!(args.contains(&"--csv".to_string()));
         assert!(args.iter().any(|a| a.contains("statement_timeout")));
         assert!(db_query_args("mongo", "c", "d", "o", "x").is_none());
+    }
+
+    #[test]
+    fn db_dump_args_per_engine() {
+        let pg = db_dump_args("postgres", "astp_db_x", "app", "acme").unwrap().join(" ");
+        assert!(pg.contains("pg_dump"), "{pg}");
+        assert!(pg.contains("-U acme"), "{pg}");
+        assert!(pg.contains("-d app"), "{pg}");
+        let my = db_dump_args("mysql", "astp_db_y", "shop", "shop").unwrap().join(" ");
+        assert!(my.contains("mysqldump"), "{my}");
+        assert!(my.contains("--single-transaction"), "{my}");
+        assert!(my.ends_with("shop"), "{my}");
+        assert!(db_dump_args("mongo", "c", "d", "o").is_none());
     }
 
     #[test]
