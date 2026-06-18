@@ -252,6 +252,15 @@ type DirectoryPrivacy struct {
 	CreatedAt      time.Time
 }
 
+type SitePhpSetting struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	WebsiteID      uuid.UUID
+	Directive      string
+	Value          string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

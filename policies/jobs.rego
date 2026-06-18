@@ -41,6 +41,7 @@ allowed_types := {
 	"file.delete",
 	"file.mkdir",
 	"runtime.switch",
+	"runtime.phpini.apply",
 	"logs.tail",
 	"antivirus.scan",
 	"health.check",

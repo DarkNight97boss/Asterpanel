@@ -50,6 +50,7 @@ const (
 	TypeFileDelete        Type = "file.delete"
 	TypeFileMkdir         Type = "file.mkdir"
 	TypeRuntimeSwitch     Type = "runtime.switch"
+	TypeRuntimePhpIni     Type = "runtime.phpini.apply"
 	TypeLogsTail          Type = "logs.tail"
 	TypeAntivirusScan     Type = "antivirus.scan"
 	TypeHealthCheck       Type = "health.check"

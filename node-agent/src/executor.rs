@@ -81,6 +81,7 @@ impl Executor for DockerExecutor {
             "file.delete" => self.file_delete(job).await,
             "file.mkdir" => self.file_mkdir(job).await,
             "runtime.switch" => self.runtime_switch(job).await,
+            "runtime.phpini.apply" => self.runtime_phpini_apply(job).await,
             "logs.tail" => self.logs_tail(job).await,
             "antivirus.scan" => self.antivirus_scan(job).await,
             "health.check" => self.health_check(job).await,
@@ -1008,6 +1009,41 @@ impl DockerExecutor {
         }
     }
 
+    /// Writes a per-site php.ini overrides file (allowlisted directives only) and
+    /// best-effort drops it into the site's PHP container conf.d + restarts it.
+    async fn runtime_phpini_apply(&self, job: &Job) -> JobOutcome {
+        let website_id = job
+            .payload
+            .get("website_id")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown");
+        let empty: Vec<Value> = Vec::new();
+        let settings = job
+            .payload
+            .get("settings")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_php_ini(settings);
+        let dir = std::env::var("AGENT_PHP_INI_DIR").unwrap_or_else(|_| "/etc/asterpanel/php".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("runtime.phpini.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/{website_id}.ini");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("runtime.phpini.apply: write failed: {e}"));
+        }
+        // Best-effort live apply: copy into the PHP container's conf.d and restart.
+        let container = format!("astp_site_{website_id}");
+        let dest = format!("{container}:/usr/local/etc/php/conf.d/zz-asterpanel.ini");
+        let _ = run_docker(&["cp".into(), path.clone(), dest]).await;
+        let _ = run_docker(&["restart".into(), container]).await;
+        let count = content
+            .lines()
+            .filter(|l| !l.is_empty() && !l.starts_with(';'))
+            .count();
+        JobOutcome::succeeded(json!({"path": path, "directives": count}))
+    }
+
     /// Tails a managed container's logs. The container name must be one of ours
     /// (`astp_*`) — this both scopes access to platform containers and, since the
     /// name can never begin with `-`, prevents argv injection into `docker logs`.
@@ -1887,6 +1923,52 @@ fn valid_redirect_target(s: &str) -> bool {
     (s.starts_with("https://") || s.starts_with("http://") || s.starts_with('/'))
         && !s.contains(char::is_whitespace)
         && s.len() <= 2048
+}
+
+/// php.ini directives a tenant may override per site. Anything outside this set
+/// is dropped, so the editor can only tune safe runtime knobs.
+const PHP_INI_ALLOWED: &[&str] = &[
+    "memory_limit",
+    "upload_max_filesize",
+    "post_max_size",
+    "max_execution_time",
+    "max_input_time",
+    "max_input_vars",
+    "max_file_uploads",
+    "display_errors",
+    "error_reporting",
+    "log_errors",
+    "date.timezone",
+    "default_charset",
+    "allow_url_fopen",
+    "file_uploads",
+    "expose_php",
+    "short_open_tag",
+    "session.gc_maxlifetime",
+    "default_socket_timeout",
+    "opcache.enable",
+    "opcache.memory_consumption",
+    "opcache.max_accelerated_files",
+    "realpath_cache_size",
+];
+
+/// Renders a php.ini overrides file from allowlisted directives. Values that
+/// could break out of the directive line (newlines, `;` comments, `[` sections)
+/// are rejected.
+fn render_php_ini(settings: &[Value]) -> String {
+    let mut out = String::from("; AsterPanel php.ini overrides (generated — do not edit)\n");
+    for s in settings {
+        let d = s.get("directive").and_then(Value::as_str).unwrap_or("").trim();
+        if !PHP_INI_ALLOWED.contains(&d) {
+            continue;
+        }
+        let v = s.get("value").and_then(Value::as_str).unwrap_or("").trim();
+        if v.is_empty() || v.contains(['\n', '\r', ';', '[', ']']) {
+            continue;
+        }
+        out.push_str(&format!("{d} = {v}\n"));
+    }
+    out
 }
 
 fn render_nftables(rules: &[Value]) -> String {
@@ -2784,6 +2866,21 @@ mod tests {
         assert!(out.contains("qa $2a$14$"), "{out}");
         assert!(!out.contains("bad dom"), "{out}");
         assert!(!out.contains("plaintext"), "{out}");
+    }
+
+    #[test]
+    fn php_ini_renders_allowlisted_only() {
+        let settings = vec![
+            json!({"directive":"memory_limit","value":"256M"}),
+            json!({"directive":"upload_max_filesize","value":"64M"}),
+            json!({"directive":"evil_directive","value":"x"}),           // not allowlisted
+            json!({"directive":"display_errors","value":"Off\n[hack]"}), // injection → dropped
+        ];
+        let out = render_php_ini(&settings);
+        assert!(out.contains("memory_limit = 256M"), "{out}");
+        assert!(out.contains("upload_max_filesize = 64M"), "{out}");
+        assert!(!out.contains("evil_directive"), "{out}");
+        assert!(!out.contains("[hack]"), "{out}");
     }
 
     #[test]
