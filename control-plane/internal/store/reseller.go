@@ -72,23 +72,33 @@ func (s *Store) ProvisionSubAccount(ctx context.Context, p ProvisionSubAccountPa
 }
 
 type SubAccount struct {
-	ID        uuid.UUID
-	Name      string
-	Slug      string
-	Status    string
-	PlanCode  *string
-	Sites     int
-	CreatedAt time.Time
+	ID          uuid.UUID
+	Name        string
+	Slug        string
+	Status      string
+	PlanCode    *string
+	Sites       int
+	CreatedAt   time.Time
+	OwnerUserID uuid.NullUUID
+	OwnerEmail  *string
 }
 
-// ListSubAccounts returns the child orgs of a reseller with their plan + site count.
+// ListSubAccounts returns the child orgs of a reseller with their plan, site
+// count and owner (the oldest member — used as the impersonation target).
 func (s *Store) ListSubAccounts(ctx context.Context, parentOrgID uuid.UUID) ([]SubAccount, error) {
 	const q = `
 		SELECT o.id, o.name, o.slug, o.status, bp.code,
 		       (SELECT count(*) FROM websites w WHERE w.organization_id = o.id AND w.deleted_at IS NULL),
-		       o.created_at
+		       o.created_at, owner.user_id, owner.email
 		FROM organizations o
 		LEFT JOIN billing_plans bp ON bp.id = o.billing_plan_id
+		LEFT JOIN LATERAL (
+		    SELECT u.id AS user_id, u.email
+		    FROM memberships m JOIN users u ON u.id = m.user_id
+		    WHERE m.organization_id = o.id AND u.deleted_at IS NULL
+		    ORDER BY u.created_at
+		    LIMIT 1
+		) owner ON true
 		WHERE o.parent_org_id = $1 AND o.deleted_at IS NULL
 		ORDER BY o.created_at DESC`
 	rows, err := s.pool.Query(ctx, q, parentOrgID)
@@ -99,12 +109,22 @@ func (s *Store) ListSubAccounts(ctx context.Context, parentOrgID uuid.UUID) ([]S
 	var out []SubAccount
 	for rows.Next() {
 		var a SubAccount
-		if err := rows.Scan(&a.ID, &a.Name, &a.Slug, &a.Status, &a.PlanCode, &a.Sites, &a.CreatedAt); err != nil {
+		if err := rows.Scan(&a.ID, &a.Name, &a.Slug, &a.Status, &a.PlanCode, &a.Sites, &a.CreatedAt,
+			&a.OwnerUserID, &a.OwnerEmail); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
 	}
 	return out, rows.Err()
+}
+
+// IsSubAccountOf reports whether child is a non-deleted sub-account of parent.
+func (s *Store) IsSubAccountOf(ctx context.Context, child, parent uuid.UUID) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM organizations WHERE id = $1 AND parent_org_id = $2 AND deleted_at IS NULL)`,
+		child, parent).Scan(&ok)
+	return ok, err
 }
 
 // CountSubAccounts is used to enforce a reseller's sub-account quota.

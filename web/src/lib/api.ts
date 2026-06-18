@@ -149,6 +149,39 @@ export async function logout(): Promise<void> {
   }
 }
 
+// --- Impersonation ------------------------------------------------------------
+
+interface ImpersonateResponse {
+  access_token: string;
+  user: User;
+  impersonating: boolean;
+}
+
+/** Start impersonating a user: swaps the in-memory access token for the
+ *  impersonation token. The admin's refresh cookie is untouched, so
+ *  stopImpersonation() (or a reload) reverts to the admin session. */
+export async function startImpersonation(targetUserId: string): Promise<User> {
+  const data = await request<ImpersonateResponse>(
+    "/api/v1/admin/impersonate",
+    { method: "POST", body: { target_user_id: targetUserId } },
+    false,
+  );
+  setTokens(data.access_token); // swap access token only; keep csrf
+  return data.user;
+}
+
+/** Stop impersonating: revoke the impersonation session and restore the admin
+ *  session from the (untouched) refresh cookie. */
+export async function stopImpersonation(): Promise<User | null> {
+  try {
+    await request("/api/v1/admin/impersonate/exit", { method: "POST" }, false);
+  } catch {
+    /* best-effort revoke */
+  }
+  setTokens(null, null);
+  return bootstrap();
+}
+
 // --- Resources ----------------------------------------------------------------
 
 export interface ServerNode {

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Copy, X } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Copy, LogIn, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
 import { Feature, ProGate } from "@/lib/license";
 import { PageHeader } from "@/components/page-header";
 
@@ -20,6 +22,8 @@ interface Account {
   plan_code: string | null;
   sites: number;
   created_at: string;
+  owner_user_id?: string | null;
+  owner_email?: string | null;
 }
 
 interface Created {
@@ -35,6 +39,8 @@ const statusBadge: Record<string, string> = {
 };
 
 export default function ResellerPage() {
+  const { impersonate } = useAuth();
+  const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -84,6 +90,18 @@ export default function ResellerPage() {
       setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update status");
+    }
+  }
+
+  // Log in as the sub-account owner for support, then land on their dashboard.
+  async function onImpersonate(a: Account) {
+    if (!a.owner_user_id) return;
+    setError(null);
+    try {
+      await impersonate(a.owner_user_id);
+      router.push("/dashboard");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start impersonation");
     }
   }
 
@@ -197,15 +215,28 @@ export default function ResellerPage() {
                     </span>
                   </td>
                   <td className="px-6 py-3 text-right">
-                    {a.status === "active" ? (
-                      <Button variant="ghost" size="sm" onClick={() => setStatus(a.id, "suspended")}>
-                        Suspend
-                      </Button>
-                    ) : (
-                      <Button variant="ghost" size="sm" onClick={() => setStatus(a.id, "active")}>
-                        Activate
-                      </Button>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {a.owner_user_id && a.status === "active" && (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onImpersonate(a)}
+                          title={a.owner_email ? `Log in as ${a.owner_email}` : "Log in as owner"}
+                        >
+                          <LogIn className="h-4 w-4" />
+                          Impersonate
+                        </Button>
+                      )}
+                      {a.status === "active" ? (
+                        <Button variant="ghost" size="sm" onClick={() => setStatus(a.id, "suspended")}>
+                          Suspend
+                        </Button>
+                      ) : (
+                        <Button variant="ghost" size="sm" onClick={() => setStatus(a.id, "active")}>
+                          Activate
+                        </Button>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}

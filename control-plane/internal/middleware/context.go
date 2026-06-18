@@ -28,6 +28,9 @@ type Principal struct {
 	TokenID     uuid.NullUUID
 	Permissions authz.PermissionSet
 	Scopes      []string
+	// ImpersonatorID is the real actor's user id when this request runs under an
+	// impersonation token (set from the JWT `act` claim).
+	ImpersonatorID uuid.NullUUID
 }
 
 // Can reports whether the principal may perform an action. Superadmins bypass.

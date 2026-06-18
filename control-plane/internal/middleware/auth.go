@@ -68,13 +68,19 @@ func (a *Authenticator) fromJWT(r *http.Request, raw string) (*Principal, error)
 	if err != nil {
 		return nil, err
 	}
-	return &Principal{
+	princ := &Principal{
 		UserID:      claims.UserID,
 		OrgID:       claims.OrgID,
 		SessionID:   claims.SessionID,
 		Superadmin:  claims.Superadmin,
 		Permissions: authz.NewPermissionSet(perms),
-	}, nil
+	}
+	if claims.Act != "" {
+		if actID, perr := uuid.Parse(claims.Act); perr == nil {
+			princ.ImpersonatorID = uuid.NullUUID{UUID: actID, Valid: true}
+		}
+	}
+	return princ, nil
 }
 
 func (a *Authenticator) fromAPIToken(r *http.Request, raw string) (*Principal, error) {

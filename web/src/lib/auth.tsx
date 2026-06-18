@@ -6,6 +6,8 @@ import {
   bootstrap,
   login as apiLogin,
   logout as apiLogout,
+  startImpersonation as apiStartImpersonation,
+  stopImpersonation as apiStopImpersonation,
   verifyMfa as apiVerifyMfa,
   type LoginResult,
   type User,
@@ -14,9 +16,13 @@ import {
 interface AuthState {
   user: User | null;
   loading: boolean;
+  /** The target user when an impersonation session is active, else null. */
+  impersonating: User | null;
   login: (email: string, password: string) => Promise<LoginResult>;
   verifyMfa: (mfaToken: string, code: string) => Promise<void>;
   logout: () => Promise<void>;
+  impersonate: (targetUserId: string) => Promise<void>;
+  stopImpersonating: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthState | null>(null);
@@ -24,6 +30,7 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [impersonating, setImpersonating] = useState<User | null>(null);
 
   useEffect(() => {
     bootstrap()
@@ -43,11 +50,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = async () => {
     await apiLogout();
+    setImpersonating(null);
     setUser(null);
   };
 
+  const impersonate = async (targetUserId: string) => {
+    const target = await apiStartImpersonation(targetUserId);
+    setImpersonating(target);
+    setUser(target);
+  };
+
+  const stopImpersonating = async () => {
+    const admin = await apiStopImpersonation();
+    setImpersonating(null);
+    setUser(admin);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, verifyMfa, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, impersonating, login, verifyMfa, logout, impersonate, stopImpersonating }}
+    >
       {children}
     </AuthContext.Provider>
   );

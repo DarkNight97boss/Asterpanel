@@ -114,6 +114,10 @@ func (s *Server) routes() http.Handler {
 			r.Get("/me", s.handleMe)
 			// Bearer-authenticated (not cookie/CSRF-able), so no CSRF middleware.
 			r.Post("/auth/logout", s.handleLogout)
+			// Impersonation ("log in as user"). Authorization is enforced in the
+			// handler (superadmin, or reseller over its own sub-accounts).
+			r.Post("/admin/impersonate", s.handleStartImpersonation)
+			r.Post("/admin/impersonate/exit", s.handleStopImpersonation)
 			r.Post("/auth/totp/enroll", s.handleTOTPEnroll)
 			r.Post("/auth/totp/confirm", s.handleTOTPConfirm)
 

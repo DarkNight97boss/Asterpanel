@@ -36,14 +36,20 @@ func slugify(name string) string {
 }
 
 func subAccountView(a store.SubAccount) map[string]any {
+	var ownerID any
+	if a.OwnerUserID.Valid {
+		ownerID = a.OwnerUserID.UUID
+	}
 	return map[string]any{
-		"id":         a.ID,
-		"name":       a.Name,
-		"slug":       a.Slug,
-		"status":     a.Status,
-		"plan_code":  a.PlanCode,
-		"sites":      a.Sites,
-		"created_at": a.CreatedAt,
+		"id":            a.ID,
+		"name":          a.Name,
+		"slug":          a.Slug,
+		"status":        a.Status,
+		"plan_code":     a.PlanCode,
+		"sites":         a.Sites,
+		"created_at":    a.CreatedAt,
+		"owner_user_id": ownerID,
+		"owner_email":   a.OwnerEmail,
 	}
 }
 
