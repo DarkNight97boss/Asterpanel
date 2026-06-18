@@ -69,6 +69,8 @@ impl Executor for DockerExecutor {
             "mail.autoresponder.apply" => self.mail_autoresponder_apply(job).await,
             "mail.filter.apply" => self.mail_filter_apply(job).await,
             "mail.spam.apply" => self.mail_spam_apply(job).await,
+            "mail.queue.list" => self.mail_queue_list(job).await,
+            "mail.queue.action" => self.mail_queue_action(job).await,
             "caldav.ensure" => self.caldav_ensure(job).await,
             "caldav.user.apply" => self.caldav_user_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
@@ -1329,6 +1331,81 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({
             "path": path, "rules": basic_auth.len(), "hotlink": hotlink.len(), "webdav": webdav.len(),
         }))
+    }
+
+    /// Lists the Postfix mail queue (`postqueue -p`) parsed into entries.
+    async fn mail_queue_list(&self, _job: &Job) -> JobOutcome {
+        match run_docker(&[
+            "exec".into(),
+            "astp_mailserver".into(),
+            "postqueue".into(),
+            "-p".into(),
+        ])
+        .await
+        {
+            Ok(o) if o.status.success() => {
+                let out = String::from_utf8_lossy(&o.stdout);
+                let entries = parse_postqueue(&out);
+                let active = entries
+                    .iter()
+                    .filter(|e| e.get("status").and_then(Value::as_str) == Some("active"))
+                    .count();
+                let deferred = entries.len() - active;
+                JobOutcome::succeeded(
+                    json!({"entries": entries, "active": active, "deferred": deferred}),
+                )
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "postqueue failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    /// Acts on the mail queue: flush (attempt delivery now), delete one message,
+    /// or delete the whole queue. The queue id is validated to stay shell-safe.
+    async fn mail_queue_action(&self, job: &Job) -> JobOutcome {
+        let action = job.payload.get("action").and_then(Value::as_str).unwrap_or("");
+        let args: Vec<String> = match action {
+            "flush" => vec![
+                "exec".into(),
+                "astp_mailserver".into(),
+                "postqueue".into(),
+                "-f".into(),
+            ],
+            "delete_all" => vec![
+                "exec".into(),
+                "astp_mailserver".into(),
+                "postsuper".into(),
+                "-d".into(),
+                "ALL".into(),
+            ],
+            "delete" => {
+                let qid = job.payload.get("queue_id").and_then(Value::as_str).unwrap_or("");
+                if !valid_queue_id(qid) {
+                    return JobOutcome::failed("mail.queue.action: invalid queue id");
+                }
+                vec![
+                    "exec".into(),
+                    "astp_mailserver".into(),
+                    "postsuper".into(),
+                    "-d".into(),
+                    qid.into(),
+                ]
+            }
+            _ => return JobOutcome::failed("mail.queue.action: unknown action"),
+        };
+        match run_docker(&args).await {
+            Ok(o) if o.status.success() => {
+                JobOutcome::succeeded(json!({"ok": true, "action": action}))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "mail.queue.action failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
     }
 
     async fn mail_server_ensure(&self, job: &Job) -> JobOutcome {
@@ -2989,6 +3066,83 @@ fn valid_cidr_or_ip(s: &str) -> bool {
     true
 }
 
+/// A Postfix queue entry parsed from `postqueue -p` output.
+#[derive(Default)]
+struct PostqueueEntry {
+    id: String,
+    size_bytes: u64,
+    arrival: String,
+    sender: String,
+    reason: String,
+    recipients: Vec<String>,
+    status: String,
+}
+
+/// Parses `postqueue -p` output into queue entries. The header/footer lines and
+/// the "Mail queue is empty" message are skipped; a trailing `*` marks an active
+/// message, `!` a held one.
+fn parse_postqueue(out: &str) -> Vec<Value> {
+    let mut entries: Vec<PostqueueEntry> = Vec::new();
+    for line in out.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
+        let t = line.trim_end();
+        if t.starts_with("-Queue ID-") || t.starts_with("--") || t.contains("Mail queue is empty") {
+            continue;
+        }
+        let indented = line.starts_with(' ') || line.starts_with('\t');
+        if !indented {
+            let toks: Vec<&str> = t.split_whitespace().collect();
+            if toks.len() < 3 {
+                continue;
+            }
+            let mut e = PostqueueEntry::default();
+            let mut id = toks[0].to_string();
+            if id.ends_with('*') {
+                id.pop();
+                e.status = "active".into();
+            } else if id.ends_with('!') {
+                id.pop();
+                e.status = "hold".into();
+            } else {
+                e.status = "deferred".into();
+            }
+            e.id = id;
+            e.size_bytes = toks[1].parse().unwrap_or(0);
+            e.sender = toks[toks.len() - 1].to_string();
+            e.arrival = toks[2..toks.len() - 1].join(" ");
+            entries.push(e);
+        } else if let Some(e) = entries.last_mut() {
+            let s = t.trim();
+            if s.starts_with('(') {
+                e.reason = s.trim_start_matches('(').trim_end_matches(')').to_string();
+            } else if s.contains('@') {
+                e.recipients.push(s.to_string());
+            }
+        }
+    }
+    entries
+        .iter()
+        .map(|e| {
+            json!({
+                "id": e.id,
+                "size_bytes": e.size_bytes,
+                "arrival": e.arrival,
+                "sender": e.sender,
+                "reason": e.reason,
+                "recipients": e.recipients,
+                "status": e.status,
+            })
+        })
+        .collect()
+}
+
+/// A Postfix queue id: alphanumeric, at most 40 chars (keeps postsuper args safe).
+fn valid_queue_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric())
+}
+
 /// Parses a query result into (columns, rows). Postgres `--csv` is parsed as
 /// RFC-4180 CSV; MySQL `--batch` is tab-separated. The first record is the
 /// header row.
@@ -3870,6 +4024,35 @@ mod tests {
         assert!(valid_doc_root("/var/www/site"));
         assert!(!valid_doc_root("relative/path"));
         assert!(!valid_doc_root("/has space"));
+    }
+
+    #[test]
+    fn postqueue_parses_entries() {
+        let out = concat!(
+            "-Queue ID-  --Size-- ----Arrival Time---- -Sender/Recipient-------\n",
+            "A1B2C3D4E5F     1234 Tue Jun 10 09:15:00  alice@example.com\n",
+            "                     (host mx.dest.com refused to talk to me)\n",
+            "                                         bob@dest.com\n",
+            "\n",
+            "3F2E1D0C9B8*     512 Tue Jun 10 09:20:00  carol@example.com\n",
+            "                                         dave@other.com\n",
+            "\n",
+            "-- 2 Kbytes in 2 Requests.\n",
+        );
+        let e = parse_postqueue(out);
+        assert_eq!(e.len(), 2);
+        assert_eq!(e[0]["id"], "A1B2C3D4E5F");
+        assert_eq!(e[0]["size_bytes"], 1234);
+        assert_eq!(e[0]["sender"], "alice@example.com");
+        assert!(e[0]["arrival"].as_str().unwrap().contains("Jun 10"), "{}", e[0]);
+        assert_eq!(e[0]["status"], "deferred");
+        assert!(e[0]["reason"].as_str().unwrap().contains("refused"), "{}", e[0]);
+        assert_eq!(e[0]["recipients"][0], "bob@dest.com");
+        assert_eq!(e[1]["id"], "3F2E1D0C9B8"); // active '*' stripped
+        assert_eq!(e[1]["status"], "active");
+        assert!(parse_postqueue("Mail queue is empty\n").is_empty());
+        assert!(valid_queue_id("A1B2C3"));
+        assert!(!valid_queue_id("bad id"));
     }
 
     #[test]

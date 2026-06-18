@@ -38,6 +38,8 @@ allowed_types := {
 	"mail.autoresponder.apply",
 	"mail.filter.apply",
 	"mail.spam.apply",
+	"mail.queue.list",
+	"mail.queue.action",
 	"caldav.ensure",
 	"caldav.user.apply",
 	"cron.apply",

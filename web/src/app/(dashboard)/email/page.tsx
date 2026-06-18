@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Calendar, Filter, Forward, Mail, Reply, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
+import { Calendar, Filter, Forward, Mail, Reply, Send, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -83,6 +83,16 @@ interface CaldavAccount {
   username: string;
 }
 
+interface QueueEntry {
+  id: string;
+  size_bytes: number;
+  arrival: string;
+  sender: string;
+  reason: string;
+  recipients: string[];
+  status: string;
+}
+
 const TABS: PageTab[] = [
   { id: "mailboxes", label: "Mailboxes", icon: Mail },
   { id: "deliverability", label: "Deliverability", icon: ShieldCheck },
@@ -90,9 +100,16 @@ const TABS: PageTab[] = [
   { id: "autoresponders", label: "Autoresponders", icon: Reply },
   { id: "filters", label: "Filters", icon: Filter },
   { id: "spam", label: "Spam", icon: ShieldAlert },
+  { id: "queue", label: "Mail Queue", icon: Send },
   { id: "lists", label: "Mailing Lists", icon: Users },
   { id: "caldav", label: "Calendars", icon: Calendar },
 ];
+
+function fmtBytes(b: number) {
+  if (b < 1024) return `${b} B`;
+  if (b < 1024 ** 2) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1024 ** 2).toFixed(1)} MB`;
+}
 
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
@@ -100,6 +117,9 @@ export default function EmailPage() {
   const [quota, setQuota] = useState("1024");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("mailboxes");
+  const [queue, setQueue] = useState<QueueEntry[]>([]);
+  const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
   const [dkimDomain, setDkimDomain] = useState("");
@@ -456,6 +476,34 @@ export default function EmailPage() {
     refreshLists();
     refreshCaldav();
   }, []);
+
+  async function loadQueue() {
+    setQueueLoading(true);
+    setQueueError(null);
+    try {
+      const { entries } = await apiGet<{ entries: QueueEntry[] }>("/api/v1/email/queue");
+      setQueue(entries ?? []);
+    } catch (e) {
+      setQueueError(e instanceof Error ? e.message : "Could not load the mail queue");
+    } finally {
+      setQueueLoading(false);
+    }
+  }
+
+  async function queueAction(action: "flush" | "delete" | "delete_all", queueId?: string) {
+    setQueueError(null);
+    try {
+      await apiPost("/api/v1/email/queue/action", { action, queue_id: queueId });
+      await loadQueue();
+    } catch (e) {
+      setQueueError(e instanceof Error ? e.message : "Queue action failed");
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "queue") loadQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -1031,6 +1079,88 @@ export default function EmailPage() {
               ))}
             </ul>
           )}
+        </CardContent>
+      </Card>
+      )}
+
+      {tab === "queue" && (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Mail queue ({queue.length})</CardTitle>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => loadQueue()} disabled={queueLoading}>
+              {queueLoading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => queueAction("flush")} disabled={queue.length === 0}>
+              Flush all
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => queueAction("delete_all")} disabled={queue.length === 0}>
+              Delete all
+            </Button>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-3 p-0">
+          <p className="px-6 pt-4 text-sm text-muted-foreground">
+            Deferred and active messages in the Postfix queue. Flush retries delivery now; delete
+            removes a message permanently.
+          </p>
+          {queueError && <p className="px-6 text-sm text-red-600">{queueError}</p>}
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Queue ID</th>
+                <th className="px-6 py-3 font-medium">Sender → Recipients</th>
+                <th className="px-6 py-3 font-medium">Size</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3" />
+              </tr>
+            </thead>
+            <tbody>
+              {queue.map((e) => (
+                <tr key={e.id} className="border-b border-border/60 align-top last:border-0">
+                  <td className="px-6 py-3">
+                    <div className="font-mono text-xs">{e.id}</div>
+                    <div className="text-xs text-muted-foreground">{e.arrival}</div>
+                  </td>
+                  <td className="px-6 py-3">
+                    <div className="font-mono text-xs">{e.sender}</div>
+                    <div className="font-mono text-xs text-muted-foreground">→ {e.recipients.join(", ")}</div>
+                    {e.reason && <div className="mt-0.5 text-xs text-amber-600 dark:text-amber-400">{e.reason}</div>}
+                  </td>
+                  <td className="px-6 py-3 text-muted-foreground">{fmtBytes(e.size_bytes)}</td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                        e.status === "active"
+                          ? "bg-sky-500/15 text-sky-600 dark:text-sky-300"
+                          : "bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                      }`}
+                    >
+                      {e.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => queueAction("delete", e.id)}
+                      aria-label="Delete message"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+              {queue.length === 0 && !queueLoading && (
+                <tr>
+                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
+                    The mail queue is empty.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </CardContent>
       </Card>
       )}

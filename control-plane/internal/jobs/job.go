@@ -47,6 +47,8 @@ const (
 	TypeMailAutoresponder Type = "mail.autoresponder.apply"
 	TypeMailFilterApply   Type = "mail.filter.apply"
 	TypeMailSpamApply     Type = "mail.spam.apply"
+	TypeMailQueueList     Type = "mail.queue.list"
+	TypeMailQueueAction   Type = "mail.queue.action"
 	TypeCaldavEnsure      Type = "caldav.ensure"
 	TypeCaldavUserApply   Type = "caldav.user.apply"
 	TypeCronApply         Type = "cron.apply"
