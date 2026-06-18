@@ -27,6 +27,8 @@ const (
 	TypeProtectionApply   Type = "protection.apply"
 	TypeCertIssue         Type = "cert.issue"
 	TypeDNSApply          Type = "dns.apply"
+	TypeDNSSECEnable      Type = "dns.dnssec.enable"
+	TypeDNSSECDisable     Type = "dns.dnssec.disable"
 	TypeBackupCreate      Type = "backup.create"
 	TypeBackupRestore     Type = "backup.restore"
 	TypeDatabaseCreate    Type = "database.create"

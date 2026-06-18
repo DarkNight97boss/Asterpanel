@@ -276,6 +276,16 @@ type SpamRule struct {
 	CreatedAt      time.Time
 }
 
+type Dnssec struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Domain         string
+	DsRecord       string
+	Algorithm      int
+	Enabled        bool
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

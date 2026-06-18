@@ -18,6 +18,8 @@ allowed_types := {
 	"protection.apply",
 	"cert.issue",
 	"dns.apply",
+	"dns.dnssec.enable",
+	"dns.dnssec.disable",
 	"backup.create",
 	"backup.restore",
 	"database.create",

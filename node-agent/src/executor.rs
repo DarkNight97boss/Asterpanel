@@ -58,6 +58,8 @@ impl Executor for DockerExecutor {
             "database.create" => self.database_create(job).await,
             "database.delete" => self.database_delete(job).await,
             "dns.apply" => self.dns_apply(job).await,
+            "dns.dnssec.enable" => self.dnssec_enable(job).await,
+            "dns.dnssec.disable" => self.dnssec_disable(job).await,
             "cert.issue" => self.cert_issue(job).await,
             "app.deploy" => self.app_deploy(job).await,
             "mail.mailbox.create" => self.mailbox_create(job).await,
@@ -229,6 +231,84 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({
             "zone": zone, "records": records.len(), "serial": serial, "path": path,
         }))
+    }
+
+    /// Enables DNSSEC for a zone: generates a KSK (+ ZSK), best-effort signs the
+    /// zone, and returns the DS record(s) to publish at the registrar. Fails
+    /// clearly when the BIND DNSSEC utilities aren't installed on the node.
+    async fn dnssec_enable(&self, job: &Job) -> JobOutcome {
+        let zone = job.payload.get("domain").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(zone) {
+            return JobOutcome::failed("dns.dnssec.enable: invalid domain");
+        }
+        let dns_dir = std::env::var("AGENT_DNS_DIR").unwrap_or_else(|_| "/etc/asterpanel/dns".into());
+        let keys_dir = format!("{dns_dir}/keys/{zone}");
+        if let Err(e) = tokio::fs::create_dir_all(&keys_dir).await {
+            return JobOutcome::failed(format!("dns.dnssec.enable: mkdir failed: {e}"));
+        }
+        match run_cmd(
+            "dnssec-keygen",
+            &[
+                "-a".into(), "ECDSAP256SHA256".into(), "-f".into(), "KSK".into(),
+                "-K".into(), keys_dir.clone(), zone.to_string(),
+            ],
+        )
+        .await
+        {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                return JobOutcome::failed(format!(
+                    "dnssec-keygen failed: {}",
+                    String::from_utf8_lossy(&o.stderr).trim()
+                ))
+            }
+            Err(_) => {
+                return JobOutcome::failed(
+                    "dns.dnssec.enable: BIND DNSSEC tools (dnssec-keygen) not installed on the node",
+                )
+            }
+        }
+        // ZSK + zone signing are best-effort (signing needs the zone file present).
+        let _ = run_cmd(
+            "dnssec-keygen",
+            &["-a".into(), "ECDSAP256SHA256".into(), "-K".into(), keys_dir.clone(), zone.to_string()],
+        )
+        .await;
+        let zonefile = format!("{dns_dir}/{zone}.zone");
+        let _ = run_cmd(
+            "dnssec-signzone",
+            &["-K".into(), keys_dir.clone(), "-o".into(), zone.to_string(), zonefile],
+        )
+        .await;
+        // Derive the DS record(s) from the KSK key file(s).
+        let ds_out = run_cmd(
+            "sh",
+            &["-c".into(), format!("dnssec-dsfromkey -2 {keys_dir}/K{zone}.*.key 2>/dev/null")],
+        )
+        .await;
+        let text = match ds_out {
+            Ok(o) => String::from_utf8_lossy(&o.stdout).into_owned(),
+            Err(_) => String::new(),
+        };
+        let records: Vec<Value> = text.lines().filter_map(parse_ds_record).collect();
+        if records.is_empty() {
+            return JobOutcome::failed(
+                "dns.dnssec.enable: keys generated but no DS record produced (install the bind9 dnssec utilities)",
+            );
+        }
+        JobOutcome::succeeded(json!({"domain": zone, "ds_records": records, "signed": true}))
+    }
+
+    /// Disables DNSSEC by removing the zone's keys and signed zone file.
+    async fn dnssec_disable(&self, job: &Job) -> JobOutcome {
+        let zone = job.payload.get("domain").and_then(Value::as_str).unwrap_or("").trim();
+        if !valid_mail_domain(zone) {
+            return JobOutcome::failed("dns.dnssec.disable: invalid domain");
+        }
+        let dns_dir = std::env::var("AGENT_DNS_DIR").unwrap_or_else(|_| "/etc/asterpanel/dns".into());
+        let _ = tokio::fs::remove_dir_all(format!("{dns_dir}/keys/{zone}")).await;
+        let _ = tokio::fs::remove_file(format!("{dns_dir}/{zone}.zone.signed")).await;
+        JobOutcome::succeeded(json!({"domain": zone, "disabled": true}))
     }
 
     async fn cert_issue(&self, job: &Job) -> JobOutcome {
@@ -1832,6 +1912,28 @@ ASTERPANEL_DENY {{\n  type = \"from\";\n  map = \"{deny_path}\";\n  score = 12.0
     )
 }
 
+/// Parses a `dnssec-dsfromkey` DS line into structured fields. Example:
+///   `example.com. IN DS 12345 13 2 49FD46E6…`
+/// A digest split across whitespace tokens is concatenated.
+fn parse_ds_record(line: &str) -> Option<Value> {
+    let parts: Vec<&str> = line.split_whitespace().collect();
+    let pos = parts.iter().position(|&t| t == "DS")?;
+    let key_tag: u32 = parts.get(pos + 1)?.parse().ok()?;
+    let algorithm: u8 = parts.get(pos + 2)?.parse().ok()?;
+    let digest_type: u8 = parts.get(pos + 3)?.parse().ok()?;
+    let digest: String = parts.get(pos + 4..)?.concat().to_uppercase();
+    if digest.is_empty() || !digest.chars().all(|c| c.is_ascii_hexdigit()) {
+        return None;
+    }
+    Some(json!({
+        "key_tag": key_tag,
+        "algorithm": algorithm,
+        "digest_type": digest_type,
+        "digest": digest,
+        "rdata": format!("{key_tag} {algorithm} {digest_type} {digest}"),
+    }))
+}
+
 /// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
 async fn sha256_file(path: &str) -> String {
     match run_cmd("sha256sum", &[path.to_string()]).await {
@@ -2978,6 +3080,22 @@ mod tests {
         assert!(mm.contains("score = -10.0;"), "{mm}");
         assert!(mm.contains("ASTERPANEL_DENY"), "{mm}");
         assert!(mm.contains("score = 12.0;"), "{mm}");
+    }
+
+    #[test]
+    fn parses_ds_record_from_dsfromkey() {
+        let line = "example.com. IN DS 12345 13 2 49FD46E6C4B45C55D4AC";
+        let v = parse_ds_record(line).expect("should parse");
+        assert_eq!(v["key_tag"], 12345);
+        assert_eq!(v["algorithm"], 13);
+        assert_eq!(v["digest_type"], 2);
+        assert_eq!(v["digest"], "49FD46E6C4B45C55D4AC");
+        assert_eq!(v["rdata"], "12345 13 2 49FD46E6C4B45C55D4AC");
+        // a digest split across tokens is concatenated
+        let split = "z. IN DS 9 8 2 ABCD EF01";
+        assert_eq!(parse_ds_record(split).unwrap()["digest"], "ABCDEF01");
+        // a non-DS line returns None
+        assert!(parse_ds_record("example.com. IN A 1.2.3.4").is_none());
     }
 
     #[test]

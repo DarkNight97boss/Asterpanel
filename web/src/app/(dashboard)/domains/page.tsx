@@ -42,6 +42,14 @@ interface Protection {
   username: string;
 }
 
+interface DnssecEntry {
+  id: string;
+  domain: string;
+  ds_record: string;
+  algorithm: number;
+  enabled: boolean;
+}
+
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
 export default function DomainsPage() {
@@ -52,6 +60,10 @@ export default function DomainsPage() {
   const [red, setRed] = useState({ source_domain: "", source_path: "*", target_url: "", status_code: "301" });
   const [protections, setProtections] = useState<Protection[]>([]);
   const [dp, setDp] = useState({ domain: "", path: "/*", username: "", password: "" });
+  const [dnssec, setDnssec] = useState<DnssecEntry[]>([]);
+  const [dnssecDomain, setDnssecDomain] = useState("");
+  const [dnssecBusy, setDnssecBusy] = useState(false);
+  const [dnssecResult, setDnssecResult] = useState<{ rdata: string }[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -66,7 +78,7 @@ export default function DomainsPage() {
 
   async function refresh() {
     try {
-      const [d, r, ns, rd, pr] = await Promise.all([
+      const [d, r, ns, rd, pr, ds] = await Promise.all([
         listDomains(),
         listDnsRecords(),
         apiGet<{ nameservers: Nameserver[] }>("/api/v1/dns/nameservers").catch(() => ({
@@ -76,12 +88,14 @@ export default function DomainsPage() {
         apiGet<{ protections: Protection[] }>("/api/v1/directory-privacy").catch(() => ({
           protections: [],
         })),
+        apiGet<{ dnssec: DnssecEntry[] }>("/api/v1/dns/dnssec").catch(() => ({ dnssec: [] })),
       ]);
       setDomains(d);
       setRecords(r);
       setNameservers(ns.nameservers ?? []);
       setRedirects(rd.redirects ?? []);
       setProtections(pr.protections ?? []);
+      setDnssec(ds.dnssec ?? []);
       if (!recDomain && d.length) setRecDomain(d[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
@@ -201,6 +215,35 @@ export default function DomainsPage() {
     setError(null);
     try {
       await apiDelete(`/api/v1/directory-privacy/${id}`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    }
+  }
+
+  async function onEnableDnssec(e: FormEvent) {
+    e.preventDefault();
+    setDnssecBusy(true);
+    setError(null);
+    setDnssecResult(null);
+    try {
+      const r = await apiPost<{ ds_records: { rdata: string }[] }>("/api/v1/dns/dnssec", {
+        domain: dnssecDomain.trim(),
+      });
+      setDnssecResult(r.ds_records ?? []);
+      setDnssecDomain("");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not enable DNSSEC");
+    } finally {
+      setDnssecBusy(false);
+    }
+  }
+
+  async function onDisableDnssec(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/dns/dnssec/${id}`);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -547,6 +590,71 @@ export default function DomainsPage() {
                     className="ml-auto h-7 w-7"
                     onClick={() => onDeleteDirPrivacy(pr.id)}
                     aria-label="Delete protection"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">DNSSEC ({dnssec.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Sign a zone and publish the printed <strong>DS record</strong> at your registrar to
+            enable DNSSEC validation.
+          </p>
+          <form onSubmit={onEnableDnssec} className="flex flex-wrap items-end gap-3">
+            <div className="grow space-y-1.5">
+              <Label htmlFor="dnssec-domain">Domain</Label>
+              <Input
+                id="dnssec-domain"
+                value={dnssecDomain}
+                onChange={(e) => setDnssecDomain(e.target.value)}
+                placeholder="acme.com"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={dnssecBusy}>
+              {dnssecBusy ? "Signing…" : "Enable DNSSEC"}
+            </Button>
+          </form>
+
+          {dnssecResult && (
+            <div className="space-y-1 rounded-md border border-border bg-muted/30 p-3 font-mono text-xs">
+              <p className="font-sans text-muted-foreground">
+                Publish this DS record at your registrar:
+              </p>
+              {dnssecResult.map((d) => (
+                <div key={d.rdata} className="break-all">
+                  <span className="text-emerald-400">DS</span> {d.rdata}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {dnssec.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {dnssec.map((d) => (
+                <li key={d.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">{d.domain}</span>
+                  <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-400">
+                    signed
+                  </span>
+                  <span className="truncate font-mono text-xs text-muted-foreground">
+                    DS {d.ds_record}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7 shrink-0"
+                    onClick={() => onDisableDnssec(d.id)}
+                    aria-label="Disable DNSSEC"
                   >
                     <Trash2 className="h-4 w-4" />
                   </Button>
