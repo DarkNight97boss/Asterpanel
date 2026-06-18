@@ -123,6 +123,24 @@ const it: Dict = {
   "Event notifications": "Notifiche eventi",
   "Invoices & usage": "Fatture e utilizzo",
   "Alerts & channels": "Avvisi e canali",
+  // in-page sub-tabs
+  Domains: "Domini",
+  "DNS Records": "Record DNS",
+  Redirects: "Redirect",
+  "Directory Privacy": "Privacy directory",
+  DNSSEC: "DNSSEC",
+  "Hotlink Protection": "Protezione hotlink",
+  "Dynamic DNS": "DNS dinamico",
+  "Web Disk": "Web Disk",
+  Instances: "Istanze",
+  "SQL Query": "Query SQL",
+  "Remote Access": "Accesso remoto",
+  Export: "Esporta",
+  Forwarders: "Inoltri",
+  Autoresponders: "Risponditori",
+  Filters: "Filtri",
+  "Mailing Lists": "Liste email",
+  Calendars: "Calendari",
 };
 
 const DICTS: Record<Locale, Dict> = { en: {}, it };

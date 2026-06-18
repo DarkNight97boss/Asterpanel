@@ -1,8 +1,19 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import {
+  Forward,
+  Globe,
+  HardDrive,
+  ImageOff,
+  List,
+  Lock,
+  RefreshCw,
+  ShieldCheck,
+  Trash2,
+} from "lucide-react";
 
+import { PageTabs, type PageTab } from "@/components/page-tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -77,6 +88,17 @@ interface Webdav {
 
 const RECORD_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "SRV", "NS", "CAA"];
 
+const TABS: PageTab[] = [
+  { id: "domains", label: "Domains", icon: Globe },
+  { id: "records", label: "DNS Records", icon: List },
+  { id: "redirects", label: "Redirects", icon: Forward },
+  { id: "privacy", label: "Directory Privacy", icon: Lock },
+  { id: "dnssec", label: "DNSSEC", icon: ShieldCheck },
+  { id: "hotlink", label: "Hotlink Protection", icon: ImageOff },
+  { id: "ddns", label: "Dynamic DNS", icon: RefreshCw },
+  { id: "webdisk", label: "Web Disk", icon: HardDrive },
+];
+
 export default function DomainsPage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [records, setRecords] = useState<DnsRecord[]>([]);
@@ -109,6 +131,7 @@ export default function DomainsPage() {
   const [recContent, setRecContent] = useState("");
   const [recPriority, setRecPriority] = useState("");
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState("domains");
 
   async function refresh() {
     try {
@@ -408,7 +431,11 @@ export default function DomainsPage() {
       {error && <p className="text-sm text-red-600">{error}</p>}
       {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
-      {nameservers.length > 0 && (
+      <PageTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {tab === "domains" && (
+        <>
+          {nameservers.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Nameservers</CardTitle>
@@ -491,7 +518,11 @@ export default function DomainsPage() {
           </table>
         </CardContent>
       </Card>
+        </>
+      )}
 
+      {tab === "records" && (
+        <>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Add DNS record</CardTitle>
@@ -574,7 +605,10 @@ export default function DomainsPage() {
           </table>
         </CardContent>
       </Card>
+        </>
+      )}
 
+      {tab === "redirects" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Redirects ({redirects.length})</CardTitle>
@@ -661,7 +695,9 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "privacy" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Directory privacy ({protections.length})</CardTitle>
@@ -741,7 +777,9 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "dnssec" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">DNSSEC ({dnssec.length})</CardTitle>
@@ -806,7 +844,9 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "hotlink" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Hotlink protection ({hotlink.length})</CardTitle>
@@ -874,7 +914,9 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "ddns" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Dynamic DNS ({ddns.length})</CardTitle>
@@ -944,7 +986,9 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
+      {tab === "webdisk" && (
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Web Disk (WebDAV) ({webdav.length})</CardTitle>
@@ -1035,6 +1079,7 @@ export default function DomainsPage() {
           )}
         </CardContent>
       </Card>
+      )}
     </div>
   );
 }
