@@ -344,6 +344,14 @@ type WebdavAccount struct {
 	CreatedAt      time.Time
 }
 
+type CaldavAccount struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Username       string
+	PasswordHash   string
+	CreatedAt      time.Time
+}
+
 type Backup struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

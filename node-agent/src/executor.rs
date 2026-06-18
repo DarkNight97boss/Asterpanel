@@ -69,6 +69,8 @@ impl Executor for DockerExecutor {
             "mail.autoresponder.apply" => self.mail_autoresponder_apply(job).await,
             "mail.filter.apply" => self.mail_filter_apply(job).await,
             "mail.spam.apply" => self.mail_spam_apply(job).await,
+            "caldav.ensure" => self.caldav_ensure(job).await,
+            "caldav.user.apply" => self.caldav_user_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "database.user.create" => self.database_user_create(job).await,
@@ -643,6 +645,46 @@ impl DockerExecutor {
             "reject": reject, "add_header": add_header, "greylisting": greylisting,
             "allow": allow.len(), "deny": deny.len(),
         }))
+    }
+
+    /// Launches a Radicale CalDAV/CardDAV server container (idempotent recreate).
+    async fn caldav_ensure(&self, _job: &Job) -> JobOutcome {
+        let dir = std::env::var("AGENT_CALDAV_DIR").unwrap_or_else(|_| "/etc/asterpanel/caldav".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("caldav.ensure: mkdir failed: {e}"));
+        }
+        let _ = run_docker(&["rm".into(), "-f".into(), "astp_radicale".into()]).await;
+        match run_docker(&radicale_args(&dir)).await {
+            Ok(o) if o.status.success() => JobOutcome::succeeded(json!({
+                "container": "astp_radicale", "port": 5232,
+            })),
+            Ok(o) => JobOutcome::failed(format!(
+                "caldav.ensure: run failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    /// Regenerates the Radicale htpasswd users file from the full account set.
+    async fn caldav_user_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let accounts = job
+            .payload
+            .get("accounts")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let content = render_radicale_users(accounts);
+        let dir = std::env::var("AGENT_CALDAV_DIR").unwrap_or_else(|_| "/etc/asterpanel/caldav".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("caldav.user.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/users");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("caldav.user.apply: write failed: {e}"));
+        }
+        let count = content.lines().filter(|l| !l.is_empty()).count();
+        JobOutcome::succeeded(json!({"path": path, "accounts": count}))
     }
 
     async fn backup_create(&self, job: &Job) -> JobOutcome {
@@ -2112,6 +2154,41 @@ fn parse_docker_services(out: &str) -> Vec<Value> {
         .collect()
 }
 
+/// Renders a Radicale htpasswd users file (`username:bcrypt_hash` per line) from
+/// the account set. Only bcrypt hashes are accepted; usernames with `:` or empty
+/// values are skipped.
+fn render_radicale_users(accounts: &[Value]) -> String {
+    let mut out = String::new();
+    for a in accounts {
+        let user = a.get("username").and_then(Value::as_str).unwrap_or("").trim();
+        let hash = a.get("password_hash").and_then(Value::as_str).unwrap_or("").trim();
+        if user.is_empty() || user.contains(':') || !hash.starts_with("$2") {
+            continue;
+        }
+        out.push_str(&format!("{user}:{hash}\n"));
+    }
+    out
+}
+
+/// `docker run` argv for the Radicale CalDAV/CardDAV server.
+fn radicale_args(data_dir: &str) -> Vec<String> {
+    vec![
+        "run".into(),
+        "-d".into(),
+        "--name".into(),
+        "astp_radicale".into(),
+        "--restart".into(),
+        "unless-stopped".into(),
+        "-p".into(),
+        "5232:5232".into(),
+        "-v".into(),
+        format!("{data_dir}:/data"),
+        "-v".into(),
+        format!("{data_dir}/users:/etc/radicale/users:ro"),
+        "tomsquest/docker-radicale".into(),
+    ]
+}
+
 /// Computes the SHA-256 of a file via `sha256sum` (None when it's unavailable).
 async fn sha256_file(path: &str) -> String {
     match run_cmd("sha256sum", &[path.to_string()]).await {
@@ -3487,6 +3564,23 @@ mod tests {
         assert!(mm.contains("score = -10.0;"), "{mm}");
         assert!(mm.contains("ASTERPANEL_DENY"), "{mm}");
         assert!(mm.contains("score = 12.0;"), "{mm}");
+    }
+
+    #[test]
+    fn radicale_users_and_args() {
+        let accounts = vec![
+            json!({"username":"alice","password_hash":"$2a$14$alicehashxxxxxxxxxxxx"}),
+            json!({"username":"bad:name","password_hash":"$2a$14$x"}), // colon → skipped
+            json!({"username":"bob","password_hash":"plaintext"}),     // not bcrypt → skipped
+        ];
+        let out = render_radicale_users(&accounts);
+        assert!(out.contains("alice:$2a$14$alicehashxxxxxxxxxxxx"), "{out}");
+        assert!(!out.contains("bad:name"), "{out}");
+        assert!(!out.contains("bob"), "{out}");
+        let args = radicale_args("/data").join(" ");
+        assert!(args.contains("astp_radicale"), "{args}");
+        assert!(args.contains("5232:5232"), "{args}");
+        assert!(args.contains("/data:/data"), "{args}");
     }
 
     #[test]

@@ -242,6 +242,12 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/lists/{listID}/members", s.handleAddListMember)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/lists/members/{memberID}", s.handleDeleteListMember)
 
+			// CalDAV/CardDAV (Radicale calendars + contacts)
+			r.With(az.Require("email.manage", "caldav.ensure", "mailbox")).Post("/email/caldav/ensure", s.handleEnsureCaldav)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/caldav/accounts", s.handleListCaldav)
+			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/caldav/accounts", s.handleCreateCaldav)
+			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/caldav/accounts/{accountID}", s.handleDeleteCaldav)
+
 			// Spam management (Rspamd thresholds + allow/deny lists)
 			r.With(az.Require("email.read", "email.spam", "mailbox")).Get("/email/spam", s.handleGetSpam)
 			r.With(az.Require("email.manage", "email.spam", "mailbox")).Put("/email/spam/settings", s.handleUpdateSpamSettings)

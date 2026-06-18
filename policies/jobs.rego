@@ -35,6 +35,8 @@ allowed_types := {
 	"mail.autoresponder.apply",
 	"mail.filter.apply",
 	"mail.spam.apply",
+	"caldav.ensure",
+	"caldav.user.apply",
 	"cron.apply",
 	"ftp.account.create",
 	"cert.install",

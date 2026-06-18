@@ -77,6 +77,11 @@ interface MailList {
   member_count: number;
 }
 
+interface CaldavAccount {
+  id: string;
+  username: string;
+}
+
 export default function EmailPage() {
   const [boxes, setBoxes] = useState<Mailbox[]>([]);
   const [address, setAddress] = useState("");
@@ -353,6 +358,60 @@ export default function EmailPage() {
     }
   }
 
+  const [caldav, setCaldav] = useState<CaldavAccount[]>([]);
+  const [caldavForm, setCaldavForm] = useState({ username: "", password: "" });
+  const [caldavBusy, setCaldavBusy] = useState(false);
+  const [caldavNotice, setCaldavNotice] = useState<string | null>(null);
+
+  async function refreshCaldav() {
+    try {
+      const { accounts } = await apiGet<{ accounts: CaldavAccount[] }>(
+        "/api/v1/email/caldav/accounts",
+      );
+      setCaldav(accounts);
+    } catch {
+      /* keep the section empty if the backend is unreachable */
+    }
+  }
+
+  async function onEnsureCaldav() {
+    setError(null);
+    setCaldavNotice(null);
+    try {
+      await apiPost("/api/v1/email/caldav/ensure", {});
+      setCaldavNotice("Radicale server launch dispatched to the node.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the server");
+    }
+  }
+
+  async function onCreateCaldav(e: FormEvent) {
+    e.preventDefault();
+    setCaldavBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/v1/email/caldav/accounts", {
+        username: caldavForm.username.trim(),
+        password: caldavForm.password,
+      });
+      setCaldavForm({ username: "", password: "" });
+      await refreshCaldav();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create account");
+    } finally {
+      setCaldavBusy(false);
+    }
+  }
+
+  async function onDeleteCaldav(id: string) {
+    try {
+      await apiDelete(`/api/v1/email/caldav/accounts/${id}`);
+      await refreshCaldav();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete account");
+    }
+  }
+
   async function generateDkim(e: FormEvent) {
     e.preventDefault();
     setDkimBusy(true);
@@ -382,6 +441,7 @@ export default function EmailPage() {
     refreshFilters();
     refreshSpam();
     refreshLists();
+    refreshCaldav();
   }, []);
 
   async function onCreate(e: FormEvent) {
@@ -1029,6 +1089,69 @@ export default function EmailPage() {
                 </div>
               ))}
             </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Calendars &amp; Contacts ({caldav.length})</CardTitle>
+          <Button variant="outline" size="sm" onClick={onEnsureCaldav}>
+            Start server
+          </Button>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            CalDAV/CardDAV accounts (Radicale). Point a calendar/contacts client at{" "}
+            <code className="rounded bg-muted px-1 py-0.5 text-xs">
+              https://&lt;node&gt;:5232/&lt;user&gt;/
+            </code>{" "}
+            with the account credentials.
+          </p>
+          {caldavNotice && <p className="text-sm text-emerald-400">{caldavNotice}</p>}
+          <form onSubmit={onCreateCaldav} className="grid gap-3 sm:grid-cols-3 sm:items-end">
+            <div className="space-y-1.5">
+              <Label htmlFor="cd-user">Username</Label>
+              <Input
+                id="cd-user"
+                value={caldavForm.username}
+                onChange={(e) => setCaldavForm({ ...caldavForm, username: e.target.value })}
+                placeholder="alice"
+                required
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="cd-pass">Password</Label>
+              <Input
+                id="cd-pass"
+                type="password"
+                value={caldavForm.password}
+                onChange={(e) => setCaldavForm({ ...caldavForm, password: e.target.value })}
+                placeholder="min 6 chars"
+                required
+              />
+            </div>
+            <Button type="submit" disabled={caldavBusy}>
+              {caldavBusy ? "Creating…" : "Create account"}
+            </Button>
+          </form>
+          {caldav.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {caldav.map((a) => (
+                <li key={a.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-mono">{a.username}</span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteCaldav(a.id)}
+                    aria-label="Delete CalDAV account"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
           )}
         </CardContent>
       </Card>
