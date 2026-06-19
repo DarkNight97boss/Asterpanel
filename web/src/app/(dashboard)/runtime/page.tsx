@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Copy, GitBranch, Trash2 } from "lucide-react";
+import { Copy, FlaskConical, GitBranch, Rocket, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +32,14 @@ interface GitRepo {
   created_at: string;
 }
 
+interface StagingEnv {
+  id: string;
+  website_id: string;
+  status: string;
+  last_synced_at: string | null;
+  created_at: string;
+}
+
 type RowState = "idle" | "switching" | "done" | "error";
 
 export default function RuntimePage() {
@@ -48,6 +56,9 @@ export default function RuntimePage() {
   const [gitRepo, setGitRepo] = useState<GitRepo | null>(null);
   const [gitBranch, setGitBranch] = useState("main");
   const [gitBusy, setGitBusy] = useState(false);
+  const [stagingSiteId, setStagingSiteId] = useState("");
+  const [staging, setStaging] = useState<StagingEnv | null>(null);
+  const [stagingBusy, setStagingBusy] = useState(false);
 
   const phpSites = runtimes.filter((r) => r.runtime === "php");
 
@@ -97,6 +108,16 @@ export default function RuntimePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [gitSiteId]);
 
+  useEffect(() => {
+    if (!stagingSiteId && runtimes.length) setStagingSiteId(runtimes[0].site_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimes]);
+
+  useEffect(() => {
+    loadStaging(stagingSiteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stagingSiteId]);
+
   async function loadGit(siteId: string) {
     if (!siteId) return;
     try {
@@ -132,6 +153,60 @@ export default function RuntimePage() {
       setGitBranch("main");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not disable git deploy");
+    }
+  }
+
+  async function loadStaging(siteId: string) {
+    if (!siteId) return;
+    try {
+      const { staging } = await apiGet<{ staging: StagingEnv | null }>(
+        `/api/v1/sites/${siteId}/staging`,
+      );
+      setStaging(staging);
+    } catch {
+      setStaging(null);
+    }
+  }
+
+  async function createStaging() {
+    setStagingBusy(true);
+    setError(null);
+    try {
+      const { staging } = await apiPost<{ staging: StagingEnv }>(
+        `/api/v1/sites/${stagingSiteId}/staging`,
+        {},
+      );
+      setStaging(staging);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create staging environment");
+    } finally {
+      setStagingBusy(false);
+    }
+  }
+
+  async function promoteStaging() {
+    setStagingBusy(true);
+    setError(null);
+    try {
+      const { staging } = await apiPost<{ staging: StagingEnv }>(
+        `/api/v1/sites/${stagingSiteId}/staging/promote`,
+        {},
+      );
+      setStaging(staging);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not promote staging environment");
+    } finally {
+      setStagingBusy(false);
+    }
+  }
+
+  async function destroyStaging() {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/sites/${stagingSiteId}/staging`);
+      setStaging(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete staging environment");
     }
   }
 
@@ -332,6 +407,93 @@ export default function RuntimePage() {
                     {gitBusy ? "Enabling…" : "Enable Git deploy"}
                   </Button>
                 </form>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Staging environment</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Clone a site&apos;s files into an isolated staging copy, test your changes, then promote
+            staging back over production. The current production tree is snapshotted first, so a
+            promote can be rolled back.
+          </p>
+          {runtimes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No sites.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <label htmlFor="staging-site" className="text-sm text-muted-foreground">
+                  Site
+                </label>
+                <select
+                  id="staging-site"
+                  className="h-9 max-w-xs rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  value={stagingSiteId}
+                  onChange={(e) => setStagingSiteId(e.target.value)}
+                >
+                  {runtimes.map((r) => (
+                    <option key={r.site_id} value={r.site_id} className="bg-card">
+                      {r.site}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {staging ? (
+                <div className="space-y-3 rounded-md border border-border/60 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <FlaskConical className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">Status</span>
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        staging.status === "ready"
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : staging.status === "error"
+                            ? "bg-red-500/15 text-red-600 dark:text-red-400"
+                            : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      }`}
+                    >
+                      {staging.status}
+                    </span>
+                    {staging.last_synced_at && (
+                      <span className="text-xs text-muted-foreground">
+                        last synced {new Date(staging.last_synced_at).toLocaleString()}
+                      </span>
+                    )}
+                    <Button variant="ghost" size="sm" className="ml-auto" onClick={destroyStaging}>
+                      <Trash2 className="h-4 w-4" />
+                      Delete
+                    </Button>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button
+                      onClick={promoteStaging}
+                      disabled={stagingBusy || staging.status !== "ready"}
+                    >
+                      <Rocket className="h-4 w-4" />
+                      {stagingBusy ? "Working…" : "Promote to production"}
+                    </Button>
+                    <Button variant="outline" onClick={createStaging} disabled={stagingBusy}>
+                      <Copy className="h-4 w-4" />
+                      Re-clone from production
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Staging serves a file-level copy of the document root. Database contents are not
+                    cloned.
+                  </p>
+                </div>
+              ) : (
+                <Button onClick={createStaging} disabled={stagingBusy}>
+                  <FlaskConical className="h-4 w-4" />
+                  {stagingBusy ? "Creating…" : "Create staging environment"}
+                </Button>
               )}
             </>
           )}

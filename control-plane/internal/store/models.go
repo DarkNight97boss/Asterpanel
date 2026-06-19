@@ -355,6 +355,16 @@ type GitRepo struct {
 	CreatedAt      time.Time
 }
 
+type StagingEnvironment struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	WebsiteID      uuid.UUID
+	Status         string
+	LastJobID      uuid.NullUUID
+	LastSyncedAt   *time.Time
+	CreatedAt      time.Time
+}
+
 type MailList struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

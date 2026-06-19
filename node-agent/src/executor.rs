@@ -81,6 +81,9 @@ impl Executor for DockerExecutor {
             "ftp.account.create" => self.ftp_account_create(job).await,
             "ssh.keys.apply" => self.ssh_keys_apply(job).await,
             "git.repo.ensure" => self.git_repo_ensure(job).await,
+            "staging.create" => self.staging_sync(job, false).await,
+            "staging.promote" => self.staging_sync(job, true).await,
+            "staging.destroy" => self.staging_destroy(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "database.user.privileges" => self.database_user_privileges(job).await,
             "database.user.delete" => self.database_user_delete(job).await,
@@ -866,6 +869,80 @@ impl DockerExecutor {
                 tokio::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).await;
         }
         JobOutcome::succeeded(json!({"repo_path": repo_path, "branch": branch}))
+    }
+
+    /// Mirrors a site's document root for its staging environment. With
+    /// `promote = false` (staging.create) production is copied *into* staging;
+    /// with `promote = true` (staging.promote) staging is copied back *into*
+    /// production, after snapshotting the current production tree so the promote
+    /// can be rolled back. Every path is derived from the validated website id, so
+    /// no payload string can escape the staging / site roots.
+    async fn staging_sync(&self, job: &Job, promote: bool) -> JobOutcome {
+        let wid = job
+            .payload
+            .get("website_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let (prod, staging) = match staging_paths(wid) {
+            Some(p) => p,
+            None => return JobOutcome::failed("staging: invalid website id"),
+        };
+        let backup = format!("{staging}-prod-backup");
+
+        let (src, dst): (&str, &str) = if promote {
+            (&staging, &prod)
+        } else {
+            (&prod, &staging)
+        };
+
+        if promote {
+            // staging must have been provisioned by staging.create first.
+            if !tokio::fs::try_exists(&staging).await.unwrap_or(false) {
+                return JobOutcome::failed("staging.promote: no staging environment");
+            }
+            // Snapshot the current production tree so a bad promote is reversible.
+            if let Some(bargs) = staging_rsync_args(&prod, &backup) {
+                let _ = tokio::fs::create_dir_all(&backup).await;
+                let _ = run_cmd("rsync", &bargs).await;
+            }
+        }
+
+        if let Err(e) = tokio::fs::create_dir_all(dst).await {
+            return JobOutcome::failed(format!("staging: mkdir {dst} failed: {e}"));
+        }
+        let args = match staging_rsync_args(src, dst) {
+            Some(a) => a,
+            None => return JobOutcome::failed("staging: unsafe sync paths"),
+        };
+        match run_cmd("rsync", &args).await {
+            Ok(o) if o.status.success() => JobOutcome::succeeded(json!({
+                "website_id": wid,
+                "action": if promote { "promote" } else { "create" },
+                "staging_path": staging,
+            })),
+            Ok(o) => JobOutcome::failed(format!(
+                "staging: rsync failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("staging: rsync not available: {e}")),
+        }
+    }
+
+    async fn staging_destroy(&self, job: &Job) -> JobOutcome {
+        let wid = job
+            .payload
+            .get("website_id")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let (_prod, staging) = match staging_paths(wid) {
+            Some(p) => p,
+            None => return JobOutcome::failed("staging.destroy: invalid website id"),
+        };
+        // `staging` is built from a validated id under /var/asterpanel/staging, so
+        // this rm can only ever target that tree (and its prod-backup sibling).
+        let _ = run_cmd("rm", &["-rf".into(), staging.clone()]).await;
+        let _ = run_cmd("rm", &["-rf".into(), format!("{staging}-prod-backup")]).await;
+        JobOutcome::succeeded(json!({"website_id": wid, "destroyed": true}))
     }
 
     async fn ftp_account_create(&self, job: &Job) -> JobOutcome {
@@ -2642,6 +2719,41 @@ fn valid_git_ref(s: &str) -> bool {
     !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
 }
 
+/// A resource id safe to embed in an on-disk path: non-empty, ≤64 chars, ASCII
+/// alphanumerics and `-` only. Anything else (`/`, `.`, …) could escape the root,
+/// so staging paths are always derived from a validated id, never a raw payload.
+fn valid_path_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// The (production, staging) document-root paths for a website's staging
+/// environment. None unless the id is path-safe.
+fn staging_paths(website_id: &str) -> Option<(String, String)> {
+    if !valid_path_id(website_id) {
+        return None;
+    }
+    Some((
+        format!("/var/asterpanel/sites/{website_id}"),
+        format!("/var/asterpanel/staging/{website_id}"),
+    ))
+}
+
+/// rsync argv that mirrors `src` into `dst` (archive mode, deleting files at the
+/// destination that no longer exist in the source). Both paths must be absolute
+/// and inside the allowed roots; None otherwise. The trailing slash on `src`
+/// copies its *contents* rather than the directory itself.
+fn staging_rsync_args(src: &str, dst: &str) -> Option<Vec<String>> {
+    if !valid_doc_root(src) || !valid_doc_root(dst) {
+        return None;
+    }
+    Some(vec![
+        "-a".into(),
+        "--delete".into(),
+        format!("{src}/"),
+        format!("{dst}/"),
+    ])
+}
+
 /// Renders the post-receive hook that checks the pushed branch out into the work
 /// tree. Returns None unless the repo path, work tree and branch are all safe, so
 /// the generated shell script can never carry an injected command.
@@ -3986,6 +4098,34 @@ mod tests {
     fn crontab_renders_entries() {
         let e = vec![json!({"schedule":"0 3 * * *","command":"backup.sh"})];
         assert!(render_crontab(&e).contains("0 3 * * *\tbackup.sh"));
+    }
+
+    #[test]
+    fn staging_paths_and_rsync_are_injection_safe() {
+        // A valid id yields both roots under the fixed prefixes.
+        let (prod, staging) = staging_paths("abc-123").unwrap();
+        assert_eq!(prod, "/var/asterpanel/sites/abc-123");
+        assert_eq!(staging, "/var/asterpanel/staging/abc-123");
+
+        // Path-traversal / injection attempts are refused before any path is built.
+        assert!(staging_paths("../../etc").is_none());
+        assert!(staging_paths("a/b").is_none());
+        assert!(staging_paths("x; rm -rf /").is_none());
+        assert!(staging_paths("").is_none());
+
+        // rsync mirrors *contents* (trailing slashes) and prunes extras (--delete).
+        assert_eq!(
+            staging_rsync_args(&prod, &staging).unwrap(),
+            vec![
+                "-a".to_string(),
+                "--delete".into(),
+                "/var/asterpanel/sites/abc-123/".into(),
+                "/var/asterpanel/staging/abc-123/".into(),
+            ]
+        );
+        // Unsafe sync paths (relative, or stray shell metacharacters) are rejected.
+        assert!(staging_rsync_args("relative/path", "/var/asterpanel/staging/x").is_none());
+        assert!(staging_rsync_args("/ok", "/bad$path").is_none());
     }
 
     #[test]

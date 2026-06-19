@@ -61,6 +61,10 @@ func (s *Server) handleAgentJobStatus(w http.ResponseWriter, r *http.Request) {
 		_ = s.deps.Store.CompleteBackupForJob(ctx, jobID, req.Status, res.SizeBytes, res.SHA256)
 	}
 
+	// Finalize a staging environment whose clone/promote job just completed
+	// (no-op for any job not linked to one).
+	_ = s.deps.Store.SyncStagingForJob(ctx, jobID, req.Status)
+
 	outcome := audit.OutcomeSuccess
 	if req.Status == "failed" || req.Status == "expired" {
 		outcome = audit.OutcomeFailure
