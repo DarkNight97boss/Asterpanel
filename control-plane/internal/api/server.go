@@ -129,6 +129,7 @@ func (s *Server) routes() http.Handler {
 
 			// Metrics (fleet resource usage)
 			r.With(az.Require("metrics.read", "metrics.read", "server_node")).Get("/metrics", s.handleMetrics)
+			r.With(az.Require("metrics.read", "metrics.read", "server_node")).Get("/metrics/history", s.handleMetricsHistory)
 
 			// Websites
 			r.With(az.Require("website.read", "website.list", "website")).Get("/websites", s.handleListWebsites)

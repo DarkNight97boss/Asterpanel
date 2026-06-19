@@ -2,9 +2,55 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+// MetricPoint is one time bucket of the org's resource usage (percentages).
+type MetricPoint struct {
+	Time    time.Time
+	CPUPct  float64
+	MemPct  float64
+	DiskPct float64
+}
+
+// MetricsHistory buckets the org's node_metrics time series since `since` into
+// `bucketSec`-wide buckets, averaging CPU / memory / disk utilisation (percent)
+// across the org's nodes — the data behind the per-account history chart.
+func (s *Store) MetricsHistory(ctx context.Context, orgID uuid.UUID, since time.Time, bucketSec int) ([]MetricPoint, error) {
+	const q = `
+		SELECT to_timestamp(floor(extract(epoch FROM nm.collected_at) / $3) * $3) AS bucket,
+		       AVG(nm.cpu_pct),
+		       AVG(nm.mem_used_bytes::float8  / NULLIF(nm.mem_total_bytes, 0)  * 100),
+		       AVG(nm.disk_used_bytes::float8 / NULLIF(nm.disk_total_bytes, 0) * 100)
+		FROM node_metrics nm
+		JOIN server_nodes sn ON sn.id = nm.server_node_id
+		WHERE sn.organization_id = $1 AND nm.collected_at >= $2
+		GROUP BY 1
+		ORDER BY 1 ASC`
+	rows, err := s.pool.Query(ctx, q, orgID, since, bucketSec)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MetricPoint
+	for rows.Next() {
+		var p MetricPoint
+		var mem, disk *float64
+		if err := rows.Scan(&p.Time, &p.CPUPct, &mem, &disk); err != nil {
+			return nil, err
+		}
+		if mem != nil {
+			p.MemPct = *mem
+		}
+		if disk != nil {
+			p.DiskPct = *disk
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
 
 // (InsertNodeMetrics lives in nodes.go and writes the byte-denominated
 // node_metrics time series created in migration 0002.)
