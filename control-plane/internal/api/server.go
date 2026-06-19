@@ -315,6 +315,9 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("firewall.manage", "firewall.create", "firewall_rule")).Post("/firewall", s.handleCreateFirewall)
 			r.With(az.Require("firewall.manage", "firewall.delete", "firewall_rule")).Delete("/firewall/{ruleID}", s.handleDeleteFirewall)
 
+			// Security Advisor (read-only posture audit + recommendations)
+			r.With(az.Require("firewall.read", "security.advisor", "organization")).Get("/security/advisor", s.handleSecurityAdvisor)
+
 			// WAF — application-layer rules (reuses firewall.* permissions)
 			r.With(az.Require("firewall.read", "waf.list", "waf_rule")).Get("/waf", s.handleListWaf)
 			r.With(az.Require("firewall.manage", "waf.create", "waf_rule")).Post("/waf", s.handleCreateWaf)

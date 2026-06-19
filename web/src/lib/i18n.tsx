@@ -45,6 +45,8 @@ const it: Dict = {
   Backups: "Backup",
   "Cron Jobs": "Cron",
   "Env & Secrets": "Variabili e segreti",
+  "Security Advisor": "Centro sicurezza",
+  "Config audit & recommendations": "Audit configurazione e raccomandazioni",
   Firewall: "Firewall",
   WAF: "WAF",
   "Audit Log": "Audit log",

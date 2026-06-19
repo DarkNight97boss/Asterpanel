@@ -26,6 +26,7 @@ import {
   Server,
   Shield,
   ShieldAlert,
+  ShieldCheck,
   Terminal,
   Webhook,
   type LucideIcon,
@@ -132,6 +133,7 @@ export const groups: NavGroup[] = [
     label: "Security",
     color: "red",
     items: [
+      { href: "/advisor", label: "Security Advisor", icon: ShieldCheck, desc: "Config audit & recommendations" },
       { href: "/firewall", label: "Firewall", icon: Shield, desc: "IP rules & bans" },
       { href: "/waf", label: "WAF", icon: ShieldAlert, desc: "Application firewall" },
       { href: "/audit", label: "Audit Log", icon: ScrollText, desc: "Security events" },
