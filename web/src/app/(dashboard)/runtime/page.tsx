@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Copy, GitBranch, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,14 @@ interface PhpSetting {
   value: string;
 }
 
+interface GitRepo {
+  id: string;
+  website_id: string;
+  branch: string;
+  clone_url: string;
+  created_at: string;
+}
+
 type RowState = "idle" | "switching" | "done" | "error";
 
 export default function RuntimePage() {
@@ -36,6 +44,10 @@ export default function RuntimePage() {
   const [phpDir, setPhpDir] = useState("memory_limit");
   const [phpVal, setPhpVal] = useState("");
   const [phpBusy, setPhpBusy] = useState(false);
+  const [gitSiteId, setGitSiteId] = useState("");
+  const [gitRepo, setGitRepo] = useState<GitRepo | null>(null);
+  const [gitBranch, setGitBranch] = useState("main");
+  const [gitBusy, setGitBusy] = useState(false);
 
   const phpSites = runtimes.filter((r) => r.runtime === "php");
 
@@ -74,6 +86,54 @@ export default function RuntimePage() {
     loadPhp(phpSiteId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phpSiteId]);
+
+  useEffect(() => {
+    if (!gitSiteId && runtimes.length) setGitSiteId(runtimes[0].site_id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runtimes]);
+
+  useEffect(() => {
+    loadGit(gitSiteId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gitSiteId]);
+
+  async function loadGit(siteId: string) {
+    if (!siteId) return;
+    try {
+      const { repo } = await apiGet<{ repo: GitRepo | null }>(`/api/v1/sites/${siteId}/git-repo`);
+      setGitRepo(repo);
+      if (repo) setGitBranch(repo.branch);
+    } catch {
+      setGitRepo(null);
+    }
+  }
+
+  async function enableGit(e: FormEvent) {
+    e.preventDefault();
+    setGitBusy(true);
+    setError(null);
+    try {
+      const { repo } = await apiPost<{ repo: GitRepo }>(`/api/v1/sites/${gitSiteId}/git-repo`, {
+        branch: gitBranch.trim() || "main",
+      });
+      setGitRepo(repo);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not enable git deploy");
+    } finally {
+      setGitBusy(false);
+    }
+  }
+
+  async function disableGit() {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/sites/${gitSiteId}/git-repo`);
+      setGitRepo(null);
+      setGitBranch("main");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not disable git deploy");
+    }
+  }
 
   async function onAddPhp(e: FormEvent) {
     e.preventDefault();
@@ -190,6 +250,91 @@ export default function RuntimePage() {
               )}
             </tbody>
           </table>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Git push-to-deploy</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Provision a bare git repo on the node. Add it as a remote and push — a post-receive hook
+            checks the branch out into the site&apos;s document root.
+          </p>
+          {runtimes.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No sites.</p>
+          ) : (
+            <>
+              <div className="flex items-center gap-3">
+                <label htmlFor="git-site" className="text-sm text-muted-foreground">
+                  Site
+                </label>
+                <select
+                  id="git-site"
+                  className="h-9 max-w-xs rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  value={gitSiteId}
+                  onChange={(e) => setGitSiteId(e.target.value)}
+                >
+                  {runtimes.map((r) => (
+                    <option key={r.site_id} value={r.site_id} className="bg-card">
+                      {r.site}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {gitRepo ? (
+                <div className="space-y-3 rounded-md border border-border/60 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <GitBranch className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-sm">
+                      Deploy branch <span className="font-mono font-medium">{gitRepo.branch}</span>
+                    </span>
+                    <Button variant="ghost" size="sm" className="ml-auto" onClick={disableGit}>
+                      <Trash2 className="h-4 w-4" />
+                      Disable
+                    </Button>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Git remote</Label>
+                    <div className="flex items-center gap-2">
+                      <code className="flex-1 truncate rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                        {gitRepo.clone_url}
+                      </code>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => navigator.clipboard?.writeText(gitRepo.clone_url)}
+                        aria-label="Copy remote URL"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </Button>
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      <code className="rounded bg-muted px-1">git remote add asterpanel {gitRepo.clone_url}</code>{" "}
+                      then <code className="rounded bg-muted px-1">git push asterpanel {gitRepo.branch}</code>
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={enableGit} className="flex items-end gap-3">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="git-branch">Deploy branch</Label>
+                    <Input
+                      id="git-branch"
+                      value={gitBranch}
+                      onChange={(e) => setGitBranch(e.target.value)}
+                      className="font-mono"
+                    />
+                  </div>
+                  <Button type="submit" disabled={gitBusy}>
+                    {gitBusy ? "Enabling…" : "Enable Git deploy"}
+                  </Button>
+                </form>
+              )}
+            </>
+          )}
         </CardContent>
       </Card>
 

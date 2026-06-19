@@ -47,6 +47,7 @@ allowed_types := {
 	"cron.apply",
 	"ftp.account.create",
 	"ssh.keys.apply",
+	"git.repo.ensure",
 	"cert.install",
 	"firewall.apply",
 	"waf.apply",

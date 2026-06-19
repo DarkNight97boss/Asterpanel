@@ -159,6 +159,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("website.read", "runtime.list", "website")).Get("/runtimes", s.handleListRuntimes)
 			r.With(az.Require("website.create", "runtime.switch", "website")).Post("/sites/{siteID}/runtime", s.handleSwitchRuntime)
 			r.With(az.Require("website.create", "app.lifecycle", "website")).Post("/sites/{siteID}/lifecycle", s.handleSiteLifecycle)
+
+			// Git push-to-deploy (bare repo + post-receive hook per site)
+			r.With(az.Require("website.read", "git.repo.get", "website")).Get("/sites/{siteID}/git-repo", s.handleGetGitRepo)
+			r.With(az.Require("website.create", "git.repo.enable", "website")).Post("/sites/{siteID}/git-repo", s.handleEnableGitRepo)
+			r.With(az.Require("website.create", "git.repo.disable", "website")).Delete("/sites/{siteID}/git-repo", s.handleDeleteGitRepo)
 			r.With(az.Require("website.read", "php.settings.list", "website")).Get("/sites/{siteID}/php-settings", s.handleListPhpSettings)
 			r.With(az.Require("website.update", "php.settings.set", "website")).Post("/sites/{siteID}/php-settings", s.handleSetPhpSetting)
 			r.With(az.Require("website.update", "php.settings.delete", "website")).Delete("/sites/{siteID}/php-settings/{settingID}", s.handleDeletePhpSetting)

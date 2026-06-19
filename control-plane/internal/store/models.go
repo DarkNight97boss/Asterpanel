@@ -346,6 +346,15 @@ type SSHKey struct {
 	CreatedAt      time.Time
 }
 
+type GitRepo struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	WebsiteID      uuid.UUID
+	Branch         string
+	CloneURL       string
+	CreatedAt      time.Time
+}
+
 type MailList struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

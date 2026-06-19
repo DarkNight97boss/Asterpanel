@@ -56,6 +56,7 @@ const (
 	TypeCronApply         Type = "cron.apply"
 	TypeFTPAccountCreate  Type = "ftp.account.create"
 	TypeSSHKeysApply      Type = "ssh.keys.apply"
+	TypeGitRepoEnsure     Type = "git.repo.ensure"
 	TypeCertInstall       Type = "cert.install"
 	TypeFirewallApply     Type = "firewall.apply"
 	TypeWAFApply          Type = "waf.apply"

@@ -80,6 +80,7 @@ impl Executor for DockerExecutor {
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
             "ssh.keys.apply" => self.ssh_keys_apply(job).await,
+            "git.repo.ensure" => self.git_repo_ensure(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "database.user.privileges" => self.database_user_privileges(job).await,
             "database.user.delete" => self.database_user_delete(job).await,
@@ -831,6 +832,40 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("ssh.keys.apply: write failed: {e}"));
         }
         JobOutcome::succeeded(json!({"path": path, "keys": keys.len()}))
+    }
+
+    /// Provisions a bare git repo for a site and installs a post-receive hook that
+    /// checks the configured branch out into the site's working tree on push.
+    async fn git_repo_ensure(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str).unwrap_or("");
+        let repo_path = pv("repo_path");
+        let work_tree = pv("work_tree");
+        let branch = if pv("branch").is_empty() { "main" } else { pv("branch") };
+        let hook = match render_post_receive_hook(repo_path, work_tree, branch) {
+            Some(h) => h,
+            None => {
+                return JobOutcome::failed("git.repo.ensure: unsafe repo path, work tree or branch")
+            }
+        };
+        if let Err(e) = tokio::fs::create_dir_all(repo_path).await {
+            return JobOutcome::failed(format!("git.repo.ensure: mkdir failed: {e}"));
+        }
+        if let Err(e) = run_cmd("git", &["init".into(), "--bare".into(), repo_path.to_string()]).await
+        {
+            return JobOutcome::failed(format!("git.repo.ensure: git init failed: {e}"));
+        }
+        let _ = tokio::fs::create_dir_all(work_tree).await;
+        let hook_path = format!("{repo_path}/hooks/post-receive");
+        if let Err(e) = tokio::fs::write(&hook_path, hook.as_bytes()).await {
+            return JobOutcome::failed(format!("git.repo.ensure: write hook failed: {e}"));
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ =
+                tokio::fs::set_permissions(&hook_path, std::fs::Permissions::from_mode(0o755)).await;
+        }
+        JobOutcome::succeeded(json!({"repo_path": repo_path, "branch": branch}))
     }
 
     async fn ftp_account_create(&self, job: &Job) -> JobOutcome {
@@ -2602,6 +2637,30 @@ fn valid_doc_root(s: &str) -> bool {
         && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
 }
 
+/// A git ref/branch name: letters, digits and `/._-`, at most 100 chars.
+fn valid_git_ref(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 100 && s.chars().all(|c| c.is_ascii_alphanumeric() || "/._-".contains(c))
+}
+
+/// Renders the post-receive hook that checks the pushed branch out into the work
+/// tree. Returns None unless the repo path, work tree and branch are all safe, so
+/// the generated shell script can never carry an injected command.
+fn render_post_receive_hook(repo_path: &str, work_tree: &str, branch: &str) -> Option<String> {
+    if !valid_doc_root(repo_path) || !valid_doc_root(work_tree) || !valid_git_ref(branch) {
+        return None;
+    }
+    Some(format!(
+        "#!/bin/sh\n\
+         # AsterPanel git deploy (generated — do not edit)\n\
+         while read _old _new ref; do\n\
+         \x20 if [ \"$ref\" = \"refs/heads/{branch}\" ]; then\n\
+         \x20   git --work-tree={work_tree} --git-dir={repo_path} checkout -f {branch}\n\
+         \x20   echo \"AsterPanel: deployed {branch} to {work_tree}\"\n\
+         \x20 fi\n\
+         done\n"
+    ))
+}
+
 /// Renders the Caddy site-protection snippet: one site block per domain, merging
 /// `basic_auth` matchers (path-scoped, bcrypt-only) and hotlink protection (a
 /// referer-guarded asset matcher → 403). Invalid domains/hashes are skipped.
@@ -3968,6 +4027,27 @@ mod tests {
         assert!(app_lifecycle_args("nuke", "astp_site_x").is_none()); // unknown action
         assert!(app_lifecycle_args("restart", "bad name").is_none()); // unsafe container
         assert!(app_lifecycle_args("restart", "").is_none());
+    }
+
+    #[test]
+    fn post_receive_hook_renders_and_validates() {
+        let h = render_post_receive_hook(
+            "/var/asterpanel/git/abc.git",
+            "/var/asterpanel/sites/abc",
+            "main",
+        )
+        .unwrap();
+        assert!(h.contains("refs/heads/main"), "{h}");
+        assert!(
+            h.contains("git --work-tree=/var/asterpanel/sites/abc --git-dir=/var/asterpanel/git/abc.git checkout -f main"),
+            "{h}"
+        );
+        // unsafe inputs are refused
+        assert!(render_post_receive_hook("/var/git; rm -rf /", "/var/site", "main").is_none());
+        assert!(render_post_receive_hook("/var/git", "/var/site", "main; evil").is_none());
+        assert!(render_post_receive_hook("relative/path", "/var/site", "main").is_none());
+        assert!(valid_git_ref("feature/x-1"));
+        assert!(!valid_git_ref("bad branch"));
     }
 
     #[test]
