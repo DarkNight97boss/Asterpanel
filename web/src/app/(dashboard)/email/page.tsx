@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Calendar, Filter, Forward, Mail, Reply, Send, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
+import { Calendar, Filter, Forward, Mail, Reply, Route, Send, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -93,6 +93,16 @@ interface QueueEntry {
   status: string;
 }
 
+interface DeliveryEvent {
+  time: string;
+  queue_id: string;
+  to: string;
+  status: string;
+  dsn: string;
+  relay: string;
+  reason: string;
+}
+
 const TABS: PageTab[] = [
   { id: "mailboxes", label: "Mailboxes", icon: Mail },
   { id: "deliverability", label: "Deliverability", icon: ShieldCheck },
@@ -101,6 +111,7 @@ const TABS: PageTab[] = [
   { id: "filters", label: "Filters", icon: Filter },
   { id: "spam", label: "Spam", icon: ShieldAlert },
   { id: "queue", label: "Mail Queue", icon: Send },
+  { id: "delivery", label: "Delivery Log", icon: Route },
   { id: "lists", label: "Mailing Lists", icon: Users },
   { id: "caldav", label: "Calendars", icon: Calendar },
 ];
@@ -120,6 +131,10 @@ export default function EmailPage() {
   const [queue, setQueue] = useState<QueueEntry[]>([]);
   const [queueLoading, setQueueLoading] = useState(false);
   const [queueError, setQueueError] = useState<string | null>(null);
+  const [delivery, setDelivery] = useState<DeliveryEvent[]>([]);
+  const [deliveryQuery, setDeliveryQuery] = useState("");
+  const [deliveryLoading, setDeliveryLoading] = useState(false);
+  const [deliveryLoaded, setDeliveryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
   const [dkimDomain, setDkimDomain] = useState("");
@@ -502,6 +517,28 @@ export default function EmailPage() {
 
   useEffect(() => {
     if (tab === "queue") loadQueue();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab]);
+
+  async function trackDelivery(e?: FormEvent) {
+    e?.preventDefault();
+    setDeliveryLoading(true);
+    setError(null);
+    try {
+      const { events } = await apiPost<{ events: DeliveryEvent[] }>("/api/v1/email/track-delivery", {
+        query: deliveryQuery.trim(),
+      });
+      setDelivery(events ?? []);
+      setDeliveryLoaded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read the delivery log");
+    } finally {
+      setDeliveryLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (tab === "delivery" && !deliveryLoaded) trackDelivery();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
@@ -1156,6 +1193,78 @@ export default function EmailPage() {
                 <tr>
                   <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
                     The mail queue is empty.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </CardContent>
+      </Card>
+      )}
+
+      {tab === "delivery" && (
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between gap-3">
+          <CardTitle className="text-base">Delivery log ({delivery.length})</CardTitle>
+          <form onSubmit={trackDelivery} className="flex items-center gap-2">
+            <Input
+              value={deliveryQuery}
+              onChange={(e) => setDeliveryQuery(e.target.value)}
+              placeholder="recipient, sender or queue id"
+              className="h-8 w-56"
+            />
+            <Button type="submit" size="sm" disabled={deliveryLoading}>
+              {deliveryLoading ? "Searching…" : "Search"}
+            </Button>
+          </form>
+        </CardHeader>
+        <CardContent className="space-y-3 p-0">
+          <p className="px-6 pt-4 text-sm text-muted-foreground">
+            Delivery results parsed from the mail log — status, SMTP response and destination for
+            each attempt. Filter by a recipient, sender or queue id.
+          </p>
+          <table className="w-full text-sm">
+            <thead className="border-b border-border text-left text-muted-foreground">
+              <tr>
+                <th className="px-6 py-3 font-medium">Time</th>
+                <th className="px-6 py-3 font-medium">Recipient</th>
+                <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3 font-medium">Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {delivery.map((e, i) => (
+                <tr key={`${e.queue_id}-${i}`} className="border-b border-border/60 align-top last:border-0">
+                  <td className="px-6 py-3 text-muted-foreground">
+                    <div>{e.time}</div>
+                    <div className="font-mono text-xs">{e.queue_id}</div>
+                  </td>
+                  <td className="px-6 py-3 font-mono text-xs">{e.to}</td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium capitalize ${
+                        e.status === "sent"
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-300"
+                          : e.status === "bounced"
+                            ? "bg-red-500/15 text-red-600 dark:text-red-300"
+                            : "bg-amber-500/15 text-amber-600 dark:text-amber-300"
+                      }`}
+                    >
+                      {e.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3">
+                    <div className="font-mono text-xs text-muted-foreground">
+                      {e.dsn} · {e.relay}
+                    </div>
+                    {e.reason && <div className="text-xs text-muted-foreground">{e.reason}</div>}
+                  </td>
+                </tr>
+              ))}
+              {delivery.length === 0 && !deliveryLoading && (
+                <tr>
+                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                    No delivery events{deliveryQuery ? " for that query" : ""}.
                   </td>
                 </tr>
               )}

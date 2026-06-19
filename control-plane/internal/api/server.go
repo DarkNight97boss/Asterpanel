@@ -250,6 +250,7 @@ func (s *Server) routes() http.Handler {
 			// Mail queue (Postfix: view / flush / delete deferred mail)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/queue", s.handleMailQueueList)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/queue/action", s.handleMailQueueAction)
+			r.With(az.Require("email.read", "email.list", "mailbox")).Post("/email/track-delivery", s.handleTrackDelivery)
 
 			// Mailing lists (fan-out aliases with member management)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/lists", s.handleListMailLists)

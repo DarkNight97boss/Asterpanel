@@ -40,6 +40,7 @@ allowed_types := {
 	"mail.spam.apply",
 	"mail.queue.list",
 	"mail.queue.action",
+	"mail.delivery.track",
 	"caldav.ensure",
 	"caldav.user.apply",
 	"cron.apply",

@@ -67,3 +67,45 @@ func (s *Server) handleMailQueueAction(w http.ResponseWriter, r *http.Request) {
 		map[string]any{"action": req.Action})
 	httpx.JSON(w, http.StatusOK, rawOrEmpty(res))
 }
+
+type trackDeliveryRequest struct {
+	Query string `json:"query"`
+	Limit int    `json:"limit"`
+}
+
+// handleTrackDelivery returns parsed Postfix delivery-log events, optionally
+// filtered by a recipient / sender / queue-id substring (WHM "Track Delivery").
+func (s *Server) handleTrackDelivery(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	var req trackDeliveryRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	query := strings.TrimSpace(req.Query)
+	if len(query) > 120 {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "query is too long")
+		return
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	node := s.firstNode(ctx, p.OrgID)
+	if node == nil {
+		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")
+		return
+	}
+	res, err := s.runAwaitedJob(ctx, p, jobs.TypeMailDeliveryTrack, node.ID, map[string]any{
+		"query": query, "limit": limit,
+	})
+	if err != nil {
+		fileJobError(w, err)
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "mail.delivery.track", "mailbox", "", audit.OutcomeSuccess, r,
+		map[string]any{"query": query})
+	httpx.JSON(w, http.StatusOK, rawOrEmpty(res))
+}

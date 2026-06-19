@@ -147,6 +147,7 @@ const it: Dict = {
   Filters: "Filtri",
   "Mailing Lists": "Liste email",
   "Mail Queue": "Coda mail",
+  "Delivery Log": "Log consegna",
   Calendars: "Calendari",
   Deliverability: "Recapito",
   Spam: "Spam",

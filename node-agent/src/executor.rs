@@ -71,6 +71,7 @@ impl Executor for DockerExecutor {
             "mail.spam.apply" => self.mail_spam_apply(job).await,
             "mail.queue.list" => self.mail_queue_list(job).await,
             "mail.queue.action" => self.mail_queue_action(job).await,
+            "mail.delivery.track" => self.mail_delivery_track(job).await,
             "caldav.ensure" => self.caldav_ensure(job).await,
             "caldav.user.apply" => self.caldav_user_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
@@ -1423,6 +1424,36 @@ impl DockerExecutor {
                 "mail.queue.action failed: {}",
                 String::from_utf8_lossy(&o.stderr).trim()
             )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
+    }
+
+    /// Reads the Postfix mail log and parses delivery results (WHM "Track
+    /// Delivery"). The query is applied as an in-process substring filter — it is
+    /// never passed to the shell — so the read is injection-safe.
+    async fn mail_delivery_track(&self, job: &Job) -> JobOutcome {
+        let query = job.payload.get("query").and_then(Value::as_str).unwrap_or("").trim();
+        let limit = job
+            .payload
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(200)
+            .clamp(1, 1000) as usize;
+        match run_docker(&[
+            "exec".into(),
+            "astp_mailserver".into(),
+            "sh".into(),
+            "-c".into(),
+            "tail -n 5000 /var/log/mail.log 2>/dev/null".into(),
+        ])
+        .await
+        {
+            Ok(o) => {
+                let log = String::from_utf8_lossy(&o.stdout);
+                let events = parse_mail_delivery(&log, query, limit);
+                let count = events.len();
+                JobOutcome::succeeded(json!({"events": events, "count": count}))
+            }
             Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
         }
     }
@@ -3207,6 +3238,61 @@ fn valid_queue_id(s: &str) -> bool {
     !s.is_empty() && s.len() <= 40 && s.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
+/// Parses Postfix mail-log delivery results into events. Only `status=` lines
+/// with a recipient are kept; if `query` is non-empty, only lines containing it.
+/// The most recent `limit` events are returned.
+fn parse_mail_delivery(log: &str, query: &str, limit: usize) -> Vec<Value> {
+    // Value between `a` and the next `b` (empty if `a` is absent).
+    let between = |s: &str, a: &str, b: &str| -> String {
+        if let Some(i) = s.find(a) {
+            let rest = &s[i + a.len()..];
+            let j = rest.find(b).unwrap_or(rest.len());
+            return rest[..j].to_string();
+        }
+        String::new()
+    };
+    // Value after `key` up to the next space or comma.
+    let after = |s: &str, key: &str| -> String {
+        if let Some(i) = s.find(key) {
+            let rest = &s[i + key.len()..];
+            let j = rest.find([' ', ',']).unwrap_or(rest.len());
+            return rest[..j].to_string();
+        }
+        String::new()
+    };
+    let mut out: Vec<Value> = Vec::new();
+    for line in log.lines() {
+        if !line.contains("status=") || !line.contains("to=<") {
+            continue;
+        }
+        if !query.is_empty() && !line.contains(query) {
+            continue;
+        }
+        let toks: Vec<&str> = line.split_whitespace().collect();
+        let time = if toks.len() >= 3 { toks[..3].join(" ") } else { String::new() };
+        let reason = if let Some(i) = line.rfind('(') {
+            let rest = &line[i + 1..];
+            let j = rest.rfind(')').unwrap_or(rest.len());
+            rest[..j].to_string()
+        } else {
+            String::new()
+        };
+        out.push(json!({
+            "time": time,
+            "queue_id": between(line, "]: ", ":").trim(),
+            "to": between(line, "to=<", ">"),
+            "status": after(line, "status="),
+            "dsn": after(line, "dsn="),
+            "relay": between(line, "relay=", ",").trim(),
+            "reason": reason,
+        }));
+    }
+    if out.len() > limit {
+        out = out.split_off(out.len() - limit);
+    }
+    out
+}
+
 /// Parses a query result into (columns, rows). Postgres `--csv` is parsed as
 /// RFC-4180 CSV; MySQL `--batch` is tab-separated. The first record is the
 /// header row.
@@ -4137,6 +4223,29 @@ mod tests {
         assert!(parse_postqueue("Mail queue is empty\n").is_empty());
         assert!(valid_queue_id("A1B2C3"));
         assert!(!valid_queue_id("bad id"));
+    }
+
+    #[test]
+    fn mail_delivery_parses_log() {
+        let log = concat!(
+            "Jun 18 09:15:03 mail postfix/smtp[1234]: A1B2C3: to=<bob@dest.com>, relay=mx.dest.com[1.2.3.4]:25, delay=2.1, dsn=2.0.0, status=sent (250 2.0.0 OK)\n",
+            "Jun 18 09:16:10 mail postfix/smtp[1235]: 9F8E7D: to=<dana@x.com>, relay=none, delay=30, dsn=4.4.1, status=deferred (connect to mx.x.com[5.6.7.8]:25: Connection timed out)\n",
+            "Jun 18 09:16:11 mail postfix/qmgr[900]: 9F8E7D: from=<billing@acme.com>, size=2310, nrcpt=1 (queue active)\n",
+        );
+        let all = parse_mail_delivery(log, "", 100);
+        assert_eq!(all.len(), 2); // the qmgr line (no status=/to=) is skipped
+        assert_eq!(all[0]["queue_id"], "A1B2C3");
+        assert_eq!(all[0]["to"], "bob@dest.com");
+        assert_eq!(all[0]["status"], "sent");
+        assert_eq!(all[0]["dsn"], "2.0.0");
+        assert_eq!(all[0]["relay"], "mx.dest.com[1.2.3.4]:25");
+        assert!(all[0]["reason"].as_str().unwrap().contains("250"), "{}", all[0]);
+        assert_eq!(all[1]["status"], "deferred");
+        assert!(all[1]["reason"].as_str().unwrap().contains("Connection timed out"), "{}", all[1]);
+        // substring query filter
+        let filtered = parse_mail_delivery(log, "dana@x.com", 100);
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0]["to"], "dana@x.com");
     }
 
     #[test]
