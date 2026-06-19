@@ -22,6 +22,7 @@ const (
 	TypeAppRollback       Type = "app.rollback"
 	TypeAppStart          Type = "app.start"
 	TypeAppStop           Type = "app.stop"
+	TypeAppRestart        Type = "app.restart"
 	TypeProxyApply        Type = "proxy.apply"
 	TypeRedirectApply     Type = "redirect.apply"
 	TypeSubdomainApply    Type = "subdomain.apply"

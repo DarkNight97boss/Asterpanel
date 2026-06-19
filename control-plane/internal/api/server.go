@@ -158,6 +158,7 @@ func (s *Server) routes() http.Handler {
 			// Runtime (language version per site)
 			r.With(az.Require("website.read", "runtime.list", "website")).Get("/runtimes", s.handleListRuntimes)
 			r.With(az.Require("website.create", "runtime.switch", "website")).Post("/sites/{siteID}/runtime", s.handleSwitchRuntime)
+			r.With(az.Require("website.create", "app.lifecycle", "website")).Post("/sites/{siteID}/lifecycle", s.handleSiteLifecycle)
 			r.With(az.Require("website.read", "php.settings.list", "website")).Get("/sites/{siteID}/php-settings", s.handleListPhpSettings)
 			r.With(az.Require("website.update", "php.settings.set", "website")).Post("/sites/{siteID}/php-settings", s.handleSetPhpSetting)
 			r.With(az.Require("website.update", "php.settings.delete", "website")).Delete("/sites/{siteID}/php-settings/{settingID}", s.handleDeletePhpSetting)

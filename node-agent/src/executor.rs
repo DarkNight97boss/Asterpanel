@@ -62,6 +62,9 @@ impl Executor for DockerExecutor {
             "dns.dnssec.disable" => self.dnssec_disable(job).await,
             "cert.issue" => self.cert_issue(job).await,
             "app.deploy" => self.app_deploy(job).await,
+            "app.start" => self.app_lifecycle(job, "start").await,
+            "app.stop" => self.app_lifecycle(job, "stop").await,
+            "app.restart" => self.app_lifecycle(job, "restart").await,
             "mail.mailbox.create" => self.mailbox_create(job).await,
             "mail.server.ensure" => self.mail_server_ensure(job).await,
             "mail.dkim.generate" => self.mail_dkim_generate(job).await,
@@ -349,6 +352,29 @@ impl DockerExecutor {
         }
         // Caddy (automatic_https) obtains/renews the cert from the ACME CA on load.
         JobOutcome::succeeded(json!({"domain": domain, "path": path, "tls": "acme"}))
+    }
+
+    /// Starts, stops or restarts a site's container (cPanel app restart).
+    async fn app_lifecycle(&self, job: &Job, action: &str) -> JobOutcome {
+        let website_id = job.payload.get("website_id").and_then(Value::as_str).unwrap_or("");
+        if website_id.is_empty() {
+            return JobOutcome::failed("app lifecycle: missing website_id");
+        }
+        let container = format!("astp_site_{website_id}");
+        let args = match app_lifecycle_args(action, &container) {
+            Some(a) => a,
+            None => return JobOutcome::failed("app lifecycle: invalid action or site"),
+        };
+        match run_docker(&args).await {
+            Ok(o) if o.status.success() => {
+                JobOutcome::succeeded(json!({"container": container, "action": action}))
+            }
+            Ok(o) => JobOutcome::failed(format!(
+                "docker {action} failed: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("could not exec docker: {e}")),
+        }
     }
 
     async fn app_deploy(&self, job: &Job) -> JobOutcome {
@@ -2849,6 +2875,25 @@ fn render_authorized_keys(keys: &[Value]) -> String {
     out
 }
 
+/// Builds the `docker <action> <container>` argv for a site lifecycle action. The
+/// action must be start/stop/restart and the container name must be shell-safe.
+fn app_lifecycle_args(action: &str, container: &str) -> Option<Vec<String>> {
+    let cmd = match action {
+        "start" => "start",
+        "stop" => "stop",
+        "restart" => "restart",
+        _ => return None,
+    };
+    if container.is_empty()
+        || !container
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    {
+        return None;
+    }
+    Some(vec![cmd.into(), container.into()])
+}
+
 fn render_sftp_match(username: &str, home: &str) -> String {
     format!(
         "Match User {username}\n    ChrootDirectory {home}\n    ForceCommand internal-sftp\n    AllowTcpForwarding no\n    X11Forwarding no\n\n"
@@ -3910,6 +3955,19 @@ mod tests {
         assert!(valid_ssh_pubkey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghij"));
         assert!(!valid_ssh_pubkey("ssh-ed25519 AAAA\nmalicious"));
         assert!(!valid_ssh_pubkey("ssh-ed25519")); // missing body
+    }
+
+    #[test]
+    fn app_lifecycle_builds_args() {
+        assert_eq!(
+            app_lifecycle_args("restart", "astp_site_abc-123").unwrap(),
+            vec!["restart", "astp_site_abc-123"]
+        );
+        assert!(app_lifecycle_args("start", "astp_site_x").is_some());
+        assert!(app_lifecycle_args("stop", "astp_site_x").is_some());
+        assert!(app_lifecycle_args("nuke", "astp_site_x").is_none()); // unknown action
+        assert!(app_lifecycle_args("restart", "bad name").is_none()); // unsafe container
+        assert!(app_lifecycle_args("restart", "").is_none());
     }
 
     #[test]

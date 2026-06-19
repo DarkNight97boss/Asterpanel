@@ -13,6 +13,7 @@ allowed_types := {
 	"app.rollback",
 	"app.start",
 	"app.stop",
+	"app.restart",
 	"proxy.apply",
 	"redirect.apply",
 	"subdomain.apply",

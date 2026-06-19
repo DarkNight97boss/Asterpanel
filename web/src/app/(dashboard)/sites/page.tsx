@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { RotateCw } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { StatusBadge } from "@/components/ui/badge";
-import { createWebsite, listNodes, listWebsites, type ServerNode, type Website } from "@/lib/api";
+import { apiPost, createWebsite, listNodes, listWebsites, type ServerNode, type Website } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 
 const RUNTIMES = ["static", "node", "php", "docker", "proxy"];
@@ -22,6 +23,22 @@ export default function SitesPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [acting, setActing] = useState<string | null>(null);
+
+  async function lifecycle(siteId: string, action: "start" | "stop" | "restart") {
+    setActing(`${siteId}:${action}`);
+    setError(null);
+    setNotice(null);
+    try {
+      await apiPost(`/api/v1/sites/${siteId}/lifecycle`, { action });
+      setNotice(`App ${action} dispatched to the node.`);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Action failed");
+    } finally {
+      setActing(null);
+    }
+  }
 
   async function refresh() {
     try {
@@ -138,6 +155,7 @@ export default function SitesPage() {
                 <th className="px-6 py-3 font-medium">Runtime</th>
                 <th className="px-6 py-3 font-medium">Status</th>
                 <th className="px-6 py-3 font-medium">SSL</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -149,11 +167,43 @@ export default function SitesPage() {
                     <StatusBadge status={s.status} />
                   </td>
                   <td className="px-6 py-3 text-muted-foreground">{s.ssl_status}</td>
+                  <td className="px-6 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={acting !== null}
+                        onClick={() => lifecycle(s.id, "restart")}
+                      >
+                        <RotateCw className="h-4 w-4" />
+                        Restart
+                      </Button>
+                      {s.status === "stopped" ? (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={acting !== null}
+                          onClick={() => lifecycle(s.id, "start")}
+                        >
+                          Start
+                        </Button>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={acting !== null}
+                          onClick={() => lifecycle(s.id, "stop")}
+                        >
+                          Stop
+                        </Button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
               {sites.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="px-6 py-8 text-center text-muted-foreground">
+                  <td colSpan={5} className="px-6 py-8 text-center text-muted-foreground">
                     No websites yet.
                   </td>
                 </tr>
