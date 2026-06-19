@@ -75,6 +75,7 @@ impl Executor for DockerExecutor {
             "caldav.user.apply" => self.caldav_user_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
+            "ssh.keys.apply" => self.ssh_keys_apply(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "database.user.privileges" => self.database_user_privileges(job).await,
             "database.user.delete" => self.database_user_delete(job).await,
@@ -785,6 +786,24 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("cron.apply: write failed: {e}"));
         }
         JobOutcome::succeeded(json!({"path": path, "jobs": entries.len()}))
+    }
+
+    /// Writes the org's authorized_keys file declaratively from the full key set.
+    /// Each key is validated (single-line OpenSSH public key, no options/command),
+    /// so the file can never carry a forced command or arbitrary directive.
+    async fn ssh_keys_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let keys = job.payload.get("keys").and_then(Value::as_array).unwrap_or(&empty);
+        let content = render_authorized_keys(keys);
+        let dir = std::env::var("AGENT_SFTP_DIR").unwrap_or_else(|_| "/etc/asterpanel/ssh".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("ssh.keys.apply: mkdir failed: {e}"));
+        }
+        let path = format!("{dir}/authorized_keys");
+        if let Err(e) = tokio::fs::write(&path, content.as_bytes()).await {
+            return JobOutcome::failed(format!("ssh.keys.apply: write failed: {e}"));
+        }
+        JobOutcome::succeeded(json!({"path": path, "keys": keys.len()}))
     }
 
     async fn ftp_account_create(&self, job: &Job) -> JobOutcome {
@@ -2754,6 +2773,51 @@ fn render_crontab(entries: &[Value]) -> String {
 }
 
 /// OpenSSH `Match` block chrooting an SFTP-only user to its site directory.
+/// Validates a single-line OpenSSH public key: `<type> <base64> [comment]`. Any
+/// options/command prefix, extra fields or non-base64 body is rejected so the
+/// rendered authorized_keys file can carry no directives.
+fn valid_ssh_pubkey(s: &str) -> bool {
+    if s.is_empty() || s.contains('\n') || s.contains('\r') {
+        return false;
+    }
+    let fields: Vec<&str> = s.split_whitespace().collect();
+    if fields.len() < 2 || fields.len() > 3 {
+        return false;
+    }
+    const TYPES: &[&str] = &[
+        "ssh-ed25519",
+        "ssh-rsa",
+        "ecdsa-sha2-nistp256",
+        "ecdsa-sha2-nistp384",
+        "ecdsa-sha2-nistp521",
+        "sk-ssh-ed25519@openssh.com",
+        "sk-ecdsa-sha2-nistp256@openssh.com",
+    ];
+    if !TYPES.contains(&fields[0]) {
+        return false;
+    }
+    let body = fields[1];
+    body.len() >= 20
+        && body.len() <= 4096
+        && body
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+}
+
+/// Renders an authorized_keys file from the org's key set, dropping any entry
+/// that isn't a safe single-line public key.
+fn render_authorized_keys(keys: &[Value]) -> String {
+    let mut out = String::from("# AsterPanel authorized keys (generated — do not edit)\n");
+    for k in keys {
+        let s = k.as_str().unwrap_or("").trim();
+        if valid_ssh_pubkey(s) {
+            out.push_str(s);
+            out.push('\n');
+        }
+    }
+    out
+}
+
 fn render_sftp_match(username: &str, home: &str) -> String {
     format!(
         "Match User {username}\n    ChrootDirectory {home}\n    ForceCommand internal-sftp\n    AllowTcpForwarding no\n    X11Forwarding no\n\n"
@@ -3740,6 +3804,26 @@ mod tests {
         assert!(s.contains("Match User acme"));
         assert!(s.contains("ChrootDirectory /sites/acme"));
         assert!(s.contains("internal-sftp"));
+    }
+
+    #[test]
+    fn authorized_keys_render_validates() {
+        let keys = vec![
+            json!("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghij user@host"),
+            json!("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABbackupkey backup"),
+            json!("ssh-ed25519 not!base64 evil"), // non-base64 body
+            json!("command=\"rm -rf /\" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5"), // options prefix → too many fields
+            json!("bogus-type AAAAC3NzaC1lZDI1NTE5AAAAIabcdef"), // unknown type
+        ];
+        let out = render_authorized_keys(&keys);
+        assert!(out.contains("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghij user@host"), "{out}");
+        assert!(out.contains("ssh-rsa AAAAB3NzaC1yc2EAAAADAQABbackupkey backup"), "{out}");
+        assert!(!out.contains("not!base64"), "{out}");
+        assert!(!out.contains("rm -rf"), "{out}");
+        assert!(!out.contains("bogus-type"), "{out}");
+        assert!(valid_ssh_pubkey("ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIabcdefghij"));
+        assert!(!valid_ssh_pubkey("ssh-ed25519 AAAA\nmalicious"));
+        assert!(!valid_ssh_pubkey("ssh-ed25519")); // missing body
     }
 
     #[test]

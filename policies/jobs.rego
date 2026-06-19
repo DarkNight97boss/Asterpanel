@@ -44,6 +44,7 @@ allowed_types := {
 	"caldav.user.apply",
 	"cron.apply",
 	"ftp.account.create",
+	"ssh.keys.apply",
 	"cert.install",
 	"firewall.apply",
 	"waf.apply",

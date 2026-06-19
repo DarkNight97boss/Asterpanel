@@ -133,6 +133,8 @@ const it: Dict = {
   "Hotlink Protection": "Protezione hotlink",
   "Dynamic DNS": "DNS dinamico",
   "Web Disk": "Web Disk",
+  Accounts: "Account",
+  "SSH Keys": "Chiavi SSH",
   Instances: "Istanze",
   "DB Users": "Utenti DB",
   "SQL Query": "Query SQL",

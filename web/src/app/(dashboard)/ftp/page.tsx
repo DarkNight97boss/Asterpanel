@@ -1,16 +1,32 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { HardDrive, KeyRound, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { createFtpAccount, listFtpAccounts, type FtpAccount } from "@/lib/api";
+import { apiDelete, apiGet, apiPost, createFtpAccount, listFtpAccounts, type FtpAccount } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
+import { PageTabs, type PageTab } from "@/components/page-tabs";
 
 const PROTOCOLS = ["SFTP", "FTPS"];
+
+interface SSHKey {
+  id: string;
+  name: string;
+  key_type: string;
+  fingerprint: string;
+  created_at: string;
+}
+
+const TABS: PageTab[] = [
+  { id: "accounts", label: "Accounts", icon: HardDrive },
+  { id: "ssh", label: "SSH Keys", icon: KeyRound },
+];
 
 export default function FtpPage() {
   const [accounts, setAccounts] = useState<FtpAccount[]>([]);
@@ -20,6 +36,11 @@ export default function FtpPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState<string | null>(null);
+  const [tab, setTab] = useState("accounts");
+  const [sshKeys, setSshKeys] = useState<SSHKey[]>([]);
+  const [keyName, setKeyName] = useState("");
+  const [keyValue, setKeyValue] = useState("");
+  const [keyBusy, setKeyBusy] = useState(false);
 
   async function refresh() {
     try {
@@ -28,9 +49,44 @@ export default function FtpPage() {
       setError(e instanceof Error ? e.message : "Failed to load");
     }
   }
+  async function loadKeys() {
+    try {
+      const { keys } = await apiGet<{ keys: SSHKey[] }>("/api/v1/ssh-keys");
+      setSshKeys(keys ?? []);
+    } catch {
+      /* ignore */
+    }
+  }
   useEffect(() => {
     refresh();
+    loadKeys();
   }, []);
+
+  async function onAddKey(e: FormEvent) {
+    e.preventDefault();
+    setKeyBusy(true);
+    setError(null);
+    try {
+      await apiPost("/api/v1/ssh-keys", { name: keyName.trim(), public_key: keyValue.trim() });
+      setKeyName("");
+      setKeyValue("");
+      await loadKeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not add key");
+    } finally {
+      setKeyBusy(false);
+    }
+  }
+
+  async function onDeleteKey(keyId: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/ssh-keys/${keyId}`);
+      await loadKeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete key");
+    }
+  }
 
   async function onCreate(e: FormEvent) {
     e.preventDefault();
@@ -68,6 +124,10 @@ export default function FtpPage() {
         </Card>
       )}
 
+      <PageTabs tabs={TABS} active={tab} onChange={setTab} />
+
+      {tab === "accounts" && (
+        <>
       <Card>
         <CardHeader>
           <CardTitle className="text-base">New account</CardTitle>
@@ -135,6 +195,68 @@ export default function FtpPage() {
           </table>
         </CardContent>
       </Card>
+        </>
+      )}
+
+      {tab === "ssh" && (
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">SSH keys ({sshKeys.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            Authorized public keys for SSH/SFTP access. Paste an OpenSSH public key — only the
+            public half. Keys are written to the account&apos;s authorized_keys on the node.
+          </p>
+          <form onSubmit={onAddKey} className="space-y-3">
+            <div className="space-y-1.5 sm:max-w-xs">
+              <Label htmlFor="key-name">Label</Label>
+              <Input id="key-name" value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="laptop" required />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="key-value">Public key</Label>
+              <Textarea
+                id="key-value"
+                value={keyValue}
+                onChange={(e) => setKeyValue(e.target.value)}
+                placeholder="ssh-ed25519 AAAA… user@host"
+                className="font-mono"
+                rows={3}
+                required
+              />
+            </div>
+            <Button type="submit" disabled={keyBusy}>
+              {keyBusy ? "Adding…" : "Authorize key"}
+            </Button>
+          </form>
+
+          {sshKeys.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {sshKeys.map((k) => (
+                <li key={k.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                  <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
+                  <div className="min-w-0">
+                    <div className="font-medium">{k.name}</div>
+                    <div className="truncate font-mono text-xs text-muted-foreground">
+                      <span className="rounded bg-muted px-1 py-0.5">{k.key_type}</span> {k.fingerprint}
+                    </div>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => onDeleteKey(k.id)}
+                    aria-label="Remove key"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+      )}
     </div>
   );
 }

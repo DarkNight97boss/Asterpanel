@@ -336,6 +336,16 @@ type Subdomain struct {
 	CreatedAt      time.Time
 }
 
+type SSHKey struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Name           string
+	KeyType        string
+	PublicKey      string
+	Fingerprint    string
+	CreatedAt      time.Time
+}
+
 type MailList struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

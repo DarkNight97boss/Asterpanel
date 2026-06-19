@@ -295,6 +295,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("ftp.manage", "ftp.create", "ftp_account")).Post("/ftp-accounts", s.handleCreateFtp)
 			r.With(az.Require("ftp.manage", "ftp.delete", "ftp_account")).Delete("/ftp-accounts/{ftpID}", s.handleDeleteFtp)
 
+			// SSH authorized keys (cPanel "SSH Access") — rendered into authorized_keys
+			r.With(az.Require("ftp.read", "ssh.key.list", "ftp_account")).Get("/ssh-keys", s.handleListSSHKeys)
+			r.With(az.Require("ftp.manage", "ssh.key.add", "ftp_account")).Post("/ssh-keys", s.handleCreateSSHKey)
+			r.With(az.Require("ftp.manage", "ssh.key.remove", "ftp_account")).Delete("/ssh-keys/{keyID}", s.handleDeleteSSHKey)
+
 			// Environment variables
 			r.With(az.Require("env.read", "env.list", "env_var")).Get("/env", s.handleListEnv)
 			r.With(az.Require("env.manage", "env.create", "env_var")).Post("/env", s.handleCreateEnv)

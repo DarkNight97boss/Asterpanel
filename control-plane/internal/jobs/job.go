@@ -53,6 +53,7 @@ const (
 	TypeCaldavUserApply   Type = "caldav.user.apply"
 	TypeCronApply         Type = "cron.apply"
 	TypeFTPAccountCreate  Type = "ftp.account.create"
+	TypeSSHKeysApply      Type = "ssh.keys.apply"
 	TypeCertInstall       Type = "cert.install"
 	TypeFirewallApply     Type = "firewall.apply"
 	TypeWAFApply          Type = "waf.apply"
