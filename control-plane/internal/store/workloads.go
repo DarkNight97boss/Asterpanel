@@ -83,6 +83,13 @@ func (s *Store) SetWebsiteSSLStatus(ctx context.Context, id uuid.UUID, sslStatus
 	return err
 }
 
+// RenameWebsite changes a website's display name (org-scoped).
+func (s *Store) RenameWebsite(ctx context.Context, orgID, id uuid.UUID, name string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE websites SET name = $3 WHERE id = $1 AND organization_id = $2 AND deleted_at IS NULL`, id, orgID, name)
+	return err
+}
+
 // --- Applications & deployments ----------------------------------------------
 
 type CreateApplicationParams struct {

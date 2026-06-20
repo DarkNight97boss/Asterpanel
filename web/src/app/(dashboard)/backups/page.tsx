@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarClock, History, Play, Trash2 } from "lucide-react";
+import { CalendarClock, History, Pencil, Play, Power, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,6 +46,7 @@ export default function BackupsPage() {
   const [retention, setRetention] = useState("30");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [editSchedId, setEditSchedId] = useState<string | null>(null);
   const [tab, setTab] = useState("run");
 
   async function refresh() {
@@ -64,19 +65,54 @@ export default function BackupsPage() {
     refresh();
   }, []);
 
+  function startEditSchedule(s: Schedule) {
+    setEditSchedId(s.id);
+    setFreq(s.frequency);
+    setRetention(String(s.retention_days));
+  }
+  function cancelEditSchedule() {
+    setEditSchedId(null);
+    setFreq("daily");
+    setRetention("30");
+  }
+
   async function addSchedule() {
     setBusy(true);
     setError(null);
     try {
-      await apiPost("/api/v1/backup-schedules", {
-        frequency: freq,
-        retention_days: Number(retention) || 30,
+      if (editSchedId) {
+        const cur = schedules.find((s) => s.id === editSchedId);
+        await apiPost(`/api/v1/backup-schedules/${editSchedId}`, {
+          frequency: freq,
+          retention_days: Number(retention) || 30,
+          enabled: cur ? cur.enabled : true,
+        });
+        setEditSchedId(null);
+      } else {
+        await apiPost("/api/v1/backup-schedules", {
+          frequency: freq,
+          retention_days: Number(retention) || 30,
+        });
+      }
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save schedule");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function toggleSchedule(s: Schedule) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/backup-schedules/${s.id}`, {
+        frequency: s.frequency,
+        retention_days: s.retention_days,
+        enabled: !s.enabled,
       });
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create schedule");
-    } finally {
-      setBusy(false);
+      setError(e instanceof Error ? e.message : "Could not toggle schedule");
     }
   }
 
@@ -184,20 +220,40 @@ export default function BackupsPage() {
               />
             </div>
             <Button variant="outline" size="sm" disabled={busy} onClick={addSchedule}>
-              Add schedule
+              {busy ? "Saving…" : editSchedId ? "Save schedule" : "Add schedule"}
             </Button>
+            {editSchedId && (
+              <Button variant="ghost" size="icon" className="h-9 w-9" onClick={cancelEditSchedule} aria-label="Cancel">
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </div>
           {schedules.length > 0 && (
             <div className="divide-y divide-border/60 rounded-md border border-border/60">
               {schedules.map((s) => (
-                <div key={s.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                <div key={s.id} className={`flex items-center gap-3 px-4 py-2 text-sm ${editSchedId === s.id ? "bg-muted/60" : ""}`}>
                   <span className="font-medium capitalize">{s.frequency}</span>
                   <span className="text-muted-foreground">retain {s.retention_days}d</span>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                      s.enabled
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-muted text-muted-foreground"
+                    }`}
+                  >
+                    {s.enabled ? "on" : "paused"}
+                  </span>
                   <span className="text-xs text-muted-foreground">
                     last run {s.last_run_at ? new Date(s.last_run_at).toLocaleString() : "never"}
                   </span>
+                  <Button variant="ghost" size="icon" className="ml-auto h-7 w-7" onClick={() => toggleSchedule(s)} aria-label="Toggle schedule" title={s.enabled ? "Pause" : "Resume"}>
+                    <Power className={`h-4 w-4 ${s.enabled ? "text-emerald-500" : "text-muted-foreground"}`} />
+                  </Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditSchedule(s)} aria-label="Edit schedule">
+                    <Pencil className="h-4 w-4" />
+                  </Button>
                   <button
-                    className="ml-auto text-muted-foreground hover:text-red-600"
+                    className="text-muted-foreground hover:text-red-600"
                     onClick={() => deleteSchedule(s.id)}
                     aria-label="Delete schedule"
                   >

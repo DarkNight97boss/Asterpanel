@@ -162,6 +162,43 @@ func (s *Server) handleCreateWebsite(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type renameWebsiteRequest struct {
+	Name string `json:"name"`
+}
+
+// handleRenameWebsite changes a website's display name (org-scoped).
+func (s *Server) handleRenameWebsite(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	siteID, err := uuid.Parse(chi.URLParam(r, "siteID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid site id")
+		return
+	}
+	var req renameWebsiteRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "name is required")
+		return
+	}
+	if _, err := s.deps.Store.GetWebsite(ctx, p.OrgID, siteID); err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "site not found")
+		return
+	}
+	if err := s.deps.Store.RenameWebsite(ctx, p.OrgID, siteID, name); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not rename site")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "website.rename", "website", siteID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"name": name})
+	httpx.JSON(w, http.StatusOK, map[string]any{"renamed": true, "name": name})
+}
+
 type createDeploymentRequest struct {
 	Ref     string `json:"ref"`
 	Trigger string `json:"trigger"`

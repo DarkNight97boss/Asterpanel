@@ -51,6 +51,20 @@ func (s *Store) ListBackupSchedules(ctx context.Context, orgID uuid.UUID) ([]Bac
 	return out, rows.Err()
 }
 
+// UpdateBackupSchedule edits a schedule's frequency, retention and enabled flag.
+func (s *Store) UpdateBackupSchedule(ctx context.Context, orgID, id uuid.UUID, frequency string, retentionDays int, enabled bool) (*BackupSchedule, error) {
+	const q = `
+		UPDATE backup_schedules SET frequency = $3, retention_days = $4, enabled = $5
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, frequency, retention_days, enabled, last_run_at, created_at`
+	var b BackupSchedule
+	if err := s.pool.QueryRow(ctx, q, id, orgID, frequency, retentionDays, enabled).
+		Scan(&b.ID, &b.OrgID, &b.Frequency, &b.RetentionDays, &b.Enabled, &b.LastRunAt, &b.CreatedAt); err != nil {
+		return nil, norows(err)
+	}
+	return &b, nil
+}
+
 func (s *Store) DeleteBackupSchedule(ctx context.Context, orgID, id uuid.UUID) error {
 	tag, err := s.pool.Exec(ctx, `DELETE FROM backup_schedules WHERE id = $1 AND organization_id = $2`, id, orgID)
 	if err != nil {

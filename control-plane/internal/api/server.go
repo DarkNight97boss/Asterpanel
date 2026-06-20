@@ -138,6 +138,7 @@ func (s *Server) routes() http.Handler {
 			// Websites
 			r.With(az.Require("website.read", "website.list", "website")).Get("/websites", s.handleListWebsites)
 			r.With(az.Require("website.create", "website.create", "website")).Post("/websites", s.handleCreateWebsite)
+			r.With(az.Require("website.update", "website.rename", "website")).Post("/websites/{siteID}", s.handleRenameWebsite)
 
 			// File manager (site-scoped, signed agent file API)
 			r.With(az.Require("files.read", "file.list", "website")).Get("/sites/{siteID}/files", s.handleListFiles)
@@ -316,6 +317,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("backup.restore", "backup.restore", "backup")).Post("/backups/{backupID}/restore", s.handleRestoreBackup)
 			r.With(az.Require("backup.read", "backup.schedule.list", "backup")).Get("/backup-schedules", s.handleListBackupSchedules)
 			r.With(az.Require("backup.create", "backup.schedule.create", "backup")).Post("/backup-schedules", s.handleCreateBackupSchedule)
+			r.With(az.Require("backup.create", "backup.schedule.update", "backup")).Post("/backup-schedules/{scheduleID}", s.handleUpdateBackupSchedule)
 			r.With(az.Require("backup.create", "backup.schedule.delete", "backup")).Delete("/backup-schedules/{scheduleID}", s.handleDeleteBackupSchedule)
 
 			// Cron jobs

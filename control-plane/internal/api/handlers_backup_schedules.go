@@ -68,6 +68,47 @@ func (s *Server) handleCreateBackupSchedule(w http.ResponseWriter, r *http.Reque
 	httpx.JSON(w, http.StatusCreated, map[string]any{"schedule": scheduleView(*sc)})
 }
 
+type updateScheduleRequest struct {
+	Frequency     string `json:"frequency"`
+	RetentionDays int    `json:"retention_days"`
+	Enabled       *bool  `json:"enabled"`
+}
+
+func (s *Server) handleUpdateBackupSchedule(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "scheduleID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req updateScheduleRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	if req.Frequency != "daily" && req.Frequency != "weekly" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "frequency must be daily or weekly")
+		return
+	}
+	if req.RetentionDays <= 0 {
+		req.RetentionDays = 30
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	sc, err := s.deps.Store.UpdateBackupSchedule(ctx, p.OrgID, id, req.Frequency, req.RetentionDays, enabled)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "schedule not found")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "backup.schedule.update", "backup_schedule", sc.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"frequency": req.Frequency, "enabled": enabled})
+	httpx.JSON(w, http.StatusOK, map[string]any{"schedule": scheduleView(*sc)})
+}
+
 func (s *Server) handleDeleteBackupSchedule(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

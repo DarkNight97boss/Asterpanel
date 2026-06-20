@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { RotateCw } from "lucide-react";
+import { Check, Pencil, RotateCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,19 @@ export default function SitesPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
+  const [editSiteId, setEditSiteId] = useState<string | null>(null);
+  const [editSiteName, setEditSiteName] = useState("");
+
+  async function renameSite(siteId: string) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/websites/${siteId}`, { name: editSiteName.trim() });
+      setEditSiteId(null);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rename site");
+    }
+  }
 
   async function lifecycle(siteId: string, action: "start" | "stop" | "restart") {
     setActing(`${siteId}:${action}`);
@@ -160,8 +173,19 @@ export default function SitesPage() {
             </thead>
             <tbody>
               {sites.map((s) => (
-                <tr key={s.id} className="border-b border-border/60 last:border-0">
-                  <td className="px-6 py-3">{s.name}</td>
+                <tr key={s.id} className={`border-b border-border/60 last:border-0 ${editSiteId === s.id ? "bg-muted/60" : ""}`}>
+                  <td className="px-6 py-3">
+                    {editSiteId === s.id ? (
+                      <Input
+                        value={editSiteName}
+                        onChange={(e) => setEditSiteName(e.target.value)}
+                        className="h-8 w-48"
+                        autoFocus
+                      />
+                    ) : (
+                      s.name
+                    )}
+                  </td>
                   <td className="px-6 py-3 text-muted-foreground">{s.runtime}</td>
                   <td className="px-6 py-3">
                     <StatusBadge status={s.status} />
@@ -169,6 +193,29 @@ export default function SitesPage() {
                   <td className="px-6 py-3 text-muted-foreground">{s.ssl_status}</td>
                   <td className="px-6 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      {editSiteId === s.id ? (
+                        <>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => renameSite(s.id)} aria-label="Save name">
+                            <Check className="h-4 w-4 text-emerald-500" />
+                          </Button>
+                          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setEditSiteId(null)} aria-label="Cancel">
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </>
+                      ) : (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8"
+                          onClick={() => {
+                            setEditSiteId(s.id);
+                            setEditSiteName(s.name);
+                          }}
+                          aria-label="Rename site"
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"
