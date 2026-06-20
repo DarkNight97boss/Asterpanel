@@ -15,6 +15,25 @@ import (
 	"github.com/DarkNight97boss/asterpanel/control-plane/internal/store"
 )
 
+// validFtpUsername mirrors the agent's valid_system_username: a Unix login name
+// (lowercase letter/underscore first, then lowercase alphanumerics/_/-, ≤32),
+// so the control plane never persists an account whose provisioning job is sure
+// to fail on the node.
+func validFtpUsername(s string) bool {
+	if s == "" || len(s) > 32 {
+		return false
+	}
+	for i, c := range s {
+		switch {
+		case c >= 'a' && c <= 'z', c == '_':
+		case i > 0 && (c >= '0' && c <= '9' || c == '-'):
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 func ftpView(a store.FtpAccount) map[string]any {
 	return map[string]any{
 		"id":             a.ID,
@@ -52,8 +71,13 @@ func (s *Server) handleCreateFtp(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
 	var req createFtpRequest
-	if err := httpx.Decode(w, r, &req); err != nil || strings.TrimSpace(req.Username) == "" || strings.TrimSpace(req.HomeDirectory) == "" {
+	if err := httpx.Decode(w, r, &req); err != nil || strings.TrimSpace(req.HomeDirectory) == "" {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "username and home_directory are required")
+		return
+	}
+	req.Username = strings.TrimSpace(req.Username)
+	if !validFtpUsername(req.Username) {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "username must be 1–32 chars: a lowercase letter or underscore, then lowercase letters, digits, underscore or hyphen")
 		return
 	}
 	node := s.firstNode(ctx, p.OrgID)
@@ -112,6 +136,65 @@ func (s *Server) handleCreateFtp(w http.ResponseWriter, r *http.Request) {
 
 	httpx.JSON(w, http.StatusCreated, map[string]any{
 		"account":  ftpView(*acct),
+		"password": password,
+		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
+// handleResetFtpPassword generates a fresh password for an existing SFTP
+// account, re-seals it under the same AAD/secret, and dispatches a signed
+// ftp.account.password job so the agent runs chpasswd for the Unix user.
+func (s *Server) handleResetFtpPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	ftpID, err := uuid.Parse(chi.URLParam(r, "ftpID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid account id")
+		return
+	}
+	username, secretID, err := s.deps.Store.GetFtpAccountAuth(ctx, p.OrgID, ftpID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "account not found")
+		return
+	}
+	if !secretID.Valid {
+		httpx.Error(w, http.StatusConflict, "no_secret", "account has no stored credentials")
+		return
+	}
+	node := s.firstNode(ctx, p.OrgID)
+	if node == nil {
+		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")
+		return
+	}
+	if ok, reason := s.jobPolicyAllows(ctx, p, jobs.TypeFTPAccountPass, node.ID); !ok {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "job denied by policy: "+reason)
+		return
+	}
+
+	password, err := crypto.RandomHex(16)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not generate password")
+		return
+	}
+	ct, nonce, err := s.deps.Envelope.Encrypt([]byte(password), []byte("ftp:"+ftpID.String()))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not seal password")
+		return
+	}
+	if err := s.deps.Store.UpdateSecretByID(ctx, secretID.UUID, ct, nonce, s.deps.Envelope.KeyID()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not store credentials")
+		return
+	}
+
+	payload := map[string]any{"ftp_id": ftpID, "username": username, "password": password}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeFTPAccountPass, node.ID, payload)
+
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "ftp.password", "ftp_account", ftpID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"username": username, "job_id": jobID.String()})
+
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"username": username,
 		"password": password,
 		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
 	})

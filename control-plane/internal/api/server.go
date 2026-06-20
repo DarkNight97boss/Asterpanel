@@ -330,6 +330,7 @@ func (s *Server) routes() http.Handler {
 			// FTP / SFTP accounts
 			r.With(az.Require("ftp.read", "ftp.list", "ftp_account")).Get("/ftp-accounts", s.handleListFtp)
 			r.With(az.Require("ftp.manage", "ftp.create", "ftp_account")).Post("/ftp-accounts", s.handleCreateFtp)
+			r.With(az.Require("ftp.manage", "ftp.password", "ftp_account")).Post("/ftp-accounts/{ftpID}/password", s.handleResetFtpPassword)
 			r.With(az.Require("ftp.manage", "ftp.delete", "ftp_account")).Delete("/ftp-accounts/{ftpID}", s.handleDeleteFtp)
 
 			// SSH authorized keys (cPanel "SSH Access") — rendered into authorized_keys

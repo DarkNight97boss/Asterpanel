@@ -80,6 +80,7 @@ impl Executor for DockerExecutor {
             "caldav.user.apply" => self.caldav_user_apply(job).await,
             "cron.apply" => self.cron_apply(job).await,
             "ftp.account.create" => self.ftp_account_create(job).await,
+            "ftp.account.password" => self.ftp_account_password(job).await,
             "ssh.keys.apply" => self.ssh_keys_apply(job).await,
             "git.repo.ensure" => self.git_repo_ensure(job).await,
             "staging.create" => self.staging_sync(job, false).await,
@@ -997,6 +998,54 @@ impl DockerExecutor {
         JobOutcome::succeeded(json!({"website_id": wid, "destroyed": true}))
     }
 
+    /// Idempotently provisions the Unix SFTP user and sets its password:
+    /// `useradd` with a non-interactive shell, a root-owned chroot (OpenSSH
+    /// refuses to chroot into a directory the user can write) holding a
+    /// user-writable `files` subdir, then `chpasswd` over stdin. The chroot
+    /// lives under a directory the agent owns — never a site/shared path — so
+    /// ownership can be enforced without touching website files.
+    async fn provision_sftp_user(&self, username: &str, password: &str) -> Result<String, String> {
+        let root =
+            std::env::var("AGENT_SFTP_HOME").unwrap_or_else(|_| "/var/asterpanel/sftp".into());
+        let chroot = sftp_chroot_path(&root, username).ok_or("invalid username")?;
+        let line = chpasswd_line(username, password).ok_or("unsafe credentials")?;
+        let files = format!("{chroot}/files");
+
+        // 1. system user (exit 9 = "already exists" → fine, this is idempotent)
+        match run_cmd("useradd", &useradd_args(username, &chroot)).await {
+            Ok(o) if o.status.success() || o.status.code() == Some(9) => {}
+            Ok(o) => {
+                return Err(format!("useradd: {}", String::from_utf8_lossy(&o.stderr).trim()))
+            }
+            Err(e) => return Err(format!("useradd exec: {e}")),
+        }
+        // 2. chroot ownership: root-owned chroot + a user-writable subdir
+        let steps: [(&str, Vec<String>); 4] = [
+            ("mkdir", vec!["-p".into(), files.clone()]),
+            ("chown", vec!["root:root".into(), chroot.clone()]),
+            ("chmod", vec!["755".into(), chroot.clone()]),
+            ("chown", vec![format!("{username}:{username}"), files.clone()]),
+        ];
+        for (prog, args) in steps {
+            match run_cmd(prog, &args).await {
+                Ok(o) if o.status.success() => {}
+                Ok(o) => {
+                    return Err(format!("{prog}: {}", String::from_utf8_lossy(&o.stderr).trim()))
+                }
+                Err(e) => return Err(format!("{prog} exec: {e}")),
+            }
+        }
+        // 3. password — fed on stdin only, never the argv/process table
+        match run_cmd_stdin("chpasswd", &[], &line).await {
+            Ok(o) if o.status.success() => {}
+            Ok(o) => {
+                return Err(format!("chpasswd: {}", String::from_utf8_lossy(&o.stderr).trim()))
+            }
+            Err(e) => return Err(format!("chpasswd exec: {e}")),
+        }
+        Ok(chroot)
+    }
+
     async fn ftp_account_create(&self, job: &Job) -> JobOutcome {
         use tokio::io::AsyncWriteExt;
         let username = job
@@ -1004,14 +1053,19 @@ impl DockerExecutor {
             .get("username")
             .and_then(Value::as_str)
             .unwrap_or("");
-        let home = job
+        let password = job
             .payload
-            .get("home_directory")
+            .get("password")
             .and_then(Value::as_str)
-            .unwrap_or("/sites");
-        if username.is_empty() {
-            return JobOutcome::failed("ftp.account.create: missing username");
+            .unwrap_or("");
+        if !valid_system_username(username) {
+            return JobOutcome::failed("ftp.account.create: invalid username");
         }
+        let chroot = match self.provision_sftp_user(username, password).await {
+            Ok(c) => c,
+            Err(e) => return JobOutcome::failed(format!("ftp.account.create: {e}")),
+        };
+        // Append the SFTP chroot rule (sshd reads it via an Include directive).
         let dir = std::env::var("AGENT_SFTP_DIR").unwrap_or_else(|_| "/etc/asterpanel/ssh".into());
         if let Err(e) = tokio::fs::create_dir_all(&dir).await {
             return JobOutcome::failed(format!("mkdir failed: {e}"));
@@ -1025,7 +1079,7 @@ impl DockerExecutor {
         {
             Ok(mut f) => {
                 if let Err(e) = f
-                    .write_all(render_sftp_match(username, home).as_bytes())
+                    .write_all(render_sftp_match(username, &chroot).as_bytes())
                     .await
                 {
                     return JobOutcome::failed(format!("write failed: {e}"));
@@ -1033,7 +1087,33 @@ impl DockerExecutor {
             }
             Err(e) => return JobOutcome::failed(format!("open failed: {e}")),
         }
-        JobOutcome::succeeded(json!({"username": username, "chroot": home}))
+        JobOutcome::succeeded(json!({"username": username, "chroot": chroot}))
+    }
+
+    /// Resets an existing SFTP account's password via `chpasswd` (stdin only).
+    async fn ftp_account_password(&self, job: &Job) -> JobOutcome {
+        let username = job
+            .payload
+            .get("username")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let password = job
+            .payload
+            .get("password")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let line = match chpasswd_line(username, password) {
+            Some(l) => l,
+            None => return JobOutcome::failed("ftp.account.password: unsafe credentials"),
+        };
+        match run_cmd_stdin("chpasswd", &[], &line).await {
+            Ok(o) if o.status.success() => JobOutcome::succeeded(json!({"username": username})),
+            Ok(o) => JobOutcome::failed(format!(
+                "ftp.account.password: chpasswd: {}",
+                String::from_utf8_lossy(&o.stderr).trim()
+            )),
+            Err(e) => JobOutcome::failed(format!("ftp.account.password: chpasswd exec: {e}")),
+        }
     }
 
     async fn database_user_create(&self, job: &Job) -> JobOutcome {
@@ -3240,6 +3320,57 @@ fn render_sftp_match(username: &str, home: &str) -> String {
     )
 }
 
+/// Unix login name: starts with a lowercase letter or underscore, then
+/// lowercase alphanumerics / underscore / hyphen; max 32 chars (the useradd
+/// limit). Anything else is refused before it reaches a host command.
+fn valid_system_username(s: &str) -> bool {
+    let b = s.as_bytes();
+    !s.is_empty()
+        && s.len() <= 32
+        && (b[0].is_ascii_lowercase() || b[0] == b'_')
+        && b.iter()
+            .all(|&c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+}
+
+/// Builds the `user:password` line fed to `chpasswd` on stdin. Returns None if
+/// the username is invalid or the password carries a separator/control byte, so
+/// the single line can never be split, escaped or injected.
+fn chpasswd_line(user: &str, password: &str) -> Option<String> {
+    if !valid_system_username(user) {
+        return None;
+    }
+    if password.is_empty()
+        || password.len() > 128
+        || password.bytes().any(|c| c == b':' || c < 0x20)
+    {
+        return None;
+    }
+    Some(format!("{user}:{password}\n"))
+}
+
+/// The managed chroot for an SFTP account: `<root>/<username>` under a directory
+/// the agent owns (never a website or shared path), so chroot ownership can be
+/// enforced without touching site files. Returns None on an invalid username.
+fn sftp_chroot_path(root: &str, username: &str) -> Option<String> {
+    if !valid_system_username(username) {
+        return None;
+    }
+    Some(format!("{}/{username}", root.trim_end_matches('/')))
+}
+
+/// `useradd` argv: no auto-home (the agent manages the chroot dirs), a
+/// non-interactive shell, and the managed chroot as the home directory.
+fn useradd_args(user: &str, home: &str) -> Vec<String> {
+    vec![
+        "-M".into(),
+        "-d".into(),
+        home.into(),
+        "-s".into(),
+        "/usr/sbin/nologin".into(),
+        user.into(),
+    ]
+}
+
 /// docker exec argv that creates a database user. Postgres only for the MVP.
 /// Privilege keywords accepted from the control plane. Anything outside this set
 /// makes the renderer refuse, so a GRANT clause can never carry injected SQL.
@@ -3917,6 +4048,28 @@ async fn run_cmd(program: &str, args: &[String]) -> std::io::Result<std::process
         .await
 }
 
+/// Runs a host command, writing `stdin_data` to its standard input. Used for
+/// `chpasswd`, which reads credentials only from stdin — keeping the password
+/// out of the argv and the process table.
+async fn run_cmd_stdin(
+    program: &str,
+    args: &[String],
+    stdin_data: &str,
+) -> std::io::Result<std::process::Output> {
+    use tokio::io::AsyncWriteExt;
+    let mut child = tokio::process::Command::new(program)
+        .args(args)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()?;
+    if let Some(mut si) = child.stdin.take() {
+        si.write_all(stdin_data.as_bytes()).await?;
+        si.shutdown().await?;
+    }
+    child.wait_with_output().await
+}
+
 fn image_for_runtime(runtime: &str) -> &'static str {
     match runtime {
         "static" => "nginxinc/nginx-unprivileged:stable-alpine",
@@ -4379,6 +4532,43 @@ mod tests {
         assert!(s.contains("Match User acme"));
         assert!(s.contains("ChrootDirectory /sites/acme"));
         assert!(s.contains("internal-sftp"));
+    }
+
+    #[test]
+    fn sftp_user_provisioning_is_injection_safe() {
+        // valid Unix login names
+        assert!(valid_system_username("acme_dev"));
+        assert!(valid_system_username("_svc-1"));
+        // rejected: leading digit, uppercase, space, punctuation, over-length
+        assert!(!valid_system_username("1bad"));
+        assert!(!valid_system_username("Bad"));
+        assert!(!valid_system_username("a b"));
+        assert!(!valid_system_username("root;rm"));
+        assert!(!valid_system_username(&"x".repeat(33)));
+
+        // chpasswd line: safe creds → "user:pass\n"; separators/control refused
+        assert_eq!(chpasswd_line("acme", "hexpw123").unwrap(), "acme:hexpw123\n");
+        assert!(chpasswd_line("acme", "has:colon").is_none());
+        assert!(chpasswd_line("acme", "has\nnewline").is_none());
+        assert!(chpasswd_line("bad name", "pw").is_none());
+        assert!(chpasswd_line("acme", "").is_none());
+
+        // chroot stays under the managed root; a traversal username is refused
+        assert_eq!(
+            sftp_chroot_path("/var/asterpanel/sftp", "acme").unwrap(),
+            "/var/asterpanel/sftp/acme"
+        );
+        assert_eq!(
+            sftp_chroot_path("/var/asterpanel/sftp/", "acme").unwrap(),
+            "/var/asterpanel/sftp/acme"
+        );
+        assert!(sftp_chroot_path("/var/asterpanel/sftp", "../etc").is_none());
+
+        // useradd uses a non-interactive shell + the managed chroot as home
+        let a = useradd_args("acme", "/var/asterpanel/sftp/acme");
+        assert!(a.contains(&"/usr/sbin/nologin".to_string()));
+        assert!(a.contains(&"acme".to_string()));
+        assert!(a.contains(&"/var/asterpanel/sftp/acme".to_string()));
     }
 
     #[test]

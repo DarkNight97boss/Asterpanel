@@ -48,6 +48,7 @@ allowed_types := {
 	"caldav.user.apply",
 	"cron.apply",
 	"ftp.account.create",
+	"ftp.account.password",
 	"ssh.keys.apply",
 	"git.repo.ensure",
 	"staging.create",

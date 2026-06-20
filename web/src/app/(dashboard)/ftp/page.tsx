@@ -117,6 +117,17 @@ export default function FtpPage() {
     }
   }
 
+  async function onResetFtpPassword(id: string) {
+    setError(null);
+    setPassword(null);
+    try {
+      const res = await apiPost<{ password?: string }>(`/api/v1/ftp-accounts/${id}/password`, {});
+      if (res.password) setPassword(res.password);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reset password");
+    }
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader title={"FTP / SFTP"} description={"Chrooted SFTP/FTPS accounts scoped to a site directory. Keys or passwords, never shared."} />
@@ -189,6 +200,7 @@ export default function FtpPage() {
                 <th className="px-6 py-3 font-medium">Protocol</th>
                 <th className="px-6 py-3 font-medium">Home</th>
                 <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -201,6 +213,18 @@ export default function FtpPage() {
                   <td className="px-6 py-3 font-mono text-xs text-muted-foreground">{a.home_directory}</td>
                   <td className="px-6 py-3">
                     <StatusBadge status={a.status} />
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => onResetFtpPassword(a.id)}
+                      aria-label="Reset password"
+                      title="Reset password"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
                   </td>
                 </tr>
               ))}

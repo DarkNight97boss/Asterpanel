@@ -57,6 +57,7 @@ const (
 	TypeCaldavUserApply   Type = "caldav.user.apply"
 	TypeCronApply         Type = "cron.apply"
 	TypeFTPAccountCreate  Type = "ftp.account.create"
+	TypeFTPAccountPass    Type = "ftp.account.password"
 	TypeSSHKeysApply      Type = "ssh.keys.apply"
 	TypeGitRepoEnsure     Type = "git.repo.ensure"
 	TypeStagingCreate     Type = "staging.create"

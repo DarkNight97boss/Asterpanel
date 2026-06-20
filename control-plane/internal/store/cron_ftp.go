@@ -107,6 +107,14 @@ func (s *Store) DeleteFtpAccount(ctx context.Context, orgID, id uuid.UUID) error
 	return err
 }
 
+// GetFtpAccountAuth returns an FTP account's username and sealed-credential
+// secret id (for a password reset). Errors if the account is not in the org.
+func (s *Store) GetFtpAccountAuth(ctx context.Context, orgID, id uuid.UUID) (username string, secretID uuid.NullUUID, err error) {
+	const q = `SELECT username, credentials_secret_id FROM ftp_accounts WHERE id = $1 AND organization_id = $2`
+	err = s.pool.QueryRow(ctx, q, id, orgID).Scan(&username, &secretID)
+	return username, secretID, norows(err)
+}
+
 func scanFtp(row rowScanner) (*FtpAccount, error) {
 	var a FtpAccount
 	if err := row.Scan(&a.ID, &a.OrganizationID, &a.Username, &a.Protocol, &a.HomeDirectory, &a.Status, &a.CreatedAt); err != nil {
