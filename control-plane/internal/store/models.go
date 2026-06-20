@@ -446,6 +446,22 @@ type EnvVar struct {
 	CreatedAt      time.Time
 }
 
+type Application struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	WebsiteID      uuid.NullUUID
+	ServerNodeID   uuid.NullUUID
+	Name           string
+	Runtime        string
+	RepoURL        *string
+	RepoBranch     string
+	InstallCommand *string
+	BuildCommand   *string
+	StartCommand   *string
+	Status         string
+	CreatedAt      time.Time
+}
+
 type SecretMeta struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

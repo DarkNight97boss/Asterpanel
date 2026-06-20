@@ -3,6 +3,7 @@ import {
   Archive,
   BarChart3,
   Bell,
+  Boxes,
   Building2,
   Clock,
   Database,
@@ -99,6 +100,7 @@ export const groups: NavGroup[] = [
       { href: "/runtime", label: "Runtime", icon: FileCode2, desc: "PHP, Node & app stack" },
       { href: "/analytics", label: "Analytics", icon: BarChart3, desc: "Per-site traffic" },
       { href: "/apps", label: "One-Click Apps", icon: Package, desc: "Install WordPress & more" },
+      { href: "/applications", label: "Applications", icon: Boxes, desc: "Deploy apps, env & start command" },
     ],
   },
   {

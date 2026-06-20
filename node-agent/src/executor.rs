@@ -472,6 +472,23 @@ impl DockerExecutor {
             return JobOutcome::failed(format!("network setup failed: {e}"));
         }
         let container = format!("astp_app_{app_id}");
+        // Runtime env vars + an optional start command override, supplied by the
+        // control plane from the application's configuration.
+        let env: Vec<(String, String)> = job
+            .payload
+            .get("env")
+            .and_then(Value::as_array)
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|e| {
+                        let k = e.get("key").and_then(Value::as_str)?;
+                        let val = e.get("value").and_then(Value::as_str).unwrap_or("");
+                        Some((k.to_string(), val.to_string()))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        let start_command = job.payload.get("start_command").and_then(Value::as_str);
         // Replace the previous container; the prior image is retained for rollback.
         let _ = run_docker(&["rm".into(), "-f".into(), container.clone()]).await;
         match run_docker(&app_run_args(
@@ -480,6 +497,8 @@ impl DockerExecutor {
             &image,
             &job.tenant_id.to_string(),
             dep_id,
+            &env,
+            start_command,
         ))
         .await
         {
@@ -2235,14 +2254,28 @@ fn git_clone_args(url: &str, git_ref: &str, dir: &str) -> Vec<String> {
     ]
 }
 
+/// A POSIX-ish environment variable name: a letter or `_` first, then
+/// letters/digits/`_`, ≤128 chars. Anything else is dropped so a crafted key
+/// can't smuggle extra `docker run` flags into the argv.
+fn valid_env_key(s: &str) -> bool {
+    let mut chars = s.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {}
+        _ => return false,
+    }
+    s.len() <= 128 && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
 fn app_run_args(
     container: &str,
     network: &str,
     image: &str,
     tenant: &str,
     dep_id: &str,
+    env: &[(String, String)],
+    command: Option<&str>,
 ) -> Vec<String> {
-    vec![
+    let mut v = vec![
         "run".into(),
         "-d".into(),
         "--name".into(),
@@ -2265,8 +2298,27 @@ fn app_run_args(
         format!("asterpanel.tenant={tenant}"),
         "--label".into(),
         format!("asterpanel.deployment={dep_id}"),
-        image.into(),
-    ]
+    ];
+    // Each var becomes exactly two argv elements (`-e`, `KEY=VALUE`); the value is
+    // never word-split, and invalid keys are dropped, so no flag injection.
+    for (k, val) in env {
+        if valid_env_key(k) {
+            v.push("-e".into());
+            v.push(format!("{k}={val}"));
+        }
+    }
+    v.push(image.into());
+    // A start command runs as `sh -c "<command>"` *inside* the container; it is a
+    // single argv element to docker (no host shell), so it cannot affect the host.
+    if let Some(cmd) = command {
+        let cmd = cmd.trim();
+        if !cmd.is_empty() {
+            v.push("sh".into());
+            v.push("-c".into());
+            v.push(cmd.into());
+        }
+    }
+    v
 }
 
 /// Dovecot passwd-file line. {PLAIN} is used for the MVP; production stores a
@@ -4056,10 +4108,38 @@ mod tests {
 
     #[test]
     fn app_run_args_are_hardened() {
-        let a = app_run_args("astp_app_1", "net", "img:1", "t1", "d1").join(" ");
+        let a = app_run_args("astp_app_1", "net", "img:1", "t1", "d1", &[], None).join(" ");
         assert!(a.contains("--cap-drop ALL"), "{a}");
         assert!(a.contains("no-new-privileges"), "{a}");
         assert!(a.ends_with("img:1"), "{a}");
+    }
+
+    #[test]
+    fn app_run_args_inject_env_and_command() {
+        let env = vec![
+            ("NODE_ENV".to_string(), "production".to_string()),
+            ("API_URL".to_string(), "https://x/y".to_string()),
+            ("bad key".to_string(), "v".to_string()), // dropped: not a valid name
+        ];
+        let v = app_run_args("astp_app_1", "net", "img:1", "t1", "d1", &env, Some("npm run start"));
+
+        // Each valid var is exactly two argv elements; values are never split.
+        let i = v.iter().position(|x| x == "NODE_ENV=production").unwrap();
+        assert_eq!(v[i - 1], "-e");
+        assert!(v.contains(&"API_URL=https://x/y".to_string()));
+        assert!(!v.iter().any(|x| x.contains("bad key")), "{v:?}");
+
+        // Env precedes the image; the start command follows it as `sh -c "..."`.
+        let img = v.iter().position(|x| x == "img:1").unwrap();
+        assert!(i < img, "env must come before the image");
+        assert_eq!(&v[img + 1..], &["sh", "-c", "npm run start"]);
+
+        // valid_env_key gate
+        assert!(valid_env_key("DATABASE_URL"));
+        assert!(valid_env_key("_x9"));
+        assert!(!valid_env_key("9LEADING"));
+        assert!(!valid_env_key("has-dash"));
+        assert!(!valid_env_key(""));
     }
 
     #[test]

@@ -230,6 +230,27 @@ func (s *Server) handleCreateDeployment(w http.ResponseWriter, r *http.Request) 
 		"runtime":        runtime,
 		"port":           port,
 	}
+	// Inject the application's start command + runtime env vars so the container
+	// is launched with them (build-time vars are applied during the image build).
+	if app, aerr := s.deps.Store.GetApplication(ctx, p.OrgID, appID); aerr == nil {
+		if sc := app.StartCommand; sc != nil && strings.TrimSpace(*sc) != "" {
+			payload["start_command"] = *sc
+		}
+		if app.RepoURL != nil && strings.TrimSpace(req.GitURL) == "" {
+			payload["git_url"] = *app.RepoURL
+		}
+	}
+	if envVars, eerr := s.deps.Store.ListAppEnvVars(ctx, p.OrgID, appID); eerr == nil {
+		env := make([]map[string]any, 0, len(envVars))
+		for _, e := range envVars {
+			if !e.IsBuildTime {
+				env = append(env, map[string]any{"key": e.Key, "value": e.Value})
+			}
+		}
+		if len(env) > 0 {
+			payload["env"] = env
+		}
+	}
 	jobID, dispatched, jerr := s.signPersistDispatch(ctx, p, jobs.TypeAppDeploy, nodeID, payload)
 	if jerr == nil && dispatched {
 		_ = s.deps.Store.SetDeploymentStatus(ctx, depID, "deploying")

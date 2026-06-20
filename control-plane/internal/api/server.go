@@ -177,6 +177,15 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("deploy.create", "deploy.create", "deployment")).
 				Post("/applications/{appID}/deployments", s.handleCreateDeployment)
 
+			// Application manager (config + per-app env)
+			r.With(az.Require("website.read", "application.list", "application")).Get("/applications", s.handleListApplications)
+			r.With(az.Require("website.create", "application.create", "application")).Post("/applications", s.handleCreateApplication)
+			r.With(az.Require("website.read", "application.get", "application")).Get("/applications/{appID}", s.handleGetApplication)
+			r.With(az.Require("website.update", "application.update", "application")).Post("/applications/{appID}/config", s.handleUpdateApplication)
+			r.With(az.Require("website.read", "application.env.list", "application")).Get("/applications/{appID}/env", s.handleListAppEnv)
+			r.With(az.Require("website.update", "application.env.set", "application")).Post("/applications/{appID}/env", s.handleSetAppEnv)
+			r.With(az.Require("website.update", "application.env.delete", "application")).Delete("/applications/{appID}/env/{envID}", s.handleDeleteAppEnv)
+
 			// Domains & DNS
 			r.With(az.Require("domain.read", "domain.list", "domain")).Get("/domains", s.handleListDomains)
 			r.With(az.Require("domain.create", "domain.create", "domain")).Post("/domains", s.handleCreateDomain)
