@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 // GetPlanIDByCode resolves an active billing plan id from its code.
@@ -205,4 +206,62 @@ func (s *Store) SetSubAccountStatus(ctx context.Context, parentOrgID, id uuid.UU
 		return ErrNotFound
 	}
 	return nil
+}
+
+// descendantSubtreeCTE collects every org beneath a root (its sub-accounts and
+// theirs, recursively) with a depth cap so a malformed cycle can't loop forever.
+const descendantSubtreeCTE = `
+	WITH RECURSIVE subtree AS (
+		SELECT id, 1 AS depth FROM organizations
+		WHERE parent_org_id = $1 AND deleted_at IS NULL
+		UNION ALL
+		SELECT o.id, t.depth + 1 FROM organizations o
+		JOIN subtree t ON o.parent_org_id = t.id
+		WHERE o.deleted_at IS NULL AND t.depth < 64
+	)`
+
+// SetSubAccountStatusCascade suspends or reactivates a direct sub-account and
+// cascades through its whole subtree, returning how many DOWNSTREAM orgs were
+// affected (the target itself is not counted). Suspending marks the target
+// 'manual' and every active descendant 'cascade'; reactivating clears the
+// target and only the descendants suspended BY the cascade ('cascade' source) —
+// children an operator suspended individually ('manual') stay suspended.
+func (s *Store) SetSubAccountStatusCascade(ctx context.Context, parentOrgID, id uuid.UUID, status string) (int, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	var source any
+	if status == "suspended" {
+		source = "manual"
+	}
+	tag, err := tx.Exec(ctx,
+		`UPDATE organizations SET status = $3, suspension_source = $4 WHERE id = $1 AND parent_org_id = $2`,
+		id, parentOrgID, status, source)
+	if err != nil {
+		return 0, err
+	}
+	if tag.RowsAffected() == 0 {
+		return 0, ErrNotFound
+	}
+
+	var ct pgconn.CommandTag
+	if status == "suspended" {
+		ct, err = tx.Exec(ctx, descendantSubtreeCTE+`
+			UPDATE organizations SET status = 'suspended', suspension_source = 'cascade'
+			WHERE id IN (SELECT id FROM subtree) AND status = 'active'`, id)
+	} else {
+		ct, err = tx.Exec(ctx, descendantSubtreeCTE+`
+			UPDATE organizations SET status = 'active', suspension_source = NULL
+			WHERE id IN (SELECT id FROM subtree) AND suspension_source = 'cascade'`, id)
+	}
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return int(ct.RowsAffected()), nil
 }

@@ -239,14 +239,19 @@ func (s *Server) handleSetSubAccountStatus(w http.ResponseWriter, r *http.Reques
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "status must be active or suspended")
 		return
 	}
-	if err := s.deps.Store.SetSubAccountStatus(ctx, p.OrgID, id, req.Status); err != nil {
-		httpx.Error(w, http.StatusNotFound, "not_found", "sub-account not found")
+	cascaded, err := s.deps.Store.SetSubAccountStatusCascade(ctx, p.OrgID, id, req.Status)
+	if err != nil {
+		if err == store.ErrNotFound {
+			httpx.Error(w, http.StatusNotFound, "not_found", "sub-account not found")
+			return
+		}
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not update status")
 		return
 	}
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "reseller.account.status", "organization", id.String(), audit.OutcomeSuccess, r,
-		map[string]any{"status": req.Status})
-	httpx.JSON(w, http.StatusOK, map[string]any{"id": id, "status": req.Status})
+		map[string]any{"status": req.Status, "cascaded": cascaded})
+	httpx.JSON(w, http.StatusOK, map[string]any{"id": id, "status": req.Status, "cascaded": cascaded})
 }
 
 // handleResellerBudget reports the reseller's allocation budget: for each

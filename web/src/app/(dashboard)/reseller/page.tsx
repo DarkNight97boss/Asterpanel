@@ -56,6 +56,7 @@ export default function ResellerPage() {
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
   const [budget, setBudget] = useState<BudgetRow[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -113,9 +114,19 @@ export default function ResellerPage() {
 
   async function setStatus(id: string, status: "active" | "suspended") {
     setError(null);
+    setNotice(null);
     try {
-      await apiPost(`/api/v1/reseller/accounts/${id}/status`, { status });
+      const res = await apiPost<{ cascaded?: number }>(`/api/v1/reseller/accounts/${id}/status`, {
+        status,
+      });
       setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, status } : a)));
+      if (res.cascaded && res.cascaded > 0) {
+        const verb = status === "suspended" ? "Suspended" : "Reactivated";
+        setNotice(
+          `${verb} ${res.cascaded} downstream ${res.cascaded === 1 ? "account" : "accounts"} as well.`,
+        );
+      }
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update status");
     }
@@ -139,6 +150,7 @@ export default function ResellerPage() {
       <PageHeader title={"Reseller"} description={"Create and manage customer sub-accounts under your organization."} />
 
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       {created && (
         <div className="rounded-md border border-emerald-500/40 bg-emerald-500/5 px-4 py-3 text-sm">
