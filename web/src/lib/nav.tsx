@@ -16,6 +16,7 @@ import {
   Inbox,
   Key,
   KeyRound,
+  Layers,
   LayoutDashboard,
   Lock,
   Mail,
@@ -146,6 +147,7 @@ export const groups: NavGroup[] = [
     label: "Account",
     color: "indigo",
     items: [
+      { href: "/packages", label: "Packages", icon: Layers, desc: "Hosting plans & quotas" },
       { href: "/reseller", label: "Reseller", icon: Building2, desc: "Sub-accounts & plans", feature: Feature.Reseller },
       { href: "/migrations", label: "Migrations", icon: DownloadCloud, desc: "Import from cPanel", feature: Feature.Migration },
       { href: "/branding", label: "Branding", icon: Palette, desc: "White-label the panel", feature: Feature.WhiteLabel },

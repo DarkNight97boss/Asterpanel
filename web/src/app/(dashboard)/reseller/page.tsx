@@ -42,6 +42,7 @@ export default function ResellerPage() {
   const { impersonate } = useAuth();
   const router = useRouter();
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [plans, setPlans] = useState<{ code: string; name: string; is_active: boolean }[]>([]);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [plan, setPlan] = useState("");
@@ -59,7 +60,20 @@ export default function ResellerPage() {
   }
   useEffect(() => {
     load();
+    apiGet<{ plans: { code: string; name: string; is_active: boolean }[] }>("/api/v1/plans")
+      .then((r) => setPlans((r.plans ?? []).filter((p) => p.is_active)))
+      .catch(() => setPlans([]));
   }, []);
+
+  async function assignPlan(id: string, planCode: string) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/reseller/accounts/${id}/plan`, { plan_code: planCode });
+      setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, plan_code: planCode || null } : a)));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to assign plan");
+    }
+  }
 
   async function create(e: FormEvent) {
     e.preventDefault();
@@ -165,13 +179,22 @@ export default function ResellerPage() {
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="plan">Plan code</Label>
-              <Input
+              <Label htmlFor="plan">Package</Label>
+              <select
                 id="plan"
-                placeholder="optional"
+                className="flex h-9 w-44 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 value={plan}
                 onChange={(e) => setPlan(e.target.value)}
-              />
+              >
+                <option value="" className="bg-card">
+                  — none —
+                </option>
+                {plans.map((p) => (
+                  <option key={p.code} value={p.code} className="bg-card">
+                    {p.name}
+                  </option>
+                ))}
+              </select>
             </div>
             <Button type="submit" disabled={busy}>
               Create
@@ -202,7 +225,29 @@ export default function ResellerPage() {
                     <div className="font-medium">{a.name}</div>
                     <div className="font-mono text-xs text-muted-foreground">{a.slug}</div>
                   </td>
-                  <td className="px-6 py-3 text-muted-foreground">{a.plan_code ?? "—"}</td>
+                  <td className="px-6 py-3">
+                    <select
+                      className="h-8 rounded-md border border-border bg-transparent px-2 text-sm text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                      value={a.plan_code ?? ""}
+                      onChange={(e) => assignPlan(a.id, e.target.value)}
+                      aria-label={`Plan for ${a.name}`}
+                    >
+                      <option value="" className="bg-card">
+                        — none —
+                      </option>
+                      {plans.map((p) => (
+                        <option key={p.code} value={p.code} className="bg-card">
+                          {p.name}
+                        </option>
+                      ))}
+                      {/* keep an unknown/inactive current plan visible */}
+                      {a.plan_code && !plans.some((p) => p.code === a.plan_code) && (
+                        <option value={a.plan_code} className="bg-card">
+                          {a.plan_code}
+                        </option>
+                      )}
+                    </select>
+                  </td>
                   <td className="px-6 py-3 text-muted-foreground">{a.sites}</td>
                   <td className="px-6 py-3">
                     <span

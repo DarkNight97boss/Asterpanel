@@ -355,6 +355,15 @@ func (s *Server) routes() http.Handler {
 			// Billing & usage. The plan/usage view stays in Community; the
 			// invoicing engine is a Pro (commercial) feature.
 			r.With(az.Require("billing.read", "billing.read", "billing")).Get("/billing", s.handleBilling)
+
+			// Hosting packages (plans + quotas). Definition/enforcement is free;
+			// only the invoicing engine below is a commercial feature.
+			r.With(az.Require("billing.read", "plan.list", "billing")).Get("/plans", s.handleListPlans)
+			r.With(az.Require("billing.manage", "plan.create", "billing")).Post("/plans", s.handleCreatePlan)
+			r.With(az.Require("billing.read", "plan.get", "billing")).Get("/plans/{planID}", s.handleGetPlan)
+			r.With(az.Require("billing.manage", "plan.update", "billing")).Post("/plans/{planID}", s.handleUpdatePlan)
+			r.With(az.Require("billing.manage", "plan.delete", "billing")).Delete("/plans/{planID}", s.handleDeletePlan)
+
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireFeature(licensing.FeatureBilling))
 				r.With(az.Require("billing.read", "billing.invoices.list", "invoice")).Get("/billing/invoices", s.handleListInvoices)
@@ -369,6 +378,7 @@ func (s *Server) routes() http.Handler {
 				r.With(az.Require("reseller.read", "reseller.list", "organization")).Get("/reseller/accounts", s.handleListSubAccounts)
 				r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
 				r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
+				r.With(az.Require("reseller.manage", "reseller.plan", "organization")).Post("/reseller/accounts/{accountID}/plan", s.handleAssignSubAccountPlan)
 			})
 
 			// White-label branding — reading is free (the panel still themes);

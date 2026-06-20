@@ -446,6 +446,19 @@ type EnvVar struct {
 	CreatedAt      time.Time
 }
 
+type BillingPlan struct {
+	ID          uuid.UUID
+	Code        string
+	Name        string
+	Description *string
+	PriceCents  int
+	Currency    string
+	Interval    string
+	Limits      map[string]int
+	IsActive    bool
+	CreatedAt   time.Time
+}
+
 type Application struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

@@ -55,6 +55,11 @@ func (s *Server) handleCreateMailbox(w http.ResponseWriter, r *http.Request) {
 		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a valid email address is required")
 		return
 	}
+	if over, used, limit := s.overQuota(ctx, p.OrgID, "mailboxes"); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "quota_exceeded", "plan mailbox limit reached",
+			map[string]any{"used": used, "limit": limit})
+		return
+	}
 	node := s.firstNode(ctx, p.OrgID)
 	if node == nil {
 		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")

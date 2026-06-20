@@ -98,6 +98,12 @@ func (s *Server) handleCreateDatabase(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if over, used, limit := s.overQuota(ctx, p.OrgID, "databases"); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "quota_exceeded", "plan database limit reached",
+			map[string]any{"used": used, "limit": limit})
+		return
+	}
+
 	// Resolve the target node: explicit, or auto-place on the first available.
 	var node *store.ServerNode
 	if strings.TrimSpace(req.NodeID) != "" {
