@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Calendar, Filter, Forward, Mail, Reply, Route, Send, ShieldAlert, ShieldCheck, Users, Trash2 } from "lucide-react";
+import { Calendar, Filter, Forward, Mail, Pencil, Reply, Route, Send, ShieldAlert, ShieldCheck, Users, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -149,6 +149,7 @@ export default function EmailPage() {
   const [fwdSource, setFwdSource] = useState("");
   const [fwdDests, setFwdDests] = useState("");
   const [fwdBusy, setFwdBusy] = useState(false);
+  const [editFwdId, setEditFwdId] = useState<string | null>(null);
 
   async function refreshForwarders() {
     try {
@@ -157,6 +158,17 @@ export default function EmailPage() {
     } catch {
       /* the section just stays empty if the backend is unreachable */
     }
+  }
+
+  function startEditForwarder(f: Forwarder) {
+    setEditFwdId(f.id);
+    setFwdSource(f.source);
+    setFwdDests((f.destinations || []).join(", "));
+  }
+  function cancelEditForwarder() {
+    setEditFwdId(null);
+    setFwdSource("");
+    setFwdDests("");
   }
 
   async function onCreateForwarder(e: FormEvent) {
@@ -168,12 +180,17 @@ export default function EmailPage() {
         .split(/[\s,]+/)
         .map((d) => d.trim())
         .filter(Boolean);
-      await apiPost("/api/v1/email/forwarders", { source: fwdSource.trim(), destinations });
+      if (editFwdId) {
+        await apiPost(`/api/v1/email/forwarders/${editFwdId}`, { destinations });
+        setEditFwdId(null);
+      } else {
+        await apiPost("/api/v1/email/forwarders", { source: fwdSource.trim(), destinations });
+      }
       setFwdSource("");
       setFwdDests("");
       await refreshForwarders();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create forwarder");
+      setError(e instanceof Error ? e.message : "Could not save forwarder");
     } finally {
       setFwdBusy(false);
     }
@@ -198,6 +215,7 @@ export default function EmailPage() {
     end_date: "",
   });
   const [arBusy, setArBusy] = useState(false);
+  const [arEditId, setArEditId] = useState<string | null>(null);
 
   async function refreshAutoresponders() {
     try {
@@ -210,23 +228,45 @@ export default function EmailPage() {
     }
   }
 
+  function startEditAr(a: Autoresponder) {
+    setArEditId(a.id);
+    setAr({
+      address: a.address,
+      subject: a.subject,
+      body: a.body,
+      interval_days: String(a.interval_days),
+      start_date: a.start_date || "",
+      end_date: a.end_date || "",
+    });
+  }
+  function cancelEditAr() {
+    setArEditId(null);
+    setAr({ address: "", subject: "", body: "", interval_days: "1", start_date: "", end_date: "" });
+  }
+
   async function onCreateAutoresponder(e: FormEvent) {
     e.preventDefault();
     setArBusy(true);
     setError(null);
     try {
-      await apiPost("/api/v1/email/autoresponders", {
+      const payload = {
         address: ar.address.trim(),
         subject: ar.subject.trim(),
         body: ar.body,
         interval_days: Number(ar.interval_days) || 1,
         start_date: ar.start_date,
         end_date: ar.end_date,
-      });
+      };
+      if (arEditId) {
+        await apiPost(`/api/v1/email/autoresponders/${arEditId}`, payload);
+        setArEditId(null);
+      } else {
+        await apiPost("/api/v1/email/autoresponders", payload);
+      }
       setAr({ address: "", subject: "", body: "", interval_days: "1", start_date: "", end_date: "" });
       await refreshAutoresponders();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create autoresponder");
+      setError(e instanceof Error ? e.message : "Could not save autoresponder");
     } finally {
       setArBusy(false);
     }
@@ -716,6 +756,7 @@ export default function EmailPage() {
                 value={fwdSource}
                 onChange={(e) => setFwdSource(e.target.value)}
                 placeholder="sales@acme.com or @acme.com"
+                disabled={!!editFwdId}
                 required
               />
             </div>
@@ -729,9 +770,16 @@ export default function EmailPage() {
                 required
               />
             </div>
-            <Button type="submit" disabled={fwdBusy}>
-              {fwdBusy ? "Adding…" : "Add forwarder"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="submit" disabled={fwdBusy}>
+                {fwdBusy ? "Saving…" : editFwdId ? "Save" : "Add forwarder"}
+              </Button>
+              {editFwdId && (
+                <Button type="button" variant="ghost" size="icon" onClick={cancelEditForwarder} aria-label="Cancel">
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </form>
 
           {forwarders.length === 0 ? (
@@ -754,6 +802,15 @@ export default function EmailPage() {
                     variant="ghost"
                     size="icon"
                     className="ml-auto h-7 w-7"
+                    onClick={() => startEditForwarder(f)}
+                    aria-label="Edit forwarder"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => onDeleteForwarder(f.id)}
                     aria-label="Delete forwarder"
                   >
@@ -786,6 +843,7 @@ export default function EmailPage() {
                   value={ar.address}
                   onChange={(e) => setAr({ ...ar, address: e.target.value })}
                   placeholder="vip@acme.com"
+                  disabled={!!arEditId}
                   required
                 />
               </div>
@@ -841,9 +899,16 @@ export default function EmailPage() {
                 />
               </div>
             </div>
-            <Button type="submit" disabled={arBusy}>
-              {arBusy ? "Saving…" : "Add autoresponder"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="submit" disabled={arBusy}>
+                {arBusy ? "Saving…" : arEditId ? "Save" : "Add autoresponder"}
+              </Button>
+              {arEditId && (
+                <Button type="button" variant="ghost" size="icon" onClick={cancelEditAr} aria-label="Cancel">
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </form>
 
           {autoresponders.length === 0 ? (
@@ -863,6 +928,15 @@ export default function EmailPage() {
                     variant="ghost"
                     size="icon"
                     className="ml-auto h-7 w-7"
+                    onClick={() => startEditAr(a)}
+                    aria-label="Edit autoresponder"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => onDeleteAutoresponder(a.id)}
                     aria-label="Delete autoresponder"
                   >

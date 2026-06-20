@@ -106,6 +106,44 @@ func (s *Server) handleCreateAutoresponder(w http.ResponseWriter, r *http.Reques
 	})
 }
 
+// handleUpdateAutoresponder edits the message + active window (address fixed).
+func (s *Server) handleUpdateAutoresponder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "autoresponderID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req createAutoresponderRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	subject := strings.TrimSpace(req.Subject)
+	if subject == "" || strings.TrimSpace(req.Body) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "subject and body are required")
+		return
+	}
+	interval := req.IntervalDays
+	if interval < 1 {
+		interval = 1
+	}
+	a, err := s.deps.Store.UpdateAutoresponder(ctx, p.OrgID, id, subject, req.Body, interval, parseDate(req.StartDate), parseDate(req.EndDate))
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "autoresponder not found")
+		return
+	}
+	jobID, dispatched := s.applyAutoresponders(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "email.autoresponder.update", "mail_autoresponder", a.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"address": a.Address, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"autoresponder": autoresponderView(*a),
+		"dispatch":      map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteAutoresponder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

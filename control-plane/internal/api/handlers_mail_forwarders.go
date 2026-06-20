@@ -105,6 +105,52 @@ func (s *Server) handleCreateForwarder(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleUpdateForwarder replaces a forwarder's destinations and re-applies the
+// virtual-alias map.
+func (s *Server) handleUpdateForwarder(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "forwarderID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req createForwarderRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	dests := make([]string, 0, len(req.Destinations))
+	for _, d := range req.Destinations {
+		d = strings.ToLower(strings.TrimSpace(d))
+		if d == "" {
+			continue
+		}
+		if !validEmailAddr(d) {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "each destination must be a valid email address")
+			return
+		}
+		dests = append(dests, d)
+	}
+	if len(dests) == 0 {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "at least one destination is required")
+		return
+	}
+	f, err := s.deps.Store.UpdateForwarder(ctx, p.OrgID, id, dests)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "forwarder not found")
+		return
+	}
+	jobID, dispatched := s.applyForwarders(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "email.forwarder.update", "mail_forwarder", f.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"source": f.Source, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"forwarder": forwarderView(*f),
+		"dispatch":  map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteForwarder(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

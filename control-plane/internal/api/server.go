@@ -260,11 +260,13 @@ func (s *Server) routes() http.Handler {
 			// Email forwarders / aliases (incl. catch-all)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/forwarders", s.handleListForwarders)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/forwarders", s.handleCreateForwarder)
+			r.With(az.Require("email.manage", "email.update", "mailbox")).Post("/email/forwarders/{forwarderID}", s.handleUpdateForwarder)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/forwarders/{forwarderID}", s.handleDeleteForwarder)
 
 			// Email autoresponders (Sieve vacation)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/autoresponders", s.handleListAutoresponders)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/autoresponders", s.handleCreateAutoresponder)
+			r.With(az.Require("email.manage", "email.update", "mailbox")).Post("/email/autoresponders/{autoresponderID}", s.handleUpdateAutoresponder)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/autoresponders/{autoresponderID}", s.handleDeleteAutoresponder)
 
 			// Email filters (Sieve rules)

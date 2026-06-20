@@ -46,6 +46,16 @@ func (s *Store) ListAutoresponders(ctx context.Context, orgID uuid.UUID) ([]Mail
 	return out, rows.Err()
 }
 
+// UpdateAutoresponder edits an autoresponder's message and active window (the
+// address is the key and stays fixed). Org-scoped.
+func (s *Store) UpdateAutoresponder(ctx context.Context, orgID, id uuid.UUID, subject, body string, intervalDays int, start, end *time.Time) (*MailAutoresponder, error) {
+	const q = `
+		UPDATE mail_autoresponders SET subject = $3, body = $4, interval_days = $5, start_date = $6, end_date = $7
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, address, subject, body, interval_days, start_date, end_date, enabled, created_at`
+	return scanAutoresponder(s.pool.QueryRow(ctx, q, id, orgID, subject, body, intervalDays, start, end))
+}
+
 func (s *Store) DeleteAutoresponder(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM mail_autoresponders WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err
