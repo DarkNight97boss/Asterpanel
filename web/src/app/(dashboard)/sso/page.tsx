@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Copy, Plus, Trash2 } from "lucide-react";
+import { Copy, Pencil, Plus, Power, Trash2 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,6 +37,7 @@ export default function SSOPage() {
   const [clientSecret, setClientSecret] = useState("");
   const [allowedDomains, setAllowedDomains] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
 
   async function load() {
     try {
@@ -50,28 +51,68 @@ export default function SSOPage() {
     load();
   }, []);
 
+  function resetForm() {
+    setEditId(null);
+    setName("");
+    setIssuer("");
+    setClientId("");
+    setClientSecret("");
+    setAllowedDomains("");
+  }
+  function startEdit(p: Provider) {
+    setEditId(p.id);
+    setName(p.name);
+    setIssuer(p.issuer);
+    setClientId(p.client_id);
+    setClientSecret("");
+    setAllowedDomains(p.allowed_domains || "");
+    setNotice(null);
+  }
+  async function toggleEnabled(p: Provider) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/sso/providers/${p.id}`, {
+        name: p.name,
+        client_id: p.client_id,
+        allowed_domains: p.allowed_domains,
+        enabled: !p.enabled,
+      });
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not toggle provider");
+    }
+  }
+
   async function create(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await apiPost("/api/v1/sso/providers", {
-        name: name.trim(),
-        issuer: issuer.trim(),
-        client_id: clientId.trim(),
-        client_secret: clientSecret,
-        allowed_domains: allowedDomains.trim(),
-      });
-      setName("");
-      setIssuer("");
-      setClientId("");
-      setClientSecret("");
-      setAllowedDomains("");
-      setNotice("Provider added. Register the callback URL below at your IdP.");
+      if (editId) {
+        const cur = providers.find((x) => x.id === editId);
+        await apiPost(`/api/v1/sso/providers/${editId}`, {
+          name: name.trim(),
+          client_id: clientId.trim(),
+          client_secret: clientSecret,
+          allowed_domains: allowedDomains.trim(),
+          enabled: cur ? cur.enabled : true,
+        });
+        setNotice("Provider updated.");
+      } else {
+        await apiPost("/api/v1/sso/providers", {
+          name: name.trim(),
+          issuer: issuer.trim(),
+          client_id: clientId.trim(),
+          client_secret: clientSecret,
+          allowed_domains: allowedDomains.trim(),
+        });
+        setNotice("Provider added. Register the callback URL below at your IdP.");
+      }
+      resetForm();
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add provider");
+      setError(e instanceof Error ? e.message : "Could not save provider");
     } finally {
       setBusy(false);
     }
@@ -99,7 +140,7 @@ export default function SSOPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">Add OIDC provider</CardTitle>
+          <CardTitle className="text-base">{editId ? "Edit OIDC provider" : "Add OIDC provider"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={create} className="space-y-4">
@@ -122,6 +163,7 @@ export default function SSOPage() {
                   onChange={(e) => setIssuer(e.target.value)}
                   placeholder="https://accounts.google.com"
                   className="font-mono"
+                  disabled={!!editId}
                   required
                 />
               </div>
@@ -143,7 +185,8 @@ export default function SSOPage() {
                   value={clientSecret}
                   onChange={(e) => setClientSecret(e.target.value)}
                   className="font-mono"
-                  required
+                  placeholder={editId ? "leave blank to keep current" : ""}
+                  required={!editId}
                 />
               </div>
               <div className="space-y-1.5 sm:col-span-2">
@@ -157,10 +200,17 @@ export default function SSOPage() {
                 />
               </div>
             </div>
-            <Button type="submit" disabled={busy}>
-              <Plus className="h-4 w-4" />
-              {busy ? "Adding…" : "Add provider"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="submit" disabled={busy}>
+                <Plus className="h-4 w-4" />
+                {busy ? "Saving…" : editId ? "Save provider" : "Add provider"}
+              </Button>
+              {editId && (
+                <Button type="button" variant="ghost" onClick={resetForm}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -187,7 +237,15 @@ export default function SSOPage() {
                   {p.enabled ? "enabled" : "disabled"}
                 </span>
                 <span className="font-mono text-xs text-muted-foreground">{p.issuer}</span>
-                <Button variant="ghost" size="sm" className="ml-auto" onClick={() => del(p.id)}>
+                <Button variant="ghost" size="sm" className="ml-auto" onClick={() => toggleEnabled(p)} title={p.enabled ? "Disable" : "Enable"}>
+                  <Power className={`h-4 w-4 ${p.enabled ? "text-emerald-500" : "text-muted-foreground"}`} />
+                  {p.enabled ? "Disable" : "Enable"}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => startEdit(p)}>
+                  <Pencil className="h-4 w-4" />
+                  Edit
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => del(p.id)}>
                   <Trash2 className="h-4 w-4" />
                   Remove
                 </Button>

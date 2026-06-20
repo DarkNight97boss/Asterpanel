@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Copy, Send, Trash2, X } from "lucide-react";
+import { Copy, Pencil, Power, Send, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +34,7 @@ export default function WebhooksPage() {
   const [url, setUrl] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<CreatedHook | null>(null);
   const [testing, setTesting] = useState<Record<string, boolean>>({});
@@ -55,21 +56,52 @@ export default function WebhooksPage() {
     setPicked((prev) => (prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev]));
   }
 
+  function startEdit(h: Webhook) {
+    setEditId(h.id);
+    setUrl(h.url);
+    setPicked(h.events || []);
+    setCreated(null);
+  }
+  function cancelEdit() {
+    setEditId(null);
+    setUrl("");
+    setPicked([]);
+  }
+  async function toggleActive(h: Webhook) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/webhooks/${h.id}`, { url: h.url, events: h.events, active: !h.active });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not toggle webhook");
+    }
+  }
+
   async function create(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const { webhook } = await apiPost<{ webhook: CreatedHook }>("/api/v1/webhooks", {
-        url,
-        events: picked,
-      });
-      setCreated(webhook);
+      if (editId) {
+        const cur = hooks.find((x) => x.id === editId);
+        await apiPost(`/api/v1/webhooks/${editId}`, {
+          url,
+          events: picked,
+          active: cur ? cur.active : true,
+        });
+        setEditId(null);
+      } else {
+        const { webhook } = await apiPost<{ webhook: CreatedHook }>("/api/v1/webhooks", {
+          url,
+          events: picked,
+        });
+        setCreated(webhook);
+      }
       setUrl("");
       setPicked([]);
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create webhook");
+      setError(err instanceof Error ? err.message : "Failed to save webhook");
     } finally {
       setBusy(false);
     }
@@ -191,9 +223,16 @@ export default function WebhooksPage() {
                   })}
                 </div>
               </div>
-              <Button type="submit" disabled={busy}>
-                Create webhook
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button type="submit" disabled={busy}>
+                  {busy ? "Saving…" : editId ? "Save webhook" : "Create webhook"}
+                </Button>
+                {editId && (
+                  <Button type="button" variant="ghost" size="icon" onClick={cancelEdit} aria-label="Cancel">
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </form>
           </CardContent>
         </Card>
@@ -248,6 +287,12 @@ export default function WebhooksPage() {
                       )}
                     </td>
                     <td className="px-6 py-3 text-right">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => toggleActive(h)} title={h.active ? "Disable" : "Enable"} aria-label="Toggle active">
+                        <Power className={`h-4 w-4 ${h.active ? "text-emerald-500" : "text-muted-foreground"}`} />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => startEdit(h)} aria-label="Edit webhook">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
                       <Button
                         variant="ghost"
                         size="sm"

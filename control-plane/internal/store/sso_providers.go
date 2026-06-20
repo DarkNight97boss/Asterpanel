@@ -81,6 +81,24 @@ func (s *Store) GetSSOProvider(ctx context.Context, id uuid.UUID) (*SSOProvider,
 	return scanSSOProvider(s.pool.QueryRow(ctx, `SELECT `+ssoColumns+` FROM sso_providers WHERE id = $1`, id))
 }
 
+// UpdateSSOProvider edits a provider's non-secret fields (issuer is the key and
+// stays fixed).
+func (s *Store) UpdateSSOProvider(ctx context.Context, orgID, id uuid.UUID, name, clientID, allowedDomains string, enabled bool) (*SSOProvider, error) {
+	const q = `
+		UPDATE sso_providers SET name = $3, client_id = $4, allowed_domains = $5, enabled = $6
+		WHERE id = $1 AND organization_id = $2
+		RETURNING ` + ssoColumns
+	return scanSSOProvider(s.pool.QueryRow(ctx, q, id, orgID, name, clientID, allowedDomains, enabled))
+}
+
+// UpdateSSOProviderSecret rotates the encrypted client secret in place.
+func (s *Store) UpdateSSOProviderSecret(ctx context.Context, orgID, id uuid.UUID, ct, nonce []byte, keyID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE sso_providers SET client_secret_ct = $3, client_secret_nonce = $4, client_secret_keyid = $5
+		 WHERE id = $1 AND organization_id = $2`, id, orgID, ct, nonce, keyID)
+	return err
+}
+
 func (s *Store) DeleteSSOProvider(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM sso_providers WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

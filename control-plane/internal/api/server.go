@@ -379,6 +379,7 @@ func (s *Server) routes() http.Handler {
 			// SSO (OIDC) provider configuration (operator/org admin).
 			r.With(az.Require("sso.read", "sso.list", "sso_provider")).Get("/sso/providers", s.handleListSSOProviders)
 			r.With(az.Require("sso.manage", "sso.create", "sso_provider")).Post("/sso/providers", s.handleCreateSSOProvider)
+			r.With(az.Require("sso.manage", "sso.update", "sso_provider")).Post("/sso/providers/{providerID}", s.handleUpdateSSOProvider)
 			r.With(az.Require("sso.manage", "sso.delete", "sso_provider")).Delete("/sso/providers/{providerID}", s.handleDeleteSSOProvider)
 
 			// CDN / Cloudflare integration (DNS records + cache purge).
@@ -419,6 +420,7 @@ func (s *Server) routes() http.Handler {
 				r.Use(s.requireFeature(licensing.FeatureWhiteLabel))
 				r.With(az.Require("webhooks.read", "webhooks.list", "webhook")).Get("/webhooks", s.handleListWebhooks)
 				r.With(az.Require("webhooks.manage", "webhooks.create", "webhook")).Post("/webhooks", s.handleCreateWebhook)
+				r.With(az.Require("webhooks.manage", "webhooks.update", "webhook")).Post("/webhooks/{hookID}", s.handleUpdateWebhook)
 				r.With(az.Require("webhooks.manage", "webhooks.delete", "webhook")).Delete("/webhooks/{hookID}", s.handleDeleteWebhook)
 				r.With(az.Require("webhooks.manage", "webhooks.test", "webhook")).Post("/webhooks/{hookID}/test", s.handleTestWebhook)
 			})

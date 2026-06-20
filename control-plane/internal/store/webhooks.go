@@ -32,6 +32,16 @@ func (s *Store) CreateWebhook(ctx context.Context, p CreateWebhookParams) (*Webh
 	return scanWebhook(s.pool.QueryRow(ctx, q, p.OrgID, p.URL, p.Secret, p.Events))
 }
 
+// UpdateWebhook edits a webhook's target URL, subscribed events and active flag
+// (the signing secret is unchanged).
+func (s *Store) UpdateWebhook(ctx context.Context, orgID, id uuid.UUID, url string, events []string, active bool) (*Webhook, error) {
+	const q = `
+		UPDATE webhooks SET url = $3, events = $4, active = $5
+		WHERE id = $1 AND organization_id = $2
+		RETURNING ` + webhookCols
+	return scanWebhook(s.pool.QueryRow(ctx, q, id, orgID, url, events, active))
+}
+
 func (s *Store) ListWebhooks(ctx context.Context, orgID uuid.UUID) ([]Webhook, error) {
 	rows, err := s.pool.Query(ctx,
 		`SELECT `+webhookCols+` FROM webhooks WHERE organization_id = $1 ORDER BY created_at DESC`, orgID)

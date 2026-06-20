@@ -94,6 +94,62 @@ func (s *Server) handleCreateSSOProvider(w http.ResponseWriter, r *http.Request)
 	httpx.JSON(w, http.StatusCreated, map[string]any{"provider": ssoProviderView(*provider)})
 }
 
+type updateSSOProviderRequest struct {
+	Name           string `json:"name"`
+	ClientID       string `json:"client_id"`
+	ClientSecret   string `json:"client_secret"`
+	AllowedDomains string `json:"allowed_domains"`
+	Enabled        *bool  `json:"enabled"`
+}
+
+// handleUpdateSSOProvider edits a provider's name, client id, allowed domains and
+// enabled flag; a non-empty client_secret rotates the (encrypted) secret. The
+// issuer is the key and cannot be changed.
+func (s *Server) handleUpdateSSOProvider(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "providerID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid provider id")
+		return
+	}
+	var req updateSSOProviderRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	req.Name = strings.TrimSpace(req.Name)
+	req.ClientID = strings.TrimSpace(req.ClientID)
+	if req.Name == "" || req.ClientID == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "name and client_id are required")
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	provider, err := s.deps.Store.UpdateSSOProvider(ctx, p.OrgID, id, req.Name, req.ClientID, strings.TrimSpace(req.AllowedDomains), enabled)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "provider not found")
+		return
+	}
+	if req.ClientSecret != "" {
+		ct, nonce, eerr := s.deps.Envelope.Encrypt([]byte(req.ClientSecret), ssoSecretAAD(p.OrgID))
+		if eerr != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not seal client secret")
+			return
+		}
+		if uerr := s.deps.Store.UpdateSSOProviderSecret(ctx, p.OrgID, id, ct, nonce, s.deps.Envelope.KeyID()); uerr != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not store client secret")
+			return
+		}
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "sso.provider.update", "sso_provider", id.String(), audit.OutcomeSuccess, r,
+		map[string]any{"enabled": enabled})
+	httpx.JSON(w, http.StatusOK, map[string]any{"provider": ssoProviderView(*provider)})
+}
+
 func (s *Server) handleDeleteSSOProvider(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

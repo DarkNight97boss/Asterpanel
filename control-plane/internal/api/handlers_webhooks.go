@@ -97,6 +97,47 @@ func (s *Server) handleCreateWebhook(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusCreated, map[string]any{"webhook": webhookView(*hook, true)})
 }
 
+type updateWebhookRequest struct {
+	URL    string   `json:"url"`
+	Events []string `json:"events"`
+	Active *bool    `json:"active"`
+}
+
+// handleUpdateWebhook edits a webhook's URL, events and active flag.
+func (s *Server) handleUpdateWebhook(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "hookID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req updateWebhookRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	target := strings.TrimSpace(req.URL)
+	u, perr := url.Parse(target)
+	if perr != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "url must be a valid http(s) URL")
+		return
+	}
+	active := true
+	if req.Active != nil {
+		active = *req.Active
+	}
+	hook, err := s.deps.Store.UpdateWebhook(ctx, p.OrgID, id, target, req.Events, active)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "webhook not found")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "webhook.update", "webhook", hook.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"url": target, "active": active})
+	httpx.JSON(w, http.StatusOK, map[string]any{"webhook": webhookView(*hook, false)})
+}
+
 func (s *Server) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
