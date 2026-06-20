@@ -446,6 +446,17 @@ type EnvVar struct {
 	CreatedAt      time.Time
 }
 
+type CloudflareAccount struct {
+	ID             uuid.UUID
+	OrganizationID uuid.UUID
+	Label          string
+	TokenCT        []byte
+	TokenNonce     []byte
+	TokenKeyID     string
+	VerifiedAt     *time.Time
+	CreatedAt      time.Time
+}
+
 type SSOProvider struct {
 	ID                uuid.UUID
 	OrganizationID    uuid.UUID

@@ -28,6 +28,8 @@ INSERT INTO permissions (key, description, category) VALUES
   ('domain.delete',       'Remove domains',                    'domain'),
   ('dns.read',            'View DNS records',                  'dns'),
   ('dns.manage',          'Manage DNS records',                'dns'),
+  ('cdn.read',            'View CDN (Cloudflare) config',      'cdn'),
+  ('cdn.manage',          'Manage CDN (Cloudflare) integration', 'cdn'),
   ('website.read',        'View websites',                     'website'),
   ('website.create',      'Create websites',                   'website'),
   ('website.update',      'Update websites',                   'website'),

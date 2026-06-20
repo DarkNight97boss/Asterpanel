@@ -6,6 +6,7 @@ import {
   Boxes,
   Building2,
   Clock,
+  Cloud,
   Database,
   DownloadCloud,
   FileCode2,
@@ -98,6 +99,7 @@ export const groups: NavGroup[] = [
     items: [
       { href: "/sites", label: "Websites", icon: Globe, desc: "Create & manage sites" },
       { href: "/domains", label: "Domains & DNS", icon: Network, desc: "Zones, records, DNSSEC" },
+      { href: "/cdn", label: "CDN", icon: Cloud, desc: "Cloudflare DNS & cache" },
       { href: "/ssl", label: "SSL / TLS", icon: Lock, desc: "Certificates & HTTPS" },
       { href: "/runtime", label: "Runtime", icon: FileCode2, desc: "PHP, Node & app stack" },
       { href: "/analytics", label: "Analytics", icon: BarChart3, desc: "Per-site traffic" },

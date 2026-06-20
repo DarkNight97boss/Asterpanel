@@ -373,6 +373,16 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("sso.manage", "sso.create", "sso_provider")).Post("/sso/providers", s.handleCreateSSOProvider)
 			r.With(az.Require("sso.manage", "sso.delete", "sso_provider")).Delete("/sso/providers/{providerID}", s.handleDeleteSSOProvider)
 
+			// CDN / Cloudflare integration (DNS records + cache purge).
+			r.With(az.Require("cdn.read", "cloudflare.get", "cloudflare_account")).Get("/cdn/cloudflare", s.handleGetCloudflare)
+			r.With(az.Require("cdn.manage", "cloudflare.connect", "cloudflare_account")).Post("/cdn/cloudflare", s.handleConnectCloudflare)
+			r.With(az.Require("cdn.manage", "cloudflare.disconnect", "cloudflare_account")).Delete("/cdn/cloudflare", s.handleDisconnectCloudflare)
+			r.With(az.Require("cdn.read", "cloudflare.zones", "cloudflare_account")).Get("/cdn/cloudflare/zones", s.handleListCloudflareZones)
+			r.With(az.Require("cdn.read", "cloudflare.dns.list", "cloudflare_account")).Get("/cdn/cloudflare/zones/{zoneID}/dns", s.handleListCloudflareDNS)
+			r.With(az.Require("cdn.manage", "cloudflare.dns.create", "cloudflare_account")).Post("/cdn/cloudflare/zones/{zoneID}/dns", s.handleCreateCloudflareDNS)
+			r.With(az.Require("cdn.manage", "cloudflare.dns.delete", "cloudflare_account")).Delete("/cdn/cloudflare/zones/{zoneID}/dns/{recordID}", s.handleDeleteCloudflareDNS)
+			r.With(az.Require("cdn.manage", "cloudflare.cache.purge", "cloudflare_account")).Post("/cdn/cloudflare/zones/{zoneID}/purge", s.handlePurgeCloudflareCache)
+
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireFeature(licensing.FeatureBilling))
 				r.With(az.Require("billing.read", "billing.invoices.list", "invoice")).Get("/billing/invoices", s.handleListInvoices)
