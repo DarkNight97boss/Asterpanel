@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, LogIn, X } from "lucide-react";
+import { Copy, LogIn, Pencil, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -68,6 +68,22 @@ export default function ResellerPage() {
   const [pkgName, setPkgName] = useState("");
   const [pkgLimits, setPkgLimits] = useState({ max_sites: "", max_mailboxes: "", max_databases: "" });
   const [pkgBusy, setPkgBusy] = useState(false);
+  const [editPkgId, setEditPkgId] = useState<string | null>(null);
+
+  function startEditPackage(pk: MyPackage) {
+    setEditPkgId(pk.id);
+    setPkgName(pk.name);
+    setPkgLimits({
+      max_sites: pk.limits.max_sites ? String(pk.limits.max_sites) : "",
+      max_mailboxes: pk.limits.max_mailboxes ? String(pk.limits.max_mailboxes) : "",
+      max_databases: pk.limits.max_databases ? String(pk.limits.max_databases) : "",
+    });
+  }
+  function cancelEditPackage() {
+    setEditPkgId(null);
+    setPkgName("");
+    setPkgLimits({ max_sites: "", max_mailboxes: "", max_databases: "" });
+  }
 
   async function loadPackages() {
     try {
@@ -88,7 +104,13 @@ export default function ResellerPage() {
         const v = parseInt(pkgLimits[k], 10);
         if (!Number.isNaN(v) && v > 0) limits[k] = v;
       });
-      await apiPost("/api/v1/reseller/packages", { name: pkgName.trim(), limits });
+      const body = { name: pkgName.trim(), limits };
+      if (editPkgId) {
+        await apiPost(`/api/v1/reseller/packages/${editPkgId}`, body);
+        setEditPkgId(null);
+      } else {
+        await apiPost("/api/v1/reseller/packages", body);
+      }
       setPkgName("");
       setPkgLimits({ max_sites: "", max_mailboxes: "", max_databases: "" });
       await loadPackages();
@@ -304,8 +326,13 @@ export default function ResellerPage() {
               <Input id="pkg-db" type="number" min={0} className="w-24" value={pkgLimits.max_databases} onChange={(e) => setPkgLimits({ ...pkgLimits, max_databases: e.target.value })} />
             </div>
             <Button type="submit" disabled={pkgBusy}>
-              {pkgBusy ? "Saving…" : "Add package"}
+              {pkgBusy ? "Saving…" : editPkgId ? "Save" : "Add package"}
             </Button>
+            {editPkgId && (
+              <Button type="button" variant="ghost" size="icon" onClick={cancelEditPackage} aria-label="Cancel">
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </form>
           {myPackages.length > 0 && (
             <ul className="divide-y divide-border/60 rounded-md border border-border/60">
@@ -321,6 +348,15 @@ export default function ResellerPage() {
                     variant="ghost"
                     size="icon"
                     className="ml-auto h-7 w-7"
+                    onClick={() => startEditPackage(pk)}
+                    aria-label="Edit package"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => deletePackage(pk.id)}
                     aria-label="Delete package"
                   >

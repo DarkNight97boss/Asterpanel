@@ -100,6 +100,17 @@ func (s *Store) DeletePlanOwnedBy(ctx context.Context, id, ownerOrgID uuid.UUID)
 	return nil
 }
 
+// UpdatePlanOwnedBy edits the name and limits of a reseller-owned package, scoped
+// to the owner (ErrNotFound if it isn't the reseller's own).
+func (s *Store) UpdatePlanOwnedBy(ctx context.Context, id, ownerOrgID uuid.UUID, name string, limits map[string]int) (*BillingPlan, error) {
+	raw, _ := json.Marshal(limits)
+	return scanPlan(s.pool.QueryRow(ctx, `
+		UPDATE billing_plans SET name = $3, limits = $4::jsonb
+		WHERE id = $1 AND owner_org_id = $2
+		RETURNING `+planColumns,
+		id, ownerOrgID, name, string(raw)))
+}
+
 // SetOrgPlan assigns (or clears, when planID is invalid) an org's billing plan.
 func (s *Store) SetOrgPlan(ctx context.Context, orgID uuid.UUID, planID uuid.NullUUID) error {
 	_, err := s.pool.Exec(ctx, `UPDATE organizations SET billing_plan_id = $2 WHERE id = $1`, orgID, planID)

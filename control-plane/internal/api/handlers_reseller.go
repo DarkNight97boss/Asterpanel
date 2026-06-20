@@ -308,6 +308,21 @@ type resellerPackageRequest struct {
 	Limits map[string]int `json:"limits"`
 }
 
+// packageExceedsOwnPlan reports whether any limit in a reseller package exceeds
+// the reseller's own plan — you can't template more capacity than you have.
+func (s *Server) packageExceedsOwnPlan(ctx context.Context, orgID uuid.UUID, limits map[string]int) (over bool, resource string, cap int) {
+	_, own, err := s.deps.Store.GetOrgPlanLimits(ctx, orgID)
+	if err != nil || len(own) == 0 {
+		return false, "", 0
+	}
+	for k, v := range limits {
+		if c := own[k]; c > 0 && v > c {
+			return true, strings.TrimPrefix(k, "max_"), c
+		}
+	}
+	return false, "", 0
+}
+
 // handleListResellerPackages lists the packages a reseller has defined for its
 // own customers (its private plan templates).
 func (s *Server) handleListResellerPackages(w http.ResponseWriter, r *http.Request) {
@@ -336,15 +351,10 @@ func (s *Server) handleCreateResellerPackage(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	limits := sanitizeLimits(req.Limits)
-	if _, own, err := s.deps.Store.GetOrgPlanLimits(ctx, p.OrgID); err == nil && len(own) > 0 {
-		for k, v := range limits {
-			if cap := own[k]; cap > 0 && v > cap {
-				httpx.ErrorWithDetails(w, http.StatusForbidden, "over_budget",
-					"a package limit can't exceed your own plan",
-					map[string]any{"resource": strings.TrimPrefix(k, "max_"), "limit": cap, "requested": v})
-				return
-			}
-		}
+	if over, res, cap := s.packageExceedsOwnPlan(ctx, p.OrgID, limits); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "over_budget",
+			"a package limit can't exceed your own plan", map[string]any{"resource": res, "limit": cap})
+		return
 	}
 	suffix, err := crypto.RandomHex(5)
 	if err != nil {
@@ -361,6 +371,38 @@ func (s *Server) handleCreateResellerPackage(w http.ResponseWriter, r *http.Requ
 	s.audit(ctx, &org, &p.UserID, "reseller.package.create", "billing_plan", plan.ID.String(), audit.OutcomeSuccess, r,
 		map[string]any{"name": plan.Name})
 	httpx.JSON(w, http.StatusCreated, map[string]any{"package": planView(*plan)})
+}
+
+// handleUpdateResellerPackage edits one of the reseller's own packages (name +
+// limits), re-checking the per-key budget cap.
+func (s *Server) handleUpdateResellerPackage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "planID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid package id")
+		return
+	}
+	var req resellerPackageRequest
+	if derr := httpx.Decode(w, r, &req); derr != nil || strings.TrimSpace(req.Name) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a package name is required")
+		return
+	}
+	limits := sanitizeLimits(req.Limits)
+	if over, res, cap := s.packageExceedsOwnPlan(ctx, p.OrgID, limits); over {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "over_budget",
+			"a package limit can't exceed your own plan", map[string]any{"resource": res, "limit": cap})
+		return
+	}
+	plan, err := s.deps.Store.UpdatePlanOwnedBy(ctx, id, p.OrgID, strings.TrimSpace(req.Name), limits)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "package not found")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.package.update", "billing_plan", id.String(), audit.OutcomeSuccess, r,
+		map[string]any{"name": plan.Name})
+	httpx.JSON(w, http.StatusOK, map[string]any{"package": planView(*plan)})
 }
 
 // handleDeleteResellerPackage removes one of the reseller's own packages.
