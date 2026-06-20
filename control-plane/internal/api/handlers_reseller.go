@@ -302,3 +302,81 @@ func (s *Server) handleResellerBudget(w http.ResponseWriter, r *http.Request) {
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"budget": out})
 }
+
+type resellerPackageRequest struct {
+	Name   string         `json:"name"`
+	Limits map[string]int `json:"limits"`
+}
+
+// handleListResellerPackages lists the packages a reseller has defined for its
+// own customers (its private plan templates).
+func (s *Server) handleListResellerPackages(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	plans, err := s.deps.Store.ListPlansOwnedBy(ctx, p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list packages")
+		return
+	}
+	views := make([]map[string]any, 0, len(plans))
+	for _, pl := range plans {
+		views = append(views, planView(pl))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"packages": views})
+}
+
+// handleCreateResellerPackage defines a reseller-owned package. No single limit
+// may exceed the reseller's OWN plan — you can't template more than you have.
+func (s *Server) handleCreateResellerPackage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	var req resellerPackageRequest
+	if err := httpx.Decode(w, r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a package name is required")
+		return
+	}
+	limits := sanitizeLimits(req.Limits)
+	if _, own, err := s.deps.Store.GetOrgPlanLimits(ctx, p.OrgID); err == nil && len(own) > 0 {
+		for k, v := range limits {
+			if cap := own[k]; cap > 0 && v > cap {
+				httpx.ErrorWithDetails(w, http.StatusForbidden, "over_budget",
+					"a package limit can't exceed your own plan",
+					map[string]any{"resource": strings.TrimPrefix(k, "max_"), "limit": cap, "requested": v})
+				return
+			}
+		}
+	}
+	suffix, err := crypto.RandomHex(5)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not generate code")
+		return
+	}
+	plan, err := s.deps.Store.CreatePlan(ctx, "pkg-"+suffix, strings.TrimSpace(req.Name), nil, 0, "EUR", "month",
+		limits, uuid.NullUUID{UUID: p.OrgID, Valid: true})
+	if err != nil {
+		httpx.Error(w, http.StatusConflict, "create_failed", "could not create package")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.package.create", "billing_plan", plan.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"name": plan.Name})
+	httpx.JSON(w, http.StatusCreated, map[string]any{"package": planView(*plan)})
+}
+
+// handleDeleteResellerPackage removes one of the reseller's own packages.
+func (s *Server) handleDeleteResellerPackage(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "planID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid package id")
+		return
+	}
+	if err := s.deps.Store.DeletePlanOwnedBy(ctx, id, p.OrgID); err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "package not found")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.package.delete", "billing_plan", id.String(), audit.OutcomeSuccess, r, nil)
+	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true})
+}

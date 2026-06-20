@@ -492,6 +492,7 @@ type BillingPlan struct {
 	Limits      map[string]int
 	IsActive    bool
 	CreatedAt   time.Time
+	OwnerOrgID  uuid.NullUUID // NULL = platform plan; set = reseller-owned
 }
 
 type Application struct {

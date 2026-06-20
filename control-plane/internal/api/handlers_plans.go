@@ -20,6 +20,7 @@ import (
 var planLimitKeys = map[string]bool{
 	"max_sites": true, "max_apps": true, "max_domains": true,
 	"max_databases": true, "max_mailboxes": true, "max_nodes": true,
+	"max_accounts": true, // reseller sub-account cap (enforced in handleCreateSubAccount)
 }
 
 func sanitizeLimits(in map[string]int) map[string]int {
@@ -111,7 +112,7 @@ func (s *Server) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		req.PriceCents = 0
 	}
 	desc := strings.TrimSpace(req.Description)
-	plan, err := s.deps.Store.CreatePlan(ctx, req.Code, req.Name, &desc, req.PriceCents, currency, interval, sanitizeLimits(req.Limits))
+	plan, err := s.deps.Store.CreatePlan(ctx, req.Code, req.Name, &desc, req.PriceCents, currency, interval, sanitizeLimits(req.Limits), uuid.NullUUID{})
 	if err != nil {
 		httpx.Error(w, http.StatusConflict, "create_failed", "could not create plan (code may already exist)")
 		return

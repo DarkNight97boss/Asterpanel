@@ -417,6 +417,9 @@ func (s *Server) routes() http.Handler {
 				r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
 				r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
 				r.With(az.Require("reseller.manage", "reseller.plan", "organization")).Post("/reseller/accounts/{accountID}/plan", s.handleAssignSubAccountPlan)
+				r.With(az.Require("reseller.read", "reseller.package.list", "billing")).Get("/reseller/packages", s.handleListResellerPackages)
+				r.With(az.Require("reseller.manage", "reseller.package.create", "billing")).Post("/reseller/packages", s.handleCreateResellerPackage)
+				r.With(az.Require("reseller.manage", "reseller.package.delete", "billing")).Delete("/reseller/packages/{planID}", s.handleDeleteResellerPackage)
 			})
 
 			// White-label branding — reading is free (the panel still themes);

@@ -7,13 +7,13 @@ import (
 	"github.com/google/uuid"
 )
 
-const planColumns = `id, code, name, description, price_cents, currency, interval, limits, is_active, created_at`
+const planColumns = `id, code, name, description, price_cents, currency, interval, limits, is_active, created_at, owner_org_id`
 
 func scanPlan(row rowScanner) (*BillingPlan, error) {
 	var p BillingPlan
 	var raw []byte
 	if err := row.Scan(&p.ID, &p.Code, &p.Name, &p.Description, &p.PriceCents, &p.Currency,
-		&p.Interval, &raw, &p.IsActive, &p.CreatedAt); err != nil {
+		&p.Interval, &raw, &p.IsActive, &p.CreatedAt, &p.OwnerOrgID); err != nil {
 		return nil, norows(err)
 	}
 	p.Limits = map[string]int{}
@@ -21,9 +21,22 @@ func scanPlan(row rowScanner) (*BillingPlan, error) {
 	return &p, nil
 }
 
-// ListPlans returns every hosting package (active and inactive), cheapest first.
+// ListPlans returns the PLATFORM hosting packages (operator-managed, not owned
+// by any reseller), active and inactive, cheapest first.
 func (s *Store) ListPlans(ctx context.Context) ([]BillingPlan, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+planColumns+` FROM billing_plans ORDER BY price_cents, code`)
+	return s.scanPlanRows(ctx, `SELECT `+planColumns+` FROM billing_plans
+		WHERE owner_org_id IS NULL ORDER BY price_cents, code`)
+}
+
+// ListPlansOwnedBy returns the packages a reseller has defined for its own
+// customers (owner_org_id = the reseller).
+func (s *Store) ListPlansOwnedBy(ctx context.Context, ownerOrgID uuid.UUID) ([]BillingPlan, error) {
+	return s.scanPlanRows(ctx, `SELECT `+planColumns+` FROM billing_plans
+		WHERE owner_org_id = $1 ORDER BY price_cents, code`, ownerOrgID)
+}
+
+func (s *Store) scanPlanRows(ctx context.Context, q string, args ...any) ([]BillingPlan, error) {
+	rows, err := s.pool.Query(ctx, q, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -43,13 +56,15 @@ func (s *Store) GetPlan(ctx context.Context, id uuid.UUID) (*BillingPlan, error)
 	return scanPlan(s.pool.QueryRow(ctx, `SELECT `+planColumns+` FROM billing_plans WHERE id = $1`, id))
 }
 
-func (s *Store) CreatePlan(ctx context.Context, code, name string, desc *string, priceCents int, currency, interval string, limits map[string]int) (*BillingPlan, error) {
+// CreatePlan inserts a hosting package. A NULL owner is a platform plan; a set
+// owner makes it a reseller-owned template.
+func (s *Store) CreatePlan(ctx context.Context, code, name string, desc *string, priceCents int, currency, interval string, limits map[string]int, owner uuid.NullUUID) (*BillingPlan, error) {
 	raw, _ := json.Marshal(limits)
 	return scanPlan(s.pool.QueryRow(ctx, `
-		INSERT INTO billing_plans (code, name, description, price_cents, currency, interval, limits)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO billing_plans (code, name, description, price_cents, currency, interval, limits, owner_org_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING `+planColumns,
-		code, name, desc, priceCents, currency, interval, string(raw)))
+		code, name, desc, priceCents, currency, interval, string(raw), owner))
 }
 
 // UpdatePlan patches a plan. nil arguments leave the field unchanged; limitsJSON
@@ -70,6 +85,19 @@ func (s *Store) UpdatePlan(ctx context.Context, id uuid.UUID, name, desc *string
 func (s *Store) DeletePlan(ctx context.Context, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM billing_plans WHERE id = $1`, id)
 	return err
+}
+
+// DeletePlanOwnedBy deletes a plan only if it belongs to the given reseller, so
+// a reseller can never remove a platform plan or another reseller's template.
+func (s *Store) DeletePlanOwnedBy(ctx context.Context, id, ownerOrgID uuid.UUID) error {
+	tag, err := s.pool.Exec(ctx, `DELETE FROM billing_plans WHERE id = $1 AND owner_org_id = $2`, id, ownerOrgID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
 }
 
 // SetOrgPlan assigns (or clears, when planID is invalid) an org's billing plan.

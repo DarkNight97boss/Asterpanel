@@ -9,7 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { Feature, ProGate } from "@/lib/license";
 import { PageHeader } from "@/components/page-header";
@@ -38,6 +38,13 @@ interface BudgetRow {
   limit: number;
 }
 
+interface MyPackage {
+  id: string;
+  code: string;
+  name: string;
+  limits: Record<string, number>;
+}
+
 const statusBadge: Record<string, string> = {
   active: "bg-emerald-500/15 text-emerald-600",
   suspended: "bg-amber-500/15 text-amber-600",
@@ -57,6 +64,50 @@ export default function ResellerPage() {
   const [created, setCreated] = useState<Created | null>(null);
   const [budget, setBudget] = useState<BudgetRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [myPackages, setMyPackages] = useState<MyPackage[]>([]);
+  const [pkgName, setPkgName] = useState("");
+  const [pkgLimits, setPkgLimits] = useState({ max_sites: "", max_mailboxes: "", max_databases: "" });
+  const [pkgBusy, setPkgBusy] = useState(false);
+
+  async function loadPackages() {
+    try {
+      const { packages } = await apiGet<{ packages: MyPackage[] }>("/api/v1/reseller/packages");
+      setMyPackages(packages ?? []);
+    } catch {
+      setMyPackages([]);
+    }
+  }
+
+  async function createPackage(e: FormEvent) {
+    e.preventDefault();
+    setPkgBusy(true);
+    setError(null);
+    try {
+      const limits: Record<string, number> = {};
+      (["max_sites", "max_mailboxes", "max_databases"] as const).forEach((k) => {
+        const v = parseInt(pkgLimits[k], 10);
+        if (!Number.isNaN(v) && v > 0) limits[k] = v;
+      });
+      await apiPost("/api/v1/reseller/packages", { name: pkgName.trim(), limits });
+      setPkgName("");
+      setPkgLimits({ max_sites: "", max_mailboxes: "", max_databases: "" });
+      await loadPackages();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create package");
+    } finally {
+      setPkgBusy(false);
+    }
+  }
+
+  async function deletePackage(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/reseller/packages/${id}`);
+      await loadPackages();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete package");
+    }
+  }
 
   async function load() {
     try {
@@ -74,10 +125,17 @@ export default function ResellerPage() {
   }
   useEffect(() => {
     load();
+    loadPackages();
     apiGet<{ plans: { code: string; name: string; is_active: boolean }[] }>("/api/v1/plans")
       .then((r) => setPlans((r.plans ?? []).filter((p) => p.is_active)))
       .catch(() => setPlans([]));
   }, []);
+
+  // Platform plans + the reseller's own packages, both assignable to customers.
+  const allPlans = [
+    ...plans.map((p) => ({ code: p.code, name: p.name })),
+    ...myPackages.map((p) => ({ code: p.code, name: `${p.name} (yours)` })),
+  ];
 
   async function assignPlan(id: string, planCode: string) {
     setError(null);
@@ -222,6 +280,61 @@ export default function ResellerPage() {
 
       <Card>
         <CardHeader>
+          <CardTitle className="text-base">My packages ({myPackages.length})</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Plan templates you offer to your own customers. No limit may exceed your own plan.
+          </p>
+          <form onSubmit={createPackage} className="flex flex-wrap items-end gap-3">
+            <div className="grow space-y-1">
+              <Label htmlFor="pkg-name">Name</Label>
+              <Input id="pkg-name" value={pkgName} onChange={(e) => setPkgName(e.target.value)} required />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pkg-sites">Sites</Label>
+              <Input id="pkg-sites" type="number" min={0} className="w-24" value={pkgLimits.max_sites} onChange={(e) => setPkgLimits({ ...pkgLimits, max_sites: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pkg-mb">Mailboxes</Label>
+              <Input id="pkg-mb" type="number" min={0} className="w-24" value={pkgLimits.max_mailboxes} onChange={(e) => setPkgLimits({ ...pkgLimits, max_mailboxes: e.target.value })} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="pkg-db">Databases</Label>
+              <Input id="pkg-db" type="number" min={0} className="w-24" value={pkgLimits.max_databases} onChange={(e) => setPkgLimits({ ...pkgLimits, max_databases: e.target.value })} />
+            </div>
+            <Button type="submit" disabled={pkgBusy}>
+              {pkgBusy ? "Saving…" : "Add package"}
+            </Button>
+          </form>
+          {myPackages.length > 0 && (
+            <ul className="divide-y divide-border/60 rounded-md border border-border/60">
+              {myPackages.map((pk) => (
+                <li key={pk.id} className="flex items-center gap-3 px-4 py-2 text-sm">
+                  <span className="font-medium">{pk.name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {Object.entries(pk.limits)
+                      .map(([k, v]) => `${k.replace("max_", "")} ${v}`)
+                      .join(" · ") || "unlimited"}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="ml-auto h-7 w-7"
+                    onClick={() => deletePackage(pk.id)}
+                    aria-label="Delete package"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
           <CardTitle className="text-base">New sub-account</CardTitle>
         </CardHeader>
         <CardContent>
@@ -251,7 +364,7 @@ export default function ResellerPage() {
                 <option value="" className="bg-card">
                   — none —
                 </option>
-                {plans.map((p) => (
+                {allPlans.map((p) => (
                   <option key={p.code} value={p.code} className="bg-card">
                     {p.name}
                   </option>
@@ -297,13 +410,13 @@ export default function ResellerPage() {
                       <option value="" className="bg-card">
                         — none —
                       </option>
-                      {plans.map((p) => (
+                      {allPlans.map((p) => (
                         <option key={p.code} value={p.code} className="bg-card">
                           {p.name}
                         </option>
                       ))}
                       {/* keep an unknown/inactive current plan visible */}
-                      {a.plan_code && !plans.some((p) => p.code === a.plan_code) && (
+                      {a.plan_code && !allPlans.some((p) => p.code === a.plan_code) && (
                         <option value={a.plan_code} className="bg-card">
                           {a.plan_code}
                         </option>
