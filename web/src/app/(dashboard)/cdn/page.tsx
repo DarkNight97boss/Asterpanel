@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Cloud, Plus, RefreshCw, Trash2, Unplug } from "lucide-react";
+import { Cloud, Pencil, Plus, RefreshCw, Trash2, Unplug, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,6 +49,7 @@ export default function CDNPage() {
   const [recName, setRecName] = useState("");
   const [recContent, setRecContent] = useState("");
   const [recProxied, setRecProxied] = useState(true);
+  const [editRecId, setEditRecId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
 
   async function loadStatus() {
@@ -123,23 +124,43 @@ export default function CDNPage() {
     await loadRecords(zid);
   }
 
+  function startEditRecord(rec: DNSRecord) {
+    setEditRecId(rec.id);
+    setRecType(rec.type);
+    setRecName(rec.name);
+    setRecContent(rec.content);
+    setRecProxied(rec.proxied);
+  }
+  function cancelEditRecord() {
+    setEditRecId(null);
+    setRecName("");
+    setRecContent("");
+    setRecProxied(true);
+  }
+
   async function addRecord(e: FormEvent) {
     e.preventDefault();
     if (!zoneId) return;
     setAdding(true);
     setError(null);
     try {
-      await apiPost(`/api/v1/cdn/cloudflare/zones/${zoneId}/dns`, {
+      const payload = {
         type: recType,
         name: recName.trim(),
         content: recContent.trim(),
         proxied: recProxied,
-      });
+      };
+      if (editRecId) {
+        await apiPost(`/api/v1/cdn/cloudflare/zones/${zoneId}/dns/${editRecId}`, payload);
+        setEditRecId(null);
+      } else {
+        await apiPost(`/api/v1/cdn/cloudflare/zones/${zoneId}/dns`, payload);
+      }
       setRecName("");
       setRecContent("");
       await loadRecords(zoneId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add record");
+      setError(e instanceof Error ? e.message : "Could not save record");
     } finally {
       setAdding(false);
     }
@@ -293,8 +314,13 @@ export default function CDNPage() {
                 </label>
                 <Button type="submit" disabled={adding || !zoneId}>
                   <Plus className="h-4 w-4" />
-                  {adding ? "Adding…" : "Add"}
+                  {adding ? "Saving…" : editRecId ? "Save" : "Add"}
                 </Button>
+                {editRecId && (
+                  <Button type="button" variant="ghost" size="icon" onClick={cancelEditRecord} aria-label="Cancel">
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
               </form>
 
               <table className="w-full text-sm">
@@ -309,7 +335,7 @@ export default function CDNPage() {
                 </thead>
                 <tbody>
                   {records.map((rec) => (
-                    <tr key={rec.id} className="border-b border-border/60 last:border-0">
+                    <tr key={rec.id} className={`border-b border-border/60 last:border-0 ${editRecId === rec.id ? "bg-muted/60" : ""}`}>
                       <td className="px-3 py-2 font-mono text-xs">{rec.type}</td>
                       <td className="px-3 py-2 font-mono text-xs">{rec.name}</td>
                       <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{rec.content}</td>
@@ -321,6 +347,9 @@ export default function CDNPage() {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right">
+                        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditRecord(rec)} aria-label="Edit record">
+                          <Pencil className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => deleteRecord(rec.id)} aria-label="Delete record">
                           <Trash2 className="h-4 w-4" />
                         </Button>

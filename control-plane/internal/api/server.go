@@ -389,6 +389,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("cdn.read", "cloudflare.zones", "cloudflare_account")).Get("/cdn/cloudflare/zones", s.handleListCloudflareZones)
 			r.With(az.Require("cdn.read", "cloudflare.dns.list", "cloudflare_account")).Get("/cdn/cloudflare/zones/{zoneID}/dns", s.handleListCloudflareDNS)
 			r.With(az.Require("cdn.manage", "cloudflare.dns.create", "cloudflare_account")).Post("/cdn/cloudflare/zones/{zoneID}/dns", s.handleCreateCloudflareDNS)
+			r.With(az.Require("cdn.manage", "cloudflare.dns.update", "cloudflare_account")).Post("/cdn/cloudflare/zones/{zoneID}/dns/{recordID}", s.handleUpdateCloudflareDNS)
 			r.With(az.Require("cdn.manage", "cloudflare.dns.delete", "cloudflare_account")).Delete("/cdn/cloudflare/zones/{zoneID}/dns/{recordID}", s.handleDeleteCloudflareDNS)
 			r.With(az.Require("cdn.manage", "cloudflare.cache.purge", "cloudflare_account")).Post("/cdn/cloudflare/zones/{zoneID}/purge", s.handlePurgeCloudflareCache)
 

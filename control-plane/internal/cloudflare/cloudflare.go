@@ -145,6 +145,18 @@ func (c *Client) CreateDNSRecord(ctx context.Context, zoneID string, rec DNSReco
 	return &out, nil
 }
 
+func (c *Client) UpdateDNSRecord(ctx context.Context, zoneID, recordID string, rec DNSRecord) (*DNSRecord, error) {
+	if rec.TTL == 0 {
+		rec.TTL = 1 // 1 = "automatic" in Cloudflare
+	}
+	var out DNSRecord
+	if err := c.do(ctx, http.MethodPut,
+		"/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), rec, &out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 func (c *Client) DeleteDNSRecord(ctx context.Context, zoneID, recordID string) error {
 	return c.do(ctx, http.MethodDelete,
 		"/zones/"+url.PathEscape(zoneID)+"/dns_records/"+url.PathEscape(recordID), nil, nil)

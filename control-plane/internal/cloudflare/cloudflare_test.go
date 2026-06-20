@@ -73,6 +73,14 @@ func TestCreateRecordAndPurge(t *testing.T) {
 				t.Errorf("purge body missing purge_everything: %s", body)
 			}
 			io.WriteString(w, wrap(map[string]any{"id": "z1"}))
+		case r.Method == http.MethodPut && r.URL.Path == "/zones/z1/dns_records/rec1":
+			var rec DNSRecord
+			json.Unmarshal(body, &rec)
+			if rec.Content != "203.0.113.9" {
+				t.Errorf("unexpected update body: %s", body)
+			}
+			rec.ID = "rec1"
+			io.WriteString(w, wrap(rec))
 		case r.Method == http.MethodDelete && r.URL.Path == "/zones/z1/dns_records/rec1":
 			io.WriteString(w, wrap(map[string]any{"id": "rec1"}))
 		default:
@@ -83,6 +91,10 @@ func TestCreateRecordAndPurge(t *testing.T) {
 	rec, err := c.CreateDNSRecord(context.Background(), "z1", DNSRecord{Type: "A", Name: "www.acme.com", Content: "203.0.113.5", Proxied: true})
 	if err != nil || rec.ID != "rec1" {
 		t.Fatalf("create: %v %+v", err, rec)
+	}
+	upd, err := c.UpdateDNSRecord(context.Background(), "z1", "rec1", DNSRecord{Type: "A", Name: "www.acme.com", Content: "203.0.113.9", Proxied: false})
+	if err != nil || upd.ID != "rec1" {
+		t.Fatalf("update: %v %+v", err, upd)
 	}
 	if err := c.PurgeCache(context.Background(), "z1"); err != nil {
 		t.Fatalf("purge: %v", err)

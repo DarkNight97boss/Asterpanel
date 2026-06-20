@@ -197,6 +197,37 @@ func (s *Server) handleCreateCloudflareDNS(w http.ResponseWriter, r *http.Reques
 	httpx.JSON(w, http.StatusCreated, map[string]any{"record": rec})
 }
 
+func (s *Server) handleUpdateCloudflareDNS(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	var req createCloudflareDNSRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	req.Type = strings.ToUpper(strings.TrimSpace(req.Type))
+	if !validCFRecordTypes[req.Type] || strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Content) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "type, name and content are required")
+		return
+	}
+	cf, err := s.cloudflareClient(ctx, p.OrgID)
+	if err != nil {
+		cloudflareError(w, err)
+		return
+	}
+	rec, err := cf.UpdateDNSRecord(ctx, chi.URLParam(r, "zoneID"), chi.URLParam(r, "recordID"), cloudflare.DNSRecord{
+		Type: req.Type, Name: strings.TrimSpace(req.Name), Content: strings.TrimSpace(req.Content), Proxied: req.Proxied,
+	})
+	if err != nil {
+		cloudflareError(w, err)
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "cloudflare.dns.update", "cloudflare_account", chi.URLParam(r, "recordID"), audit.OutcomeSuccess, r,
+		map[string]any{"type": rec.Type, "name": rec.Name})
+	httpx.JSON(w, http.StatusOK, map[string]any{"record": rec})
+}
+
 func (s *Server) handleDeleteCloudflareDNS(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
