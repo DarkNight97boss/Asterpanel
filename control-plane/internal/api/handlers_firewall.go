@@ -70,6 +70,38 @@ func (s *Server) handleCreateFirewall(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleUpdateFirewall(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "ruleID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req createFirewallRequest
+	if err := httpx.Decode(w, r, &req); err != nil || (req.Action != "allow" && req.Action != "deny") || strings.TrimSpace(req.Source) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "action (allow|deny) and source are required")
+		return
+	}
+	var note *string
+	if strings.TrimSpace(req.Note) != "" {
+		note = &req.Note
+	}
+	rule, err := s.deps.Store.UpdateFirewallRule(ctx, p.OrgID, id, req.Action, req.Source, req.Port, note)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "rule not found")
+		return
+	}
+	jobID, dispatched := s.applyFirewall(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "firewall.update", "firewall_rule", rule.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"action": req.Action, "source": req.Source, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"rule":     firewallView(*rule),
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteFirewall(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

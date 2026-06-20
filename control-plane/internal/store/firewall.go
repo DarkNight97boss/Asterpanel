@@ -37,6 +37,17 @@ func (s *Store) ListFirewallRules(ctx context.Context, orgID uuid.UUID) ([]Firew
 	return out, rows.Err()
 }
 
+func (s *Store) UpdateFirewallRule(ctx context.Context, orgID, id uuid.UUID, action, source, port string, note *string) (*FirewallRule, error) {
+	if port == "" {
+		port = "*"
+	}
+	const q = `
+		UPDATE firewall_rules SET action = $3, source = $4, port = $5, note = $6
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, action, source, port, note, created_at`
+	return scanFirewall(s.pool.QueryRow(ctx, q, id, orgID, action, source, port, note))
+}
+
 func (s *Store) DeleteFirewallRule(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM firewall_rules WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

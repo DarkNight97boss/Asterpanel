@@ -1,13 +1,14 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import { Pencil, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
-import { apiGet, apiPost } from "@/lib/api";
+import { apiDelete, apiGet, apiPost } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
 
 interface Rule {
@@ -25,6 +26,7 @@ export default function FirewallPage() {
   const [port, setPort] = useState("*");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -39,19 +41,51 @@ export default function FirewallPage() {
     refresh();
   }, []);
 
+  function startEdit(r: Rule) {
+    setEditId(r.id);
+    setAction(r.action);
+    setSource(r.source);
+    setPort(r.port);
+    setNote(r.note || "");
+  }
+  function cancelEdit() {
+    setEditId(null);
+    setAction("deny");
+    setSource("");
+    setPort("*");
+    setNote("");
+  }
+
   async function onAdd(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await apiPost("/api/v1/firewall", { action, source, port, note });
+      if (editId) {
+        await apiPost(`/api/v1/firewall/${editId}`, { action, source, port, note });
+        setEditId(null);
+      } else {
+        await apiPost("/api/v1/firewall", { action, source, port, note });
+      }
       setSource("");
       setNote("");
+      setPort("*");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function onDelete(id: string) {
+    setError(null);
+    try {
+      await apiDelete(`/api/v1/firewall/${id}`);
+      if (editId === id) cancelEdit();
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete rule");
     }
   }
 
@@ -63,7 +97,7 @@ export default function FirewallPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">New rule</CardTitle>
+          <CardTitle className="text-base">{editId ? "Edit rule" : "New rule"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onAdd} className="grid gap-4 sm:grid-cols-6 sm:items-end">
@@ -91,9 +125,16 @@ export default function FirewallPage() {
               <Label htmlFor="note">Note</Label>
               <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
-            <Button type="submit" disabled={busy}>
-              {busy ? "Adding…" : "Add"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="submit" disabled={busy}>
+                {busy ? "Saving…" : editId ? "Save" : "Add"}
+              </Button>
+              {editId && (
+                <Button type="button" variant="ghost" size="icon" onClick={cancelEdit} aria-label="Cancel">
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -110,11 +151,12 @@ export default function FirewallPage() {
                 <th className="px-6 py-3 font-medium">Source</th>
                 <th className="px-6 py-3 font-medium">Port</th>
                 <th className="px-6 py-3 font-medium">Note</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
               {rules.map((r) => (
-                <tr key={r.id} className="border-b border-border/60 last:border-0">
+                <tr key={r.id} className={cn("border-b border-border/60 last:border-0", editId === r.id && "bg-muted/60")}>
                   <td className="px-6 py-3">
                     <span
                       className={cn(
@@ -140,6 +182,14 @@ export default function FirewallPage() {
                     ) : (
                       r.note
                     )}
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(r)} aria-label="Edit rule">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onDelete(r.id)} aria-label="Delete rule">
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </td>
                 </tr>
               ))}

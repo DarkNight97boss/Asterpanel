@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Trash2 } from "lucide-react";
+import { Pencil, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +35,7 @@ export default function WafPage() {
   const [pattern, setPattern] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function refresh() {
@@ -49,17 +50,35 @@ export default function WafPage() {
     refresh();
   }, []);
 
+  function startEdit(r: Rule) {
+    setEditId(r.id);
+    setMatchType(r.match_type);
+    setPattern(r.pattern);
+    setNote(r.note || "");
+  }
+  function cancelEdit() {
+    setEditId(null);
+    setMatchType("path");
+    setPattern("");
+    setNote("");
+  }
+
   async function create(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      await apiPost("/api/v1/waf", { match_type: matchType, pattern, note });
+      if (editId) {
+        await apiPost(`/api/v1/waf/${editId}`, { match_type: matchType, pattern, note });
+        setEditId(null);
+      } else {
+        await apiPost("/api/v1/waf", { match_type: matchType, pattern, note });
+      }
       setPattern("");
       setNote("");
       await refresh();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add rule");
+      setError(err instanceof Error ? err.message : "Failed to save rule");
     } finally {
       setBusy(false);
     }
@@ -91,7 +110,7 @@ export default function WafPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">New rule</CardTitle>
+          <CardTitle className="text-base">{editId ? "Edit rule" : "New rule"}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <form onSubmit={create} className="flex flex-wrap items-end gap-3">
@@ -123,8 +142,13 @@ export default function WafPage() {
               <Input id="note" value={note} onChange={(e) => setNote(e.target.value)} />
             </div>
             <Button type="submit" disabled={busy}>
-              Block
+              {busy ? "Saving…" : editId ? "Save" : "Block"}
             </Button>
+            {editId && (
+              <Button type="button" variant="ghost" size="icon" onClick={cancelEdit} aria-label="Cancel">
+                <X className="h-4 w-4" />
+              </Button>
+            )}
           </form>
           <div className="flex flex-wrap gap-2">
             {PRESETS.map((p) => (
@@ -171,11 +195,18 @@ export default function WafPage() {
                   <td className="px-6 py-3 text-muted-foreground">{r.note}</td>
                   <td className="px-6 py-3 text-right">
                     <button
+                      className="mr-3 text-muted-foreground hover:text-foreground"
+                      onClick={() => startEdit(r)}
+                      aria-label="Edit rule"
+                    >
+                      <Pencil className="inline h-4 w-4" />
+                    </button>
+                    <button
                       className="text-muted-foreground hover:text-red-600"
                       onClick={() => remove(r.id)}
                       aria-label="Delete rule"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="inline h-4 w-4" />
                     </button>
                   </td>
                 </tr>

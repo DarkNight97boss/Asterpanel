@@ -71,6 +71,38 @@ func (s *Server) handleCreateWaf(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleUpdateWaf(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "ruleID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req createWafRequest
+	if err := httpx.Decode(w, r, &req); err != nil || !validWafMatch[req.MatchType] || strings.TrimSpace(req.Pattern) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "match_type (path|user_agent|ip) and pattern are required")
+		return
+	}
+	var note *string
+	if strings.TrimSpace(req.Note) != "" {
+		note = &req.Note
+	}
+	rule, err := s.deps.Store.UpdateWafRule(ctx, p.OrgID, id, req.MatchType, req.Pattern, note)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "rule not found")
+		return
+	}
+	jobID, dispatched := s.applyWaf(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "waf.update", "waf_rule", rule.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"match_type": req.MatchType, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"rule":     wafView(*rule),
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteWaf(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

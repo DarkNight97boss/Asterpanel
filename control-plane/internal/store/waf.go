@@ -34,6 +34,14 @@ func (s *Store) ListWafRules(ctx context.Context, orgID uuid.UUID) ([]WafRule, e
 	return out, rows.Err()
 }
 
+func (s *Store) UpdateWafRule(ctx context.Context, orgID, id uuid.UUID, matchType, pattern string, note *string) (*WafRule, error) {
+	const q = `
+		UPDATE waf_rules SET match_type = $3, pattern = $4, note = $5
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, match_type, pattern, note, created_at`
+	return scanWaf(s.pool.QueryRow(ctx, q, id, orgID, matchType, pattern, note))
+}
+
 func (s *Store) DeleteWafRule(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM waf_rules WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err
