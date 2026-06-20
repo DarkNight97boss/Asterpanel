@@ -446,6 +446,20 @@ type EnvVar struct {
 	CreatedAt      time.Time
 }
 
+type SSOProvider struct {
+	ID                uuid.UUID
+	OrganizationID    uuid.UUID
+	Name              string
+	Issuer            string
+	ClientID          string
+	ClientSecretCT    []byte
+	ClientSecretNonce []byte
+	ClientSecretKeyID string
+	AllowedDomains    string
+	Enabled           bool
+	CreatedAt         time.Time
+}
+
 type BillingPlan struct {
 	ID          uuid.UUID
 	Code        string

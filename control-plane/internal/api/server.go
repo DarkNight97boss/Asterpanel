@@ -99,6 +99,10 @@ func (s *Server) routes() http.Handler {
 			// Passkey (WebAuthn) login ceremony — public, rate-limited.
 			r.Post("/auth/webauthn/login/begin", s.handleWebAuthnLoginBegin)
 			r.Post("/auth/webauthn/login/finish", s.handleWebAuthnLoginFinish)
+			// SSO (OIDC) login ceremony — public; state/nonce/PKCE guard the flow.
+			r.Get("/auth/sso/providers", s.handlePublicSSOProviders)
+			r.Get("/auth/sso/{providerID}/start", s.handleSSOStart)
+			r.Get("/auth/sso/{providerID}/callback", s.handleSSOCallback)
 			r.With(middleware.CSRF).Post("/auth/refresh", s.handleRefresh)
 			// Agent bootstrap: authenticated by the one-time enrollment token itself.
 			r.Post("/agents/enroll", s.handleAgentEnroll)
@@ -363,6 +367,11 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("billing.read", "plan.get", "billing")).Get("/plans/{planID}", s.handleGetPlan)
 			r.With(az.Require("billing.manage", "plan.update", "billing")).Post("/plans/{planID}", s.handleUpdatePlan)
 			r.With(az.Require("billing.manage", "plan.delete", "billing")).Delete("/plans/{planID}", s.handleDeletePlan)
+
+			// SSO (OIDC) provider configuration (operator/org admin).
+			r.With(az.Require("sso.read", "sso.list", "sso_provider")).Get("/sso/providers", s.handleListSSOProviders)
+			r.With(az.Require("sso.manage", "sso.create", "sso_provider")).Post("/sso/providers", s.handleCreateSSOProvider)
+			r.With(az.Require("sso.manage", "sso.delete", "sso_provider")).Delete("/sso/providers/{providerID}", s.handleDeleteSSOProvider)
 
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireFeature(licensing.FeatureBilling))

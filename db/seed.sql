@@ -9,6 +9,8 @@ INSERT INTO permissions (key, description, category) VALUES
   ('org.update',          'Update organization settings',      'org'),
   ('org.manage_members',  'Invite/remove members',             'org'),
   ('org.manage_billing',  'Manage billing & plan',             'org'),
+  ('sso.read',            'View SSO (OIDC) providers',         'org'),
+  ('sso.manage',          'Configure SSO (OIDC) providers',    'org'),
   ('role.read',           'View roles',                        'rbac'),
   ('role.manage',         'Create/update roles',               'rbac'),
   ('apitoken.read',       'List API tokens',                   'apitoken'),

@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { KeyRound, ShieldCheck } from "lucide-react";
+import { KeyRound, LogIn, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,6 +24,17 @@ export default function LoginPage() {
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [ssoProviders, setSsoProviders] = useState<{ id: string; name: string }[]>([]);
+
+  useEffect(() => {
+    const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+    fetch(`${API}/api/v1/auth/sso/providers`)
+      .then((r) => r.json())
+      .then((d) => setSsoProviders(d.providers ?? []))
+      .catch(() => setSsoProviders([]));
+    const ssoError = new URLSearchParams(window.location.search).get("sso_error");
+    if (ssoError) setError(`SSO sign-in failed (${ssoError})`);
+  }, []);
 
   async function onPasskey() {
     setError(null);
@@ -122,6 +133,25 @@ export default function LoginPage() {
                   <KeyRound className="h-4 w-4" />
                   {t("Sign in with a passkey")}
                 </Button>
+              )}
+              {ssoProviders.length > 0 && (
+                <div className="space-y-2 border-t border-border pt-3">
+                  {ssoProviders.map((pr) => (
+                    <Button
+                      key={pr.id}
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => {
+                        const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
+                        window.location.href = `${API}/api/v1/auth/sso/${pr.id}/start`;
+                      }}
+                    >
+                      <LogIn className="h-4 w-4" />
+                      {`Sign in with ${pr.name}`}
+                    </Button>
+                  ))}
+                </div>
               )}
             </form>
           ) : (
