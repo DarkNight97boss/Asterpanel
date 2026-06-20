@@ -413,6 +413,7 @@ func (s *Server) routes() http.Handler {
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireFeature(licensing.FeatureReseller))
 				r.With(az.Require("reseller.read", "reseller.list", "organization")).Get("/reseller/accounts", s.handleListSubAccounts)
+				r.With(az.Require("reseller.read", "reseller.budget", "organization")).Get("/reseller/budget", s.handleResellerBudget)
 				r.With(az.Require("reseller.manage", "reseller.create", "organization")).Post("/reseller/accounts", s.handleCreateSubAccount)
 				r.With(az.Require("reseller.manage", "reseller.status", "organization")).Post("/reseller/accounts/{accountID}/status", s.handleSetSubAccountStatus)
 				r.With(az.Require("reseller.manage", "reseller.plan", "organization")).Post("/reseller/accounts/{accountID}/plan", s.handleAssignSubAccountPlan)

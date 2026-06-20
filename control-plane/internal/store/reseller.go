@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -125,6 +126,64 @@ func (s *Store) IsSubAccountOf(ctx context.Context, child, parent uuid.UUID) (bo
 		`SELECT EXISTS(SELECT 1 FROM organizations WHERE id = $1 AND parent_org_id = $2 AND deleted_at IS NULL)`,
 		child, parent).Scan(&ok)
 	return ok, err
+}
+
+// IsDescendantOf reports whether descendant sits anywhere under ancestor in the
+// reseller tree (any depth), walking parent_org_id recursively. This is the
+// multi-tier generalisation of IsSubAccountOf: a master reseller authorises over
+// its whole subtree, not just its direct children. A depth cap guards against a
+// pathological cycle (parents are only ever set to pre-existing orgs, so cycles
+// shouldn't arise, but the cap keeps the walk bounded regardless).
+func (s *Store) IsDescendantOf(ctx context.Context, descendant, ancestor uuid.UUID) (bool, error) {
+	if descendant == ancestor {
+		return false, nil
+	}
+	const q = `
+		WITH RECURSIVE chain AS (
+			SELECT id, parent_org_id, 1 AS depth
+			FROM organizations WHERE id = $1 AND deleted_at IS NULL
+			UNION ALL
+			SELECT o.id, o.parent_org_id, c.depth + 1
+			FROM organizations o
+			JOIN chain c ON o.id = c.parent_org_id
+			WHERE o.deleted_at IS NULL AND c.depth < 64
+		)
+		SELECT EXISTS(SELECT 1 FROM chain WHERE parent_org_id = $2)`
+	var ok bool
+	err := s.pool.QueryRow(ctx, q, descendant, ancestor).Scan(&ok)
+	return ok, err
+}
+
+// SumSubAccountPlanLimits sums the plan limit maps of a reseller's direct
+// sub-accounts (optionally excluding one being re-planned), so the overselling
+// guard can check that the parent isn't allocating more than its own plan
+// grants. Sub-accounts without a plan contribute nothing (they are handled
+// separately as an "unlimited child" by the guard).
+func (s *Store) SumSubAccountPlanLimits(ctx context.Context, parentOrgID uuid.UUID, except uuid.NullUUID) (map[string]int, error) {
+	const q = `
+		SELECT bp.limits
+		FROM organizations o
+		JOIN billing_plans bp ON bp.id = o.billing_plan_id
+		WHERE o.parent_org_id = $1 AND o.deleted_at IS NULL
+		  AND ($2::uuid IS NULL OR o.id <> $2)`
+	rows, err := s.pool.Query(ctx, q, parentOrgID, except)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	sum := map[string]int{}
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		m := map[string]int{}
+		_ = json.Unmarshal(raw, &m)
+		for k, v := range m {
+			sum[k] += v
+		}
+	}
+	return sum, rows.Err()
 }
 
 // CountSubAccounts is used to enforce a reseller's sub-account quota.

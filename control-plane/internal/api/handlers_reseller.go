@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -53,6 +54,73 @@ func subAccountView(a store.SubAccount) map[string]any {
 	}
 }
 
+// planLimitsByCode resolves a plan code to its limit map (an empty code → nil,
+// i.e. an "unlimited" assignment).
+func (s *Server) planLimitsByCode(ctx context.Context, code string) (map[string]int, error) {
+	if strings.TrimSpace(code) == "" {
+		return nil, nil
+	}
+	id, err := s.deps.Store.GetPlanIDByCode(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+	plan, err := s.deps.Store.GetPlan(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return plan.Limits, nil
+}
+
+// overAllocates is the overselling guard. It reports whether assigning newLimits
+// to one of parentOrgID's direct sub-accounts (excluding `except`, the account
+// being re-planned, if set) would let the reseller hand out more capacity than
+// its OWN plan grants. A reseller with no plan (unlimited) is never constrained.
+// Granting an unlimited child (newLimits missing/≤0 for a resource the parent
+// caps) is itself overselling — you can't sell unlimited capacity from a finite
+// budget — and is reported with allocated == -1.
+func (s *Server) overAllocates(ctx context.Context, parentOrgID uuid.UUID, except uuid.NullUUID, newLimits map[string]int) (over bool, resource string, allocated, limit int) {
+	_, parentLimits, err := s.deps.Store.GetOrgPlanLimits(ctx, parentOrgID)
+	if err != nil || len(parentLimits) == 0 {
+		return false, "", 0, 0
+	}
+	siblings, err := s.deps.Store.SumSubAccountPlanLimits(ctx, parentOrgID, except)
+	if err != nil {
+		return false, "", 0, 0
+	}
+	for key, lim := range parentLimits {
+		if lim <= 0 {
+			continue // unlimited for the reseller on this resource
+		}
+		res := strings.TrimPrefix(key, "max_")
+		nv := newLimits[key]
+		if nv <= 0 {
+			return true, res, -1, lim // would grant unlimited from a finite budget
+		}
+		if siblings[key]+nv > lim {
+			return true, res, siblings[key] + nv, lim
+		}
+	}
+	return false, "", 0, 0
+}
+
+// rejectOverselling writes the standard 403 when the guard trips; returns true
+// if it rejected (so the caller can stop).
+func rejectOverselling(w http.ResponseWriter, over bool, resource string, allocated, limit int) bool {
+	if !over {
+		return false
+	}
+	if allocated < 0 {
+		httpx.ErrorWithDetails(w, http.StatusForbidden, "overselling",
+			"cannot grant an unlimited "+resource+" allowance from your limited plan",
+			map[string]any{"resource": resource, "limit": limit})
+		return true
+	}
+	httpx.ErrorWithDetails(w, http.StatusForbidden, "overselling",
+		"this would allocate more "+resource+" than your plan grants",
+		map[string]any{"resource": resource, "allocated": allocated, "limit": limit})
+	return true
+}
+
 func (s *Server) handleListSubAccounts(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
@@ -100,6 +168,17 @@ func (s *Server) handleCreateSubAccount(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		planID = uuid.NullUUID{UUID: id, Valid: true}
+	}
+
+	// Overselling guard: a reseller can't allocate a new sub-account more than
+	// its own plan grants (counting what its existing sub-accounts already hold).
+	newLimits, lerr := s.planLimitsByCode(ctx, req.PlanCode)
+	if lerr != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "unknown plan code")
+		return
+	}
+	if over, res, alloc, lim := s.overAllocates(ctx, p.OrgID, uuid.NullUUID{}, newLimits); rejectOverselling(w, over, res, alloc, lim) {
+		return
 	}
 
 	ownerRole, err := s.deps.Store.GetSystemRoleID(ctx, "owner")
@@ -168,4 +247,38 @@ func (s *Server) handleSetSubAccountStatus(w http.ResponseWriter, r *http.Reques
 	s.audit(ctx, &org, &p.UserID, "reseller.account.status", "organization", id.String(), audit.OutcomeSuccess, r,
 		map[string]any{"status": req.Status})
 	httpx.JSON(w, http.StatusOK, map[string]any{"id": id, "status": req.Status})
+}
+
+// handleResellerBudget reports the reseller's allocation budget: for each
+// resource its own plan caps, how much it has already handed out to its direct
+// sub-accounts versus its own limit. An unconstrained reseller (no plan) returns
+// an empty list — the UI then shows no budget bars.
+func (s *Server) handleResellerBudget(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	_, limits, err := s.deps.Store.GetOrgPlanLimits(ctx, p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not load plan")
+		return
+	}
+	out := make([]map[string]any, 0)
+	if len(limits) > 0 {
+		alloc, aerr := s.deps.Store.SumSubAccountPlanLimits(ctx, p.OrgID, uuid.NullUUID{})
+		if aerr != nil {
+			httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not sum allocations")
+			return
+		}
+		for _, key := range []string{"max_sites", "max_apps", "max_domains", "max_databases", "max_mailboxes", "max_nodes"} {
+			lim := limits[key]
+			if lim <= 0 {
+				continue
+			}
+			out = append(out, map[string]any{
+				"resource":  strings.TrimPrefix(key, "max_"),
+				"allocated": alloc[key],
+				"limit":     lim,
+			})
+		}
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"budget": out})
 }

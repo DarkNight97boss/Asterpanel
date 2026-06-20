@@ -32,6 +32,12 @@ interface Created {
   temp_password: string;
 }
 
+interface BudgetRow {
+  resource: string;
+  allocated: number;
+  limit: number;
+}
+
 const statusBadge: Record<string, string> = {
   active: "bg-emerald-500/15 text-emerald-600",
   suspended: "bg-amber-500/15 text-amber-600",
@@ -49,6 +55,7 @@ export default function ResellerPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<Created | null>(null);
+  const [budget, setBudget] = useState<BudgetRow[]>([]);
 
   async function load() {
     try {
@@ -56,6 +63,12 @@ export default function ResellerPage() {
       setAccounts(accounts ?? []);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load");
+    }
+    try {
+      const { budget } = await apiGet<{ budget: BudgetRow[] }>("/api/v1/reseller/budget");
+      setBudget(budget ?? []);
+    } catch {
+      setBudget([]);
     }
   }
   useEffect(() => {
@@ -70,6 +83,7 @@ export default function ResellerPage() {
     try {
       await apiPost(`/api/v1/reseller/accounts/${id}/plan`, { plan_code: planCode });
       setAccounts((prev) => prev.map((a) => (a.id === id ? { ...a, plan_code: planCode || null } : a)));
+      await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to assign plan");
     }
@@ -156,6 +170,42 @@ export default function ResellerPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {budget.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Allocation budget</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-muted-foreground">
+              How much of your own plan you have handed out to sub-accounts. You can&apos;t oversell
+              past these limits.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              {budget.map((b) => {
+                const pct = b.limit > 0 ? Math.min(100, Math.round((b.allocated / b.limit) * 100)) : 0;
+                const full = b.allocated >= b.limit;
+                return (
+                  <div key={b.resource} className="space-y-1">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="capitalize">{b.resource}</span>
+                      <span className={cn("text-xs", full ? "text-amber-600" : "text-muted-foreground")}>
+                        {b.allocated} / {b.limit}
+                      </span>
+                    </div>
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className={cn("h-full rounded-full", full ? "bg-amber-500" : "bg-primary")}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       <Card>

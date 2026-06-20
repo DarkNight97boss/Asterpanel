@@ -66,10 +66,11 @@ func (s *Server) handleStartImpersonation(w http.ResponseWriter, r *http.Request
 	targetOrgID := mem.OrganizationID
 
 	// Authorize: a superadmin may impersonate anyone; otherwise the target must
-	// belong to one of the actor's own sub-accounts.
+	// sit anywhere in the actor's reseller subtree (multi-tier — a master reaches
+	// its sub-resellers' customers too, not just its direct sub-accounts).
 	allowed := actor.Superadmin
 	if !allowed {
-		sub, serr := s.deps.Store.IsSubAccountOf(ctx, targetOrgID, actor.OrgID)
+		sub, serr := s.deps.Store.IsDescendantOf(ctx, targetOrgID, actor.OrgID)
 		allowed = serr == nil && sub
 	}
 	if !allowed {

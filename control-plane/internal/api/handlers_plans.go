@@ -225,6 +225,20 @@ func (s *Server) handleAssignSubAccountPlan(w http.ResponseWriter, r *http.Reque
 		}
 		planID = uuid.NullUUID{UUID: id, Valid: true}
 	}
+	// Overselling guard: re-planning a sub-account can't push the reseller's
+	// total allocation past its own plan (its current contribution is excluded
+	// from the sibling sum). Superadmin re-plans bypass the budget.
+	if !p.Superadmin {
+		newLimits, lerr := s.planLimitsByCode(ctx, req.PlanCode)
+		if lerr != nil {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "unknown plan code")
+			return
+		}
+		except := uuid.NullUUID{UUID: accountID, Valid: true}
+		if over, res, alloc, lim := s.overAllocates(ctx, p.OrgID, except, newLimits); rejectOverselling(w, over, res, alloc, lim) {
+			return
+		}
+	}
 	if err := s.deps.Store.SetOrgPlan(ctx, accountID, planID); err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not assign plan")
 		return
