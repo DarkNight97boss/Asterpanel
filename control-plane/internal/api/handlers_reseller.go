@@ -405,6 +405,68 @@ func (s *Server) handleUpdateResellerPackage(w http.ResponseWriter, r *http.Requ
 	httpx.JSON(w, http.StatusOK, map[string]any{"package": planView(*plan)})
 }
 
+// resellerOwnsAccount verifies the account is the caller's direct sub-account
+// (superadmin may act on any). Writes a 403 and returns false otherwise.
+func (s *Server) resellerOwnsAccount(w http.ResponseWriter, ctx context.Context, p *middleware.Principal, accountID uuid.UUID) bool {
+	if p.Superadmin {
+		return true
+	}
+	ok, err := s.deps.Store.IsSubAccountOf(ctx, accountID, p.OrgID)
+	if err != nil || !ok {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "not your sub-account")
+		return false
+	}
+	return true
+}
+
+// handleInvoiceSubAccount issues an invoice from a customer's plan — the reseller
+// billing its customer (the WHMCS relationship). The invoice belongs to the
+// sub-account org; the customer settles it from their own billing area.
+func (s *Server) handleInvoiceSubAccount(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	accountID, err := uuid.Parse(chi.URLParam(r, "accountID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid account id")
+		return
+	}
+	if !s.resellerOwnsAccount(w, ctx, p, accountID) {
+		return
+	}
+	inv, code := s.billOrg(ctx, accountID)
+	if billErrorStatus(w, code) {
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.invoice.create", "invoice", inv.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"account_id": accountID.String(), "number": inv.Number, "total_cents": inv.TotalCents})
+	httpx.JSON(w, http.StatusCreated, map[string]any{"invoice": invoiceHeaderView(*inv)})
+}
+
+// handleListSubAccountInvoices lists a customer's invoices for its reseller.
+func (s *Server) handleListSubAccountInvoices(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	accountID, err := uuid.Parse(chi.URLParam(r, "accountID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid account id")
+		return
+	}
+	if !s.resellerOwnsAccount(w, ctx, p, accountID) {
+		return
+	}
+	invs, err := s.deps.Store.ListInvoices(ctx, accountID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list invoices")
+		return
+	}
+	views := make([]map[string]any, 0, len(invs))
+	for _, inv := range invs {
+		views = append(views, invoiceHeaderView(inv))
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"invoices": views})
+}
+
 // handleDeleteResellerPackage removes one of the reseller's own packages.
 func (s *Server) handleDeleteResellerPackage(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()

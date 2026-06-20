@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -77,29 +78,25 @@ func (s *Server) handleGetInvoice(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"invoice": invoiceView(*inv)})
 }
 
-// handleGenerateInvoice bills the org for the current month: the plan base fee
-// plus informational usage lines, numbered INV-YYYY-NNNN.
-func (s *Server) handleGenerateInvoice(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	p := middleware.PrincipalFrom(ctx)
-
-	plan, err := s.deps.Store.GetOrgPlan(ctx, p.OrgID)
+// billOrg generates the current-month invoice for an org from its plan (base fee
+// + informational usage lines), numbered INV-YYYY-NNNN. Returns an error code
+// ("" on success) so both self-billing and reseller-bills-customer can reuse it.
+func (s *Server) billOrg(ctx context.Context, orgID uuid.UUID) (*store.Invoice, string) {
+	plan, err := s.deps.Store.GetOrgPlan(ctx, orgID)
 	if err != nil {
-		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not load plan")
-		return
+		return nil, "internal_error"
 	}
 	if plan == nil {
-		httpx.Error(w, http.StatusBadRequest, "no_plan", "organization has no billing plan")
-		return
+		return nil, "no_plan"
 	}
-	usage, _ := s.deps.Store.UsageCounts(ctx, p.OrgID)
+	usage, _ := s.deps.Store.UsageCounts(ctx, orgID)
 
 	now := time.Now().UTC()
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
 	end := start.AddDate(0, 1, -1)
 	due := start.AddDate(0, 0, 14)
 
-	count, _ := s.deps.Store.CountOrgInvoices(ctx, p.OrgID)
+	count, _ := s.deps.Store.CountOrgInvoices(ctx, orgID)
 	number := fmt.Sprintf("INV-%d-%04d", now.Year(), count+1)
 
 	lines := []store.InvoiceLine{{
@@ -114,14 +111,40 @@ func (s *Server) handleGenerateInvoice(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	inv, err := s.deps.Store.CreateInvoice(ctx, p.OrgID, number, plan.Currency, start, end, &due, lines)
+	inv, err := s.deps.Store.CreateInvoice(ctx, orgID, number, plan.Currency, start, end, &due, lines)
 	if err != nil {
+		return nil, "create_failed"
+	}
+	return inv, ""
+}
+
+// billErrorStatus maps a billOrg error code to an HTTP error (returns false when
+// the code is "" — success).
+func billErrorStatus(w http.ResponseWriter, code string) bool {
+	switch code {
+	case "":
+		return false
+	case "no_plan":
+		httpx.Error(w, http.StatusBadRequest, "no_plan", "organization has no billing plan")
+	case "create_failed":
 		httpx.Error(w, http.StatusConflict, "create_failed", "could not create invoice (already billed this period?)")
+	default:
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not bill organization")
+	}
+	return true
+}
+
+// handleGenerateInvoice bills the caller's own org for the current month.
+func (s *Server) handleGenerateInvoice(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	inv, code := s.billOrg(ctx, p.OrgID)
+	if billErrorStatus(w, code) {
 		return
 	}
 	org := p.OrgID
 	s.audit(ctx, &org, &p.UserID, "invoice.create", "invoice", inv.ID.String(), audit.OutcomeSuccess, r,
-		map[string]any{"number": number, "total_cents": inv.TotalCents})
+		map[string]any{"number": inv.Number, "total_cents": inv.TotalCents})
 	httpx.JSON(w, http.StatusCreated, map[string]any{"invoice": invoiceView(*inv)})
 }
 

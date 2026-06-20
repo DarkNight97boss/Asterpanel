@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, LogIn, Pencil, X } from "lucide-react";
+import { Copy, LogIn, Pencil, Receipt, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -209,6 +209,21 @@ export default function ResellerPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update status");
+    }
+  }
+
+  // Issue an invoice to a customer from its plan (the reseller→customer billing).
+  async function onBillAccount(a: Account) {
+    setError(null);
+    setNotice(null);
+    try {
+      const { invoice } = await apiPost<{
+        invoice: { number: string; total_cents: number; currency: string };
+      }>(`/api/v1/reseller/accounts/${a.id}/invoice`, {});
+      const amt = (invoice.total_cents / 100).toFixed(2);
+      setNotice(`Invoice ${invoice.number} (${amt} ${invoice.currency}) issued to ${a.name}.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not issue invoice");
     }
   }
 
@@ -472,6 +487,15 @@ export default function ResellerPage() {
                   </td>
                   <td className="px-6 py-3 text-right">
                     <div className="flex items-center justify-end gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => onBillAccount(a)}
+                        title="Issue an invoice from this customer's plan"
+                      >
+                        <Receipt className="h-4 w-4" />
+                        Bill
+                      </Button>
                       {a.owner_user_id && a.status === "active" && (
                         <Button
                           variant="ghost"
