@@ -42,6 +42,7 @@ const (
 	TypeDatabaseAccess    Type = "database.access.apply"
 	TypeDatabaseDump      Type = "database.dump"
 	TypeMailboxCreate     Type = "mail.mailbox.create"
+	TypeMailboxApply      Type = "mail.mailbox.apply"
 	TypeMailServerEnsure  Type = "mail.server.ensure"
 	TypeMailDKIMGenerate  Type = "mail.dkim.generate"
 	TypeMailAliasApply    Type = "mail.alias.apply"

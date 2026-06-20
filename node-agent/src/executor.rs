@@ -66,6 +66,7 @@ impl Executor for DockerExecutor {
             "app.stop" => self.app_lifecycle(job, "stop").await,
             "app.restart" => self.app_lifecycle(job, "restart").await,
             "mail.mailbox.create" => self.mailbox_create(job).await,
+            "mail.mailbox.apply" => self.mail_mailbox_apply(job).await,
             "mail.server.ensure" => self.mail_server_ensure(job).await,
             "mail.dkim.generate" => self.mail_dkim_generate(job).await,
             "mail.alias.apply" => self.mail_alias_apply(job).await,
@@ -572,6 +573,37 @@ impl DockerExecutor {
             Err(e) => return JobOutcome::failed(format!("open postfix virtual failed: {e}")),
         }
         JobOutcome::succeeded(json!({"address": address, "provisioned": true}))
+    }
+
+    /// Declarative mailbox apply: rewrites the Dovecot passwd-file and the Postfix
+    /// virtual (local-delivery) map from the full mailbox set. Suspended mailboxes
+    /// and unsafe values are dropped, so editing a password / quota / status is
+    /// just a full re-render — deletes and suspensions propagate without a
+    /// separate command.
+    async fn mail_mailbox_apply(&self, job: &Job) -> JobOutcome {
+        let empty: Vec<Value> = Vec::new();
+        let mailboxes = job
+            .payload
+            .get("mailboxes")
+            .and_then(Value::as_array)
+            .unwrap_or(&empty);
+        let dir = std::env::var("AGENT_MAIL_DIR").unwrap_or_else(|_| "/etc/asterpanel/mail".into());
+        if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+            return JobOutcome::failed(format!("mail.mailbox.apply: mkdir failed: {e}"));
+        }
+        let users = render_dovecot_users(mailboxes);
+        let virt = render_postfix_virtual_mailboxes(mailboxes);
+        if let Err(e) = tokio::fs::write(format!("{dir}/dovecot-users"), users.as_bytes()).await {
+            return JobOutcome::failed(format!("mail.mailbox.apply: write dovecot-users failed: {e}"));
+        }
+        if let Err(e) =
+            tokio::fs::write(format!("{dir}/postfix-virtual"), virt.as_bytes()).await
+        {
+            return JobOutcome::failed(format!(
+                "mail.mailbox.apply: write postfix-virtual failed: {e}"
+            ));
+        }
+        JobOutcome::succeeded(json!({"mailboxes": mailboxes.len()}))
     }
 
     /// Regenerates the Postfix virtual-alias map from the full forwarder set.
@@ -2329,6 +2361,55 @@ fn render_dovecot_user(address: &str, password: &str) -> String {
 
 fn render_postfix_virtual(address: &str) -> String {
     format!("{address}\t{address}\n")
+}
+
+/// A mailbox address `local@domain`: a sane local part plus a valid domain. Used
+/// to gate the declarative mailbox re-render so a crafted address can't inject
+/// extra passwd / virtual-map lines.
+fn valid_mail_address(s: &str) -> bool {
+    let (local, domain) = match s.split_once('@') {
+        Some(p) => p,
+        None => return false,
+    };
+    !local.is_empty()
+        && local.len() <= 64
+        && local
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || ".-_+".contains(c))
+        && valid_mail_domain(domain)
+}
+
+/// Renders the full Dovecot passwd-file from the active mailboxes (declarative
+/// re-render). One `address:{PLAIN}password` line per active mailbox; suspended
+/// mailboxes and unsafe addresses / passwords (containing the `:` separator or a
+/// newline) are skipped so nothing can smuggle an extra line.
+fn render_dovecot_users(mailboxes: &[Value]) -> String {
+    let mut out = String::new();
+    for m in mailboxes {
+        let addr = m.get("address").and_then(Value::as_str).unwrap_or("").trim();
+        let pw = m.get("password").and_then(Value::as_str).unwrap_or("");
+        let active = m.get("active").and_then(Value::as_bool).unwrap_or(true);
+        if !active || !valid_mail_address(addr) || pw.contains([':', '\n', '\r']) {
+            continue;
+        }
+        out.push_str(&render_dovecot_user(addr, pw));
+    }
+    out
+}
+
+/// Renders the full Postfix virtual (local-delivery) map from the active
+/// mailboxes — one `address<TAB>address` line each.
+fn render_postfix_virtual_mailboxes(mailboxes: &[Value]) -> String {
+    let mut out = String::new();
+    for m in mailboxes {
+        let addr = m.get("address").and_then(Value::as_str).unwrap_or("").trim();
+        let active = m.get("active").and_then(Value::as_bool).unwrap_or(true);
+        if !active || !valid_mail_address(addr) {
+            continue;
+        }
+        out.push_str(&render_postfix_virtual(addr));
+    }
+    out
 }
 
 /// Renders the Postfix virtual-alias map from forwarder entries, one line per
@@ -4148,6 +4229,30 @@ mod tests {
             render_dovecot_user("info@acme.com", "pw"),
             "info@acme.com:{PLAIN}pw\n"
         );
+    }
+
+    #[test]
+    fn mailbox_apply_renders_active_only_and_is_injection_safe() {
+        let mboxes = vec![
+            json!({"address": "a@acme.com", "password": "secret1", "active": true, "quota_mb": 2048}),
+            json!({"address": "b@acme.com", "password": "secret2", "active": false}), // suspended → dropped
+            json!({"address": "bad addr", "password": "x", "active": true}),          // invalid → dropped
+            json!({"address": "c@acme.com", "password": "p:w\ninjected", "active": true}), // `:`/newline → dropped
+        ];
+        let users = render_dovecot_users(&mboxes);
+        assert_eq!(users, "a@acme.com:{PLAIN}secret1\n", "only the valid active mailbox: {users:?}");
+        assert!(!users.contains("b@acme.com"), "suspended must be dropped");
+        assert!(!users.contains("injected"), "unsafe password must be dropped");
+
+        // Postfix delivery doesn't carry the password, so a valid active address
+        // still receives mail (only suspended / invalid addresses are dropped).
+        let virt = render_postfix_virtual_mailboxes(&mboxes);
+        assert_eq!(virt, "a@acme.com\ta@acme.com\nc@acme.com\tc@acme.com\n");
+
+        assert!(valid_mail_address("a.b+tag@sub.acme.com"));
+        assert!(!valid_mail_address("no-domain"));
+        assert!(!valid_mail_address("@acme.com"));
+        assert!(!valid_mail_address("a b@acme.com"));
     }
 
     #[test]

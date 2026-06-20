@@ -33,6 +33,7 @@ allowed_types := {
 	"database.access.apply",
 	"database.dump",
 	"mail.mailbox.create",
+	"mail.mailbox.apply",
 	"mail.server.ensure",
 	"mail.dkim.generate",
 	"mail.alias.apply",

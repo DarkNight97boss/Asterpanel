@@ -255,6 +255,8 @@ func (s *Server) routes() http.Handler {
 			// Email mailboxes
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/mailboxes", s.handleListMailboxes)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/mailboxes", s.handleCreateMailbox)
+			r.With(az.Require("email.manage", "email.update", "mailbox")).Post("/email/mailboxes/{mailboxID}", s.handleUpdateMailbox)
+			r.With(az.Require("email.manage", "email.update", "mailbox")).Post("/email/mailboxes/{mailboxID}/password", s.handleResetMailboxPassword)
 			r.With(az.Require("email.manage", "mail.dkim", "domain")).Post("/email/dkim", s.handleGenerateDKIM)
 
 			// Email forwarders / aliases (incl. catch-all)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { Calendar, Filter, Forward, Mail, Pencil, Reply, Route, Send, ShieldAlert, ShieldCheck, Users, Trash2, X } from "lucide-react";
+import { Calendar, Filter, Forward, KeyRound, Mail, Pencil, Power, Reply, Route, Send, ShieldAlert, ShieldCheck, Users, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -137,6 +137,8 @@ export default function EmailPage() {
   const [deliveryLoaded, setDeliveryLoaded] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [password, setPassword] = useState<string | null>(null);
+  const [editMbId, setEditMbId] = useState<string | null>(null);
+  const [mbStatus, setMbStatus] = useState("active");
   const [dkimDomain, setDkimDomain] = useState("");
   const [dkimBusy, setDkimBusy] = useState(false);
   const [dkim, setDkim] = useState<{
@@ -582,22 +584,67 @@ export default function EmailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
+  function startEditMb(b: Mailbox) {
+    setEditMbId(b.id);
+    setAddress(b.address);
+    setQuota(String(b.quota_mb));
+    setMbStatus(b.status);
+    setPassword(null);
+  }
+  function cancelEditMb() {
+    setEditMbId(null);
+    setAddress("");
+    setQuota("1024");
+  }
+
   async function onCreate(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     try {
-      const res = await apiPost<{ password?: string }>("/api/v1/email/mailboxes", {
-        address,
-        quota_mb: Number(quota),
-      });
-      if (res.password) setPassword(res.password);
+      if (editMbId) {
+        await apiPost(`/api/v1/email/mailboxes/${editMbId}`, {
+          quota_mb: Number(quota),
+          status: mbStatus,
+        });
+        setEditMbId(null);
+      } else {
+        const res = await apiPost<{ password?: string }>("/api/v1/email/mailboxes", {
+          address,
+          quota_mb: Number(quota),
+        });
+        if (res.password) setPassword(res.password);
+      }
       setAddress("");
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Create failed");
+      setError(e instanceof Error ? e.message : "Save failed");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function toggleMbStatus(b: Mailbox) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/email/mailboxes/${b.id}`, {
+        quota_mb: b.quota_mb,
+        status: b.status === "active" ? "suspended" : "active",
+      });
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not change status");
+    }
+  }
+
+  async function resetMbPassword(b: Mailbox) {
+    setError(null);
+    setPassword(null);
+    try {
+      const res = await apiPost<{ password?: string }>(`/api/v1/email/mailboxes/${b.id}/password`, {});
+      if (res.password) setPassword(res.password);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reset password");
     }
   }
 
@@ -678,21 +725,28 @@ export default function EmailPage() {
         <>
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">New mailbox</CardTitle>
+          <CardTitle className="text-base">{editMbId ? "Edit mailbox" : "New mailbox"}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={onCreate} className="grid gap-4 sm:grid-cols-4 sm:items-end">
             <div className="space-y-1.5 sm:col-span-2">
               <Label htmlFor="address">Address</Label>
-              <Input id="address" type="email" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="hello@acme.com" required />
+              <Input id="address" type="email" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="hello@acme.com" disabled={!!editMbId} required />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="quota">Quota (MB)</Label>
               <Input id="quota" type="number" value={quota} onChange={(e) => setQuota(e.target.value)} />
             </div>
-            <Button type="submit" disabled={busy}>
-              {busy ? "Creating…" : "Create"}
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button type="submit" disabled={busy}>
+                {busy ? "Saving…" : editMbId ? "Save quota" : "Create"}
+              </Button>
+              {editMbId && (
+                <Button type="button" variant="ghost" size="icon" onClick={cancelEditMb} aria-label="Cancel">
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+            </div>
           </form>
         </CardContent>
       </Card>
@@ -708,11 +762,12 @@ export default function EmailPage() {
                 <th className="px-6 py-3 font-medium">Address</th>
                 <th className="px-6 py-3 font-medium">Usage</th>
                 <th className="px-6 py-3 font-medium">Status</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
               {boxes.map((b) => (
-                <tr key={b.id} className="border-b border-border/60 last:border-0">
+                <tr key={b.id} className={`border-b border-border/60 last:border-0 ${editMbId === b.id ? "bg-muted/60" : ""}`}>
                   <td className="px-6 py-3 font-medium">{b.address}</td>
                   <td className="px-6 py-3">
                     <div className="flex items-center gap-3">
@@ -727,7 +782,28 @@ export default function EmailPage() {
                       </span>
                     </div>
                   </td>
-                  <td className="px-6 py-3 text-muted-foreground">{b.status}</td>
+                  <td className="px-6 py-3">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                        b.status === "active"
+                          ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                          : "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                      }`}
+                    >
+                      {b.status}
+                    </span>
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => resetMbPassword(b)} aria-label="Reset password" title="Reset password">
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => toggleMbStatus(b)} aria-label="Toggle status" title={b.status === "active" ? "Suspend" : "Activate"}>
+                      <Power className={`h-4 w-4 ${b.status === "active" ? "text-emerald-500" : "text-muted-foreground"}`} />
+                    </Button>
+                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEditMb(b)} aria-label="Edit quota" title="Edit quota">
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  </td>
                 </tr>
               ))}
             </tbody>

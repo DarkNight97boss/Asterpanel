@@ -195,6 +195,16 @@ type Mailbox struct {
 	CreatedAt      time.Time
 }
 
+// MailboxApply is the per-mailbox data the declarative mail.mailbox.apply job
+// needs: address, quota, status and the id of the secret holding its password.
+type MailboxApply struct {
+	ID       uuid.UUID
+	Address  string
+	QuotaMB  int
+	Status   string
+	SecretID uuid.NullUUID
+}
+
 type MailForwarder struct {
 	ID             uuid.UUID
 	OrganizationID uuid.UUID

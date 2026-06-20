@@ -95,6 +95,49 @@ func scanMailbox(row rowScanner) (*Mailbox, error) {
 	return &m, nil
 }
 
+// UpdateMailbox edits a mailbox's quota and status (active / suspended).
+func (s *Store) UpdateMailbox(ctx context.Context, orgID, id uuid.UUID, quotaMB int, status string) (*Mailbox, error) {
+	if quotaMB <= 0 {
+		quotaMB = 1024
+	}
+	const q = `
+		UPDATE mailboxes SET quota_mb = $3, status = $4
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, address, quota_mb, used_mb, status, created_at`
+	return scanMailbox(s.pool.QueryRow(ctx, q, id, orgID, quotaMB, status))
+}
+
+// MailboxesForApply returns every mailbox plus the id of its password secret, so
+// the declarative mail.mailbox.apply job can be assembled.
+func (s *Store) MailboxesForApply(ctx context.Context, orgID uuid.UUID) ([]MailboxApply, error) {
+	const q = `
+		SELECT id, address, quota_mb, status, credentials_secret_id
+		FROM mailboxes WHERE organization_id = $1 ORDER BY address`
+	rows, err := s.pool.Query(ctx, q, orgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MailboxApply
+	for rows.Next() {
+		var m MailboxApply
+		if err := rows.Scan(&m.ID, &m.Address, &m.QuotaMB, &m.Status, &m.SecretID); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// UpdateSecretByID rotates a secret's ciphertext in place (used to reset a
+// mailbox password without changing the mailbox's secret reference).
+func (s *Store) UpdateSecretByID(ctx context.Context, id uuid.UUID, ciphertext, nonce []byte, keyID string) error {
+	_, err := s.pool.Exec(ctx,
+		`UPDATE secrets SET ciphertext = $2, nonce = $3, key_id = $4, version = version + 1 WHERE id = $1`,
+		id, ciphertext, nonce, keyID)
+	return err
+}
+
 // GetMailboxAuth returns a mailbox's address and the id of the secret holding
 // its (encrypted) password, scoped to the organization.
 func (s *Store) GetMailboxAuth(ctx context.Context, orgID, id uuid.UUID) (string, uuid.NullUUID, error) {
