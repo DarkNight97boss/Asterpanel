@@ -837,13 +837,61 @@ impl DockerExecutor {
             .get("target_path")
             .and_then(Value::as_str)
             .unwrap_or("/var/asterpanel/sites");
+        let expected_sha = job
+            .payload
+            .get("checksum")
+            .and_then(Value::as_str)
+            .unwrap_or("");
         let dir =
             std::env::var("AGENT_BACKUP_DIR").unwrap_or_else(|_| "/var/asterpanel/backups".into());
         let file = format!("{dir}/{backup_id}.tar.gz");
+
+        // Disaster recovery: if the artifact isn't on local disk (e.g. the node
+        // was rebuilt), pull it back from S3 before restoring. Without this an
+        // off-site backup couldn't actually be restored.
+        if tokio::fs::metadata(&file).await.is_err() {
+            match std::env::var("AGENT_S3_BUCKET") {
+                Ok(bucket) => {
+                    if let Err(e) = tokio::fs::create_dir_all(&dir).await {
+                        return JobOutcome::failed(format!("backup.restore: mkdir failed: {e}"));
+                    }
+                    let key = format!("backups/{backup_id}.tar.gz");
+                    match run_cmd("aws", &s3_restore_args(&bucket, &key, &file)).await {
+                        Ok(o) if o.status.success() => {}
+                        Ok(o) => {
+                            return JobOutcome::failed(format!(
+                                "backup.restore: S3 download failed: {}",
+                                String::from_utf8_lossy(&o.stderr).trim()
+                            ))
+                        }
+                        Err(e) => {
+                            return JobOutcome::failed(format!("backup.restore: aws not available: {e}"))
+                        }
+                    }
+                }
+                Err(_) => {
+                    return JobOutcome::failed(
+                        "backup.restore: artifact not found locally and no S3 bucket configured",
+                    )
+                }
+            }
+        }
+
+        // Integrity gate: never extract a corrupt or tampered artifact over live
+        // data. Verify the SHA-256 recorded at backup time before touching files.
+        if !expected_sha.is_empty() {
+            let actual = sha256_file(&file).await;
+            if actual != expected_sha {
+                return JobOutcome::failed(format!(
+                    "backup.restore: checksum mismatch (expected {expected_sha}, got {actual}) — refusing to restore"
+                ));
+            }
+        }
+
         let _ = run_cmd("mkdir", &["-p".into(), target.to_string()]).await;
         match run_cmd("tar", &backup_untar_args(&file, target)).await {
             Ok(o) if o.status.success() => {
-                JobOutcome::succeeded(json!({"restored": backup_id, "target": target}))
+                JobOutcome::succeeded(json!({"restored": backup_id, "target": target, "verified": !expected_sha.is_empty()}))
             }
             Ok(o) => JobOutcome::failed(format!(
                 "tar restore failed: {}",
@@ -2842,6 +2890,18 @@ fn s3_cp_args(file: &str, bucket: &str, key: &str) -> Vec<String> {
     ]
 }
 
+// s3_restore_args downloads an artifact back from S3 (the reverse of s3_cp_args)
+// so a backup can be restored even after the local copy — or the whole node — is
+// gone. That off-site fetch is the point of disaster recovery.
+fn s3_restore_args(bucket: &str, key: &str, file: &str) -> Vec<String> {
+    vec![
+        "s3".into(),
+        "cp".into(),
+        format!("s3://{bucket}/{key}"),
+        file.into(),
+    ]
+}
+
 /// Renders an nftables ruleset from the org's firewall rules (deny => drop).
 /// Renders WAF rules into a Caddy snippet: a named request matcher per rule and
 /// a `respond <matcher> 403`. Supported match types: path (regex), user_agent
@@ -4569,6 +4629,18 @@ mod tests {
         assert!(a.contains(&"/usr/sbin/nologin".to_string()));
         assert!(a.contains(&"acme".to_string()));
         assert!(a.contains(&"/var/asterpanel/sftp/acme".to_string()));
+    }
+
+    #[test]
+    fn s3_backup_args_round_trip() {
+        // upload: local file → s3://bucket/key
+        let up = s3_cp_args("/b/x.tar.gz", "my-bucket", "backups/x.tar.gz");
+        assert_eq!(up, vec!["s3", "cp", "/b/x.tar.gz", "s3://my-bucket/backups/x.tar.gz"]);
+        // restore: s3://bucket/key → local file (the reverse, for disaster recovery)
+        let down = s3_restore_args("my-bucket", "backups/x.tar.gz", "/b/x.tar.gz");
+        assert_eq!(down, vec!["s3", "cp", "s3://my-bucket/backups/x.tar.gz", "/b/x.tar.gz"]);
+        // untar always extracts into the target dir
+        assert_eq!(backup_untar_args("/b/x.tar.gz", "/sites"), vec!["-xzf", "/b/x.tar.gz", "-C", "/sites"]);
     }
 
     #[test]

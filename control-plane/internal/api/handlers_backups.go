@@ -121,11 +121,17 @@ func (s *Server) handleRestoreBackup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	checksum := ""
+	if b.Checksum != nil {
+		checksum = *b.Checksum
+	}
 	payload := map[string]any{
 		"backup_id":      backupID,
 		"restore_job_id": restoreID,
 		"type":           b.Type,
 		"target_path":    "/var/asterpanel/sites",
+		"checksum":       checksum,        // agent verifies before extracting
+		"storage":        b.StorageBackend, // s3 → fetched off-site if the local copy is gone
 	}
 	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeBackupRestore, node.ID, payload)
 

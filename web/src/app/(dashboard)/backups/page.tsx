@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarClock, History, Pencil, Play, Power, Trash2, X } from "lucide-react";
+import { CalendarClock, History, Pencil, Play, Power, RotateCcw, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -48,6 +48,25 @@ export default function BackupsPage() {
   const [busy, setBusy] = useState(false);
   const [editSchedId, setEditSchedId] = useState<string | null>(null);
   const [tab, setTab] = useState("run");
+  const [confirmRestore, setConfirmRestore] = useState<string | null>(null);
+  const [restoreNotice, setRestoreNotice] = useState<string | null>(null);
+  const [restoreBusy, setRestoreBusy] = useState(false);
+
+  async function doRestore(id: string) {
+    setRestoreBusy(true);
+    setError(null);
+    setRestoreNotice(null);
+    try {
+      await apiPost(`/api/v1/backups/${id}/restore`, {});
+      setConfirmRestore(null);
+      setRestoreNotice("Restore dispatched to the node — the artifact is verified against its checksum before files are overwritten.");
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start restore");
+    } finally {
+      setRestoreBusy(false);
+    }
+  }
 
   async function refresh() {
     try {
@@ -272,7 +291,27 @@ export default function BackupsPage() {
         <CardHeader>
           <CardTitle className="text-base">History ({backups.length})</CardTitle>
         </CardHeader>
-        <CardContent className="p-0">
+        <CardContent className="space-y-0 p-0">
+          {restoreNotice && (
+            <p className="px-6 pt-4 text-sm text-emerald-600">{restoreNotice}</p>
+          )}
+          {confirmRestore && (
+            <div className="mx-6 mt-4 rounded-md border border-amber-500/40 bg-amber-500/5 px-4 py-3 text-sm">
+              <p className="font-medium text-amber-700 dark:text-amber-400">Restore this backup?</p>
+              <p className="mt-0.5 text-muted-foreground">
+                The node downloads the artifact (from S3 if the local copy is gone), verifies its
+                checksum, then overwrites the live site directory. This can&apos;t be undone.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <Button variant="destructive" size="sm" disabled={restoreBusy} onClick={() => doRestore(confirmRestore)}>
+                  {restoreBusy ? "Starting…" : "Restore now"}
+                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setConfirmRestore(null)}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          )}
           <table className="w-full text-sm">
             <thead className="border-b border-border text-left text-muted-foreground">
               <tr>
@@ -283,6 +322,7 @@ export default function BackupsPage() {
                 <th className="px-6 py-3 font-medium">Checksum</th>
                 <th className="px-6 py-3 font-medium">Storage</th>
                 <th className="px-6 py-3 font-medium">When</th>
+                <th className="px-6 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -302,6 +342,21 @@ export default function BackupsPage() {
                   </td>
                   <td className="px-6 py-3 text-muted-foreground">
                     {new Date(b.created_at).toLocaleString()}
+                  </td>
+                  <td className="px-6 py-3 text-right">
+                    {b.status === "completed" && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setRestoreNotice(null);
+                          setConfirmRestore(b.id);
+                        }}
+                      >
+                        <RotateCcw className="h-4 w-4" />
+                        Restore
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))}
