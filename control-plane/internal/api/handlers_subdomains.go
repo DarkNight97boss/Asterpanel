@@ -116,6 +116,56 @@ func (s *Server) handleCreateSubdomain(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type updateSubdomainRequest struct {
+	DocumentRoot string `json:"document_root"`
+	TargetURL    string `json:"target_url"`
+}
+
+// handleUpdateSubdomain edits the document root (subdomain/addon) or target URL
+// (alias) of an existing host; kind and FQDN are fixed.
+func (s *Server) handleUpdateSubdomain(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "subID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req updateSubdomainRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	docRoot := strings.TrimSpace(req.DocumentRoot)
+	target := strings.TrimSpace(req.TargetURL)
+	if target != "" {
+		if !(strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://")) {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "an alias requires an absolute target URL")
+			return
+		}
+		docRoot = ""
+	} else {
+		if !validDocRoot(docRoot) {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "an absolute document root is required")
+			return
+		}
+		target = ""
+	}
+	sd, err := s.deps.Store.UpdateSubdomain(ctx, p.OrgID, id, docRoot, target)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "subdomain not found")
+		return
+	}
+	jobID, dispatched := s.applySubdomains(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "subdomain.update", "subdomain", sd.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"fqdn": sd.FQDN, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"subdomain": subdomainView(*sd),
+		"dispatch":  map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteSubdomain(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

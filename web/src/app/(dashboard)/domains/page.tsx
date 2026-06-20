@@ -136,6 +136,7 @@ export default function DomainsPage() {
   const [subdomains, setSubdomains] = useState<SubdomainRow[]>([]);
   const [sd, setSd] = useState({ kind: "subdomain", fqdn: "", document_root: "", target_url: "" });
   const [sdBusy, setSdBusy] = useState(false);
+  const [editSubId, setEditSubId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -292,18 +293,35 @@ export default function DomainsPage() {
     }
   }
 
+  function startEditSub(x: SubdomainRow) {
+    setEditSubId(x.id);
+    setSd({ kind: x.kind, fqdn: x.fqdn, document_root: x.document_root || "", target_url: x.target_url || "" });
+  }
+  function cancelEditSub() {
+    setEditSubId(null);
+    setSd({ kind: "subdomain", fqdn: "", document_root: "", target_url: "" });
+  }
+
   async function onAddSubdomain(e: FormEvent) {
     e.preventDefault();
     setSdBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await apiPost("/api/v1/subdomains", {
-        kind: sd.kind,
-        fqdn: sd.fqdn.trim(),
-        document_root: sd.document_root.trim(),
-        target_url: sd.target_url.trim(),
-      });
+      if (editSubId) {
+        await apiPost(`/api/v1/subdomains/${editSubId}`, {
+          document_root: sd.document_root.trim(),
+          target_url: sd.target_url.trim(),
+        });
+        setEditSubId(null);
+      } else {
+        await apiPost("/api/v1/subdomains", {
+          kind: sd.kind,
+          fqdn: sd.fqdn.trim(),
+          document_root: sd.document_root.trim(),
+          target_url: sd.target_url.trim(),
+        });
+      }
       setNotice("Subdomain saved; Caddy config re-applied on the node.");
       setSd({ kind: sd.kind, fqdn: "", document_root: "", target_url: "" });
       await refresh();
@@ -705,6 +723,7 @@ export default function DomainsPage() {
                 className={selectCls}
                 value={sd.kind}
                 onChange={(e) => setSd({ ...sd, kind: e.target.value })}
+                disabled={!!editSubId}
               >
                 <option value="subdomain" className="bg-card">
                   Subdomain
@@ -725,6 +744,7 @@ export default function DomainsPage() {
                 onChange={(e) => setSd({ ...sd, fqdn: e.target.value })}
                 placeholder="blog.acme.com"
                 className="font-mono"
+                disabled={!!editSubId}
                 required
               />
             </div>
@@ -752,9 +772,16 @@ export default function DomainsPage() {
                 />
               </div>
             )}
-            <Button type="submit" disabled={sdBusy} className="sm:col-span-6 sm:w-fit">
-              {sdBusy ? "Adding…" : "Add"}
-            </Button>
+            <div className="flex items-center gap-2 sm:col-span-6">
+              <Button type="submit" disabled={sdBusy} className="sm:w-fit">
+                {sdBusy ? "Saving…" : editSubId ? "Save" : "Add"}
+              </Button>
+              {editSubId && (
+                <Button type="button" variant="ghost" onClick={cancelEditSub}>
+                  Cancel
+                </Button>
+              )}
+            </div>
           </form>
 
           {subdomains.length > 0 && (
@@ -773,6 +800,15 @@ export default function DomainsPage() {
                     variant="ghost"
                     size="icon"
                     className="ml-auto h-7 w-7"
+                    onClick={() => startEditSub(x)}
+                    aria-label="Edit subdomain"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => onDeleteSubdomain(x.id)}
                     aria-label="Delete subdomain"
                   >

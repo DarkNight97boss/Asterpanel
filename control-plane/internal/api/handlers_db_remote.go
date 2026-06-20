@@ -85,6 +85,49 @@ func (s *Server) handleCreateRemoteHost(w http.ResponseWriter, r *http.Request) 
 	})
 }
 
+func (s *Server) handleUpdateRemoteHost(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	hostID, err := uuid.Parse(chi.URLParam(r, "hostID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid host id")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	var req createRemoteHostRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	host := strings.TrimSpace(req.Host)
+	if !validRemoteHost(host) {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "host must be an IP address or CIDR")
+		return
+	}
+	h, err := s.deps.Store.UpdateRemoteHost(ctx, p.OrgID, hostID, host)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "host not found")
+		return
+	}
+	jobID, dispatched := s.applyDbAccess(ctx, p, db)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.remote.update", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"host": host, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"host":     map[string]any{"id": h.ID, "host": h.Host},
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteRemoteHost(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

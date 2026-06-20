@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { Database, Network, Terminal, Trash2, Users } from "lucide-react";
+import { Database, Network, Pencil, Terminal, Trash2, Users, X } from "lucide-react";
 
 import { apiDelete, apiGet, apiPost, apiPut, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
@@ -100,6 +100,7 @@ export default function DatabasesPage() {
   const [remoteHosts, setRemoteHosts] = useState<RemoteHost[]>([]);
   const [remoteHostInput, setRemoteHostInput] = useState("");
   const [remoteBusy, setRemoteBusy] = useState(false);
+  const [editHostId, setEditHostId] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [exporting, setExporting] = useState<Record<string, boolean>>({});
   const [tab, setTab] = useState("instances");
@@ -194,16 +195,30 @@ export default function DatabasesPage() {
     }
   }
 
+  function startEditHost(h: RemoteHost) {
+    setEditHostId(h.id);
+    setRemoteHostInput(h.host);
+  }
+  function cancelEditHost() {
+    setEditHostId(null);
+    setRemoteHostInput("");
+  }
+
   async function onAddRemoteHost(e: FormEvent) {
     e.preventDefault();
     setRemoteBusy(true);
     setError(null);
     try {
-      await apiPost(`/api/v1/databases/${remoteDbId}/remote-hosts`, { host: remoteHostInput.trim() });
+      if (editHostId) {
+        await apiPost(`/api/v1/databases/${remoteDbId}/remote-hosts/${editHostId}`, { host: remoteHostInput.trim() });
+        setEditHostId(null);
+      } else {
+        await apiPost(`/api/v1/databases/${remoteDbId}/remote-hosts`, { host: remoteHostInput.trim() });
+      }
       setRemoteHostInput("");
       await loadRemoteHosts();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not add host");
+      setError(e instanceof Error ? e.message : "Could not save host");
     } finally {
       setRemoteBusy(false);
     }
@@ -737,8 +752,13 @@ export default function DatabasesPage() {
                   />
                 </div>
                 <Button type="submit" disabled={remoteBusy}>
-                  {remoteBusy ? "Adding…" : "Allow host"}
+                  {remoteBusy ? "Saving…" : editHostId ? "Save host" : "Allow host"}
                 </Button>
+                {editHostId && (
+                  <Button type="button" variant="ghost" size="icon" onClick={cancelEditHost} aria-label="Cancel">
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
               </form>
               {remoteHosts.length > 0 && (
                 <ul className="divide-y divide-border/60 rounded-md border border-border/60">
@@ -749,6 +769,15 @@ export default function DatabasesPage() {
                         variant="ghost"
                         size="icon"
                         className="ml-auto h-7 w-7"
+                        onClick={() => startEditHost(h)}
+                        aria-label="Edit host"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7"
                         onClick={() => onDeleteRemoteHost(h.id)}
                         aria-label="Remove host"
                       >

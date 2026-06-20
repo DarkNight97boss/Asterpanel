@@ -34,6 +34,14 @@ func (s *Store) ListRemoteHosts(ctx context.Context, orgID, databaseID uuid.UUID
 	return out, rows.Err()
 }
 
+func (s *Store) UpdateRemoteHost(ctx context.Context, orgID, id uuid.UUID, host string) (*DBRemoteHost, error) {
+	const q = `
+		UPDATE db_remote_hosts SET host = $3
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, database_id, host, created_at`
+	return scanRemoteHost(s.pool.QueryRow(ctx, q, id, orgID, host))
+}
+
 func (s *Store) DeleteRemoteHost(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM db_remote_hosts WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

@@ -43,6 +43,16 @@ func (s *Store) ListSubdomains(ctx context.Context, orgID uuid.UUID) ([]Subdomai
 	return out, rows.Err()
 }
 
+// UpdateSubdomain edits a subdomain's document root / target URL (kind and FQDN
+// are the key and stay fixed).
+func (s *Store) UpdateSubdomain(ctx context.Context, orgID, id uuid.UUID, documentRoot, targetURL string) (*Subdomain, error) {
+	const q = `
+		UPDATE subdomains SET document_root = $3, target_url = $4
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, kind, fqdn, document_root, target_url, status, created_at`
+	return scanSubdomain(s.pool.QueryRow(ctx, q, id, orgID, documentRoot, targetURL))
+}
+
 func (s *Store) DeleteSubdomain(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM subdomains WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err
