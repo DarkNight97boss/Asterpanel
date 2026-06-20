@@ -183,6 +183,43 @@ func (s *Server) handleDeleteDNSRecord(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
+type updateDNSRecordRequest struct {
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	Content  string `json:"content"`
+	TTL      int    `json:"ttl"`
+	Priority *int   `json:"priority"`
+}
+
+func (s *Server) handleUpdateDNSRecord(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	recordID, perr := uuid.Parse(chi.URLParam(r, "recordID"))
+	if perr != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid record id")
+		return
+	}
+	var req updateDNSRecordRequest
+	if err := httpx.Decode(w, r, &req); err != nil || !validDNSTypes[req.Type] ||
+		strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.Content) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "name, a valid type and content are required")
+		return
+	}
+	rec, err := s.deps.Store.UpdateDNSRecord(ctx, p.OrgID, recordID, req.Name, req.Type, req.Content, req.TTL, req.Priority)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "record not found")
+		return
+	}
+	jobID, dispatched := s.applyZone(ctx, p, rec.ZoneID)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "dns.record.update", "dns_record", rec.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"type": rec.Type, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"record": dnsRecordView(*rec),
+		"job":    map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 // handleListNameservers returns the fleet's authoritative nameservers so a
 // customer knows which NS to set at their registrar (and sees the DNS cluster).
 func (s *Server) handleListNameservers(w http.ResponseWriter, r *http.Request) {

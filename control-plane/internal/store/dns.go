@@ -137,6 +137,31 @@ func (s *Store) DeleteDNSRecord(ctx context.Context, orgID, recordID uuid.UUID) 
 	return zoneID, norows(err)
 }
 
+// UpdateDNSRecord edits a record (org-scoped), bumps the zone serial and returns
+// the updated record (with its zone id) so the caller can re-apply the zone.
+func (s *Store) UpdateDNSRecord(ctx context.Context, orgID, recordID uuid.UUID, name, typ, content string, ttl int, priority *int) (*DNSRecord, error) {
+	if ttl <= 0 {
+		ttl = 3600
+	}
+	var rec DNSRecord
+	err := s.withTx(ctx, func(tx pgx.Tx) error {
+		if err := tx.QueryRow(ctx, `
+			UPDATE dns_records SET name = $3, type = $4, content = $5, ttl = $6, priority = $7, updated_at = now()
+			WHERE id = $1 AND organization_id = $2
+			RETURNING id, dns_zone_id, name, type, content, ttl, priority, proxied, created_at`,
+			recordID, orgID, name, typ, content, ttl, priority).
+			Scan(&rec.ID, &rec.ZoneID, &rec.Name, &rec.Type, &rec.Content, &rec.TTL, &rec.Priority, &rec.Proxied, &rec.CreatedAt); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `UPDATE dns_zones SET serial = serial + 1 WHERE id = $1`, rec.ZoneID)
+		return err
+	})
+	if err != nil {
+		return nil, norows(err)
+	}
+	return &rec, nil
+}
+
 // SetARecord upserts the A record for (zone, name) to ip and bumps the zone
 // serial. Used by the dynamic-DNS update endpoint (one A record per host).
 func (s *Store) SetARecord(ctx context.Context, zoneID, orgID uuid.UUID, name, ip string, ttl int) error {

@@ -9,6 +9,7 @@ import {
   Layers,
   List,
   Lock,
+  Pencil,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -27,6 +28,7 @@ import {
   createDnsRecord,
   createDomain,
   deleteDnsRecord,
+  updateDnsRecord,
   listDnsRecords,
   listDomains,
   type DnsRecord,
@@ -144,6 +146,7 @@ export default function DomainsPage() {
   const [recType, setRecType] = useState("A");
   const [recContent, setRecContent] = useState("");
   const [recPriority, setRecPriority] = useState("");
+  const [editRecId, setEditRecId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState("domains");
 
@@ -204,21 +207,41 @@ export default function DomainsPage() {
     }
   }
 
+  function startEditRecord(r: DnsRecord) {
+    setEditRecId(r.id);
+    setRecName(r.name);
+    setRecType(r.type);
+    setRecContent(r.content);
+    setRecPriority(r.priority != null ? String(r.priority) : "");
+  }
+  function cancelEditRecord() {
+    setEditRecId(null);
+    setRecContent("");
+    setRecPriority("");
+  }
+
   async function onAddRecord(e: FormEvent) {
     e.preventDefault();
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await createDnsRecord({
-        domain_id: recDomain,
+      const payload = {
         name: recName,
         type: recType,
         content: recContent,
         priority: recPriority ? Number(recPriority) : undefined,
-      });
-      setNotice("Record added; zone re-applied on the node.");
+      };
+      if (editRecId) {
+        await updateDnsRecord(editRecId, payload);
+        setNotice("Record updated; zone re-applied on the node.");
+        setEditRecId(null);
+      } else {
+        await createDnsRecord({ domain_id: recDomain, ...payload });
+        setNotice("Record added; zone re-applied on the node.");
+      }
       setRecContent("");
+      setRecPriority("");
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed");
@@ -606,9 +629,14 @@ export default function DomainsPage() {
               <Label htmlFor="recContent">Content</Label>
               <Input id="recContent" value={recContent} onChange={(e) => setRecContent(e.target.value)} required />
             </div>
-            <Button type="submit" disabled={busy || domains.length === 0}>
-              {busy ? "Adding…" : "Add"}
+            <Button type="submit" disabled={busy || (domains.length === 0 && !editRecId)}>
+              {busy ? "Saving…" : editRecId ? "Save" : "Add"}
             </Button>
+            {editRecId && (
+              <Button type="button" variant="ghost" onClick={cancelEditRecord}>
+                Cancel
+              </Button>
+            )}
           </form>
         </CardContent>
       </Card>
@@ -643,6 +671,9 @@ export default function DomainsPage() {
                   </td>
                   <td className="px-6 py-3 text-muted-foreground">{r.ttl}</td>
                   <td className="px-6 py-3 text-right">
+                    <Button variant="ghost" size="icon" onClick={() => startEditRecord(r)} title="Edit">
+                      <Pencil className="h-4 w-4 text-muted-foreground" />
+                    </Button>
                     <Button variant="ghost" size="icon" onClick={() => onDeleteRecord(r.id)} title="Delete">
                       <Trash2 className="h-4 w-4 text-muted-foreground" />
                     </Button>

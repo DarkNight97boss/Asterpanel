@@ -196,6 +196,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("dns.read", "dns.list", "dns_record")).Get("/dns", s.handleListDNSRecords)
 			r.With(az.Require("dns.read", "dns.nameservers", "dns_record")).Get("/dns/nameservers", s.handleListNameservers)
 			r.With(az.Require("dns.manage", "dns.create", "dns_record")).Post("/dns", s.handleCreateDNSRecord)
+			r.With(az.Require("dns.manage", "dns.update", "dns_record")).Post("/dns/{recordID}", s.handleUpdateDNSRecord)
 			r.With(az.Require("dns.manage", "dns.delete", "dns_record")).Delete("/dns/{recordID}", s.handleDeleteDNSRecord)
 
 			// DNSSEC (zone signing + DS record)
@@ -313,6 +314,7 @@ func (s *Server) routes() http.Handler {
 			// Cron jobs
 			r.With(az.Require("cron.read", "cron.list", "cron_job")).Get("/cron", s.handleListCron)
 			r.With(az.Require("cron.manage", "cron.create", "cron_job")).Post("/cron", s.handleCreateCron)
+			r.With(az.Require("cron.manage", "cron.update", "cron_job")).Post("/cron/{cronID}", s.handleUpdateCron)
 			r.With(az.Require("cron.manage", "cron.delete", "cron_job")).Delete("/cron/{cronID}", s.handleDeleteCron)
 
 			// FTP / SFTP accounts

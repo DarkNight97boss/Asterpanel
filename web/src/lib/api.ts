@@ -282,6 +282,12 @@ export async function createDnsRecord(input: {
 }) {
   return apiPost<{ record: DnsRecord }>("/api/v1/dns", input);
 }
+export async function updateDnsRecord(
+  id: string,
+  input: { name: string; type: string; content: string; ttl?: number; priority?: number },
+) {
+  return apiPost<{ record: DnsRecord }>(`/api/v1/dns/${id}`, input);
+}
 export async function deleteDnsRecord(id: string) {
   return apiDelete<{ deleted: boolean }>(`/api/v1/dns/${id}`);
 }

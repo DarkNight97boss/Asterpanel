@@ -36,6 +36,15 @@ func (s *Store) ListCronJobs(ctx context.Context, orgID uuid.UUID) ([]CronJob, e
 	return out, rows.Err()
 }
 
+// UpdateCronJob edits a cron job's schedule, command and enabled flag.
+func (s *Store) UpdateCronJob(ctx context.Context, orgID, id uuid.UUID, schedule, command string, enabled bool) (*CronJob, error) {
+	const q = `
+		UPDATE cron_jobs SET schedule = $3, command = $4, enabled = $5
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, schedule, command, enabled, last_run_at, last_status, created_at`
+	return scanCron(s.pool.QueryRow(ctx, q, id, orgID, schedule, command, enabled))
+}
+
 func (s *Store) DeleteCronJob(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM cron_jobs WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

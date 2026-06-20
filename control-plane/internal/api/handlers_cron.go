@@ -78,6 +78,44 @@ func (s *Server) handleDeleteCron(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
+type updateCronRequest struct {
+	Schedule string `json:"schedule"`
+	Command  string `json:"command"`
+	Enabled  *bool  `json:"enabled"`
+}
+
+func (s *Server) handleUpdateCron(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "cronID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req updateCronRequest
+	if err := httpx.Decode(w, r, &req); err != nil || strings.TrimSpace(req.Schedule) == "" || strings.TrimSpace(req.Command) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "schedule and command are required")
+		return
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	job, err := s.deps.Store.UpdateCronJob(ctx, p.OrgID, id, req.Schedule, req.Command, enabled)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "cron job not found")
+		return
+	}
+	jobID, dispatched := s.applyCron(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "cron.update", "cron_job", job.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"job":      map[string]any{"id": job.ID, "schedule": job.Schedule, "command": job.Command, "enabled": job.Enabled},
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 // applyCron renders the org's enabled crontab and dispatches it to a node.
 func (s *Server) applyCron(ctx context.Context, p *middleware.Principal) (uuid.UUID, bool) {
 	all, err := s.deps.Store.ListCronJobs(ctx, p.OrgID)
