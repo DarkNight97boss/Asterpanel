@@ -294,6 +294,7 @@ export default function EmailPage() {
     action_arg: "",
   });
   const [fltBusy, setFltBusy] = useState(false);
+  const [editFltId, setEditFltId] = useState<string | null>(null);
 
   async function refreshFilters() {
     try {
@@ -304,16 +305,39 @@ export default function EmailPage() {
     }
   }
 
+  function startEditFilter(f: Filter) {
+    setEditFltId(f.id);
+    setFlt({
+      address: f.address,
+      name: f.name,
+      field: f.field,
+      op: f.op,
+      value: f.value,
+      action: f.action,
+      action_arg: f.action_arg || "",
+    });
+  }
+  function cancelEditFilter() {
+    setEditFltId(null);
+    setFlt({ address: "", name: "", field: "subject", op: "contains", value: "", action: "fileinto", action_arg: "" });
+  }
+
   async function onCreateFilter(e: FormEvent) {
     e.preventDefault();
     setFltBusy(true);
     setError(null);
     try {
-      await apiPost("/api/v1/email/filters", { ...flt, address: flt.address.trim(), name: flt.name.trim() });
+      const payload = { ...flt, address: flt.address.trim(), name: flt.name.trim() };
+      if (editFltId) {
+        await apiPost(`/api/v1/email/filters/${editFltId}`, payload);
+        setEditFltId(null);
+      } else {
+        await apiPost("/api/v1/email/filters", payload);
+      }
       setFlt({ address: "", name: "", field: "subject", op: "contains", value: "", action: "fileinto", action_arg: "" });
       await refreshFilters();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not create filter");
+      setError(e instanceof Error ? e.message : "Could not save filter");
     } finally {
       setFltBusy(false);
     }
@@ -1127,9 +1151,16 @@ export default function EmailPage() {
                   />
                 </div>
               )}
-              <Button type="submit" disabled={fltBusy}>
-                {fltBusy ? "Saving…" : "Add filter"}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button type="submit" disabled={fltBusy}>
+                  {fltBusy ? "Saving…" : editFltId ? "Save" : "Add filter"}
+                </Button>
+                {editFltId && (
+                  <Button type="button" variant="ghost" size="icon" onClick={cancelEditFilter} aria-label="Cancel">
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           </form>
 
@@ -1151,6 +1182,15 @@ export default function EmailPage() {
                     variant="ghost"
                     size="icon"
                     className="ml-auto h-7 w-7"
+                    onClick={() => startEditFilter(f)}
+                    aria-label="Edit filter"
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7"
                     onClick={() => onDeleteFilter(f.id)}
                     aria-label="Delete filter"
                   >

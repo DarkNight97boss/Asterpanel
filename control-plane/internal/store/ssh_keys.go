@@ -43,6 +43,15 @@ func (s *Store) ListSSHKeys(ctx context.Context, orgID uuid.UUID) ([]SSHKey, err
 	return out, rows.Err()
 }
 
+// RenameSSHKey changes a key's display name (the public key is the immutable
+// identity, so it is not editable — delete and re-add to rotate).
+func (s *Store) RenameSSHKey(ctx context.Context, orgID, id uuid.UUID, name string) (*SSHKey, error) {
+	const q = `
+		UPDATE ssh_keys SET name = $3 WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, name, key_type, public_key, fingerprint, created_at`
+	return scanSSHKey(s.pool.QueryRow(ctx, q, id, orgID, name))
+}
+
 func (s *Store) DeleteSSHKey(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM ssh_keys WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

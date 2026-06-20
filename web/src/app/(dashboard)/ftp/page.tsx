@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { HardDrive, KeyRound, Trash2 } from "lucide-react";
+import { Check, HardDrive, KeyRound, Pencil, Trash2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,6 +38,8 @@ export default function FtpPage() {
   const [password, setPassword] = useState<string | null>(null);
   const [tab, setTab] = useState("accounts");
   const [sshKeys, setSshKeys] = useState<SSHKey[]>([]);
+  const [editKeyId, setEditKeyId] = useState<string | null>(null);
+  const [editKeyName, setEditKeyName] = useState("");
   const [keyName, setKeyName] = useState("");
   const [keyValue, setKeyValue] = useState("");
   const [keyBusy, setKeyBusy] = useState(false);
@@ -85,6 +87,17 @@ export default function FtpPage() {
       await loadKeys();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not delete key");
+    }
+  }
+
+  async function saveKeyName(keyId: string) {
+    setError(null);
+    try {
+      await apiPost(`/api/v1/ssh-keys/${keyId}`, { name: editKeyName.trim() });
+      setEditKeyId(null);
+      await loadKeys();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not rename key");
     }
   }
 
@@ -235,16 +248,48 @@ export default function FtpPage() {
               {sshKeys.map((k) => (
                 <li key={k.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
                   <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
-                  <div className="min-w-0">
-                    <div className="font-medium">{k.name}</div>
+                  <div className="min-w-0 grow">
+                    {editKeyId === k.id ? (
+                      <Input
+                        value={editKeyName}
+                        onChange={(e) => setEditKeyName(e.target.value)}
+                        className="h-8"
+                        autoFocus
+                      />
+                    ) : (
+                      <div className="font-medium">{k.name}</div>
+                    )}
                     <div className="truncate font-mono text-xs text-muted-foreground">
                       <span className="rounded bg-muted px-1 py-0.5">{k.key_type}</span> {k.fingerprint}
                     </div>
                   </div>
+                  {editKeyId === k.id ? (
+                    <>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => saveKeyName(k.id)} aria-label="Save name">
+                        <Check className="h-4 w-4 text-emerald-500" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditKeyId(null)} aria-label="Cancel">
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7"
+                      onClick={() => {
+                        setEditKeyId(k.id);
+                        setEditKeyName(k.name);
+                      }}
+                      aria-label="Rename key"
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="ml-auto h-7 w-7"
+                    className="h-7 w-7"
                     onClick={() => onDeleteKey(k.id)}
                     aria-label="Remove key"
                   >

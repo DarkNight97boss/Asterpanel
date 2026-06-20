@@ -107,6 +107,40 @@ func (s *Server) handleCreateSSHKey(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+type renameSSHKeyRequest struct {
+	Name string `json:"name"`
+}
+
+// handleRenameSSHKey changes a key's display name and re-applies the authorized
+// keys file (the public key itself is immutable).
+func (s *Server) handleRenameSSHKey(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "keyID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req renameSSHKeyRequest
+	if err := httpx.Decode(w, r, &req); err != nil || strings.TrimSpace(req.Name) == "" {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "a name is required")
+		return
+	}
+	k, err := s.deps.Store.RenameSSHKey(ctx, p.OrgID, id, strings.TrimSpace(req.Name))
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "key not found")
+		return
+	}
+	jobID, dispatched := s.applySSHKeys(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "ssh.key.rename", "ssh_key", k.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"name": k.Name, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"key":      sshKeyView(*k),
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteSSHKey(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)

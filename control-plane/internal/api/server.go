@@ -276,6 +276,7 @@ func (s *Server) routes() http.Handler {
 			// Email filters (Sieve rules)
 			r.With(az.Require("email.read", "email.list", "mailbox")).Get("/email/filters", s.handleListFilters)
 			r.With(az.Require("email.manage", "email.create", "mailbox")).Post("/email/filters", s.handleCreateFilter)
+			r.With(az.Require("email.manage", "email.update", "mailbox")).Post("/email/filters/{filterID}", s.handleUpdateFilter)
 			r.With(az.Require("email.manage", "email.delete", "mailbox")).Delete("/email/filters/{filterID}", s.handleDeleteFilter)
 
 			// Mail queue (Postfix: view / flush / delete deferred mail)
@@ -331,6 +332,7 @@ func (s *Server) routes() http.Handler {
 			// SSH authorized keys (cPanel "SSH Access") — rendered into authorized_keys
 			r.With(az.Require("ftp.read", "ssh.key.list", "ftp_account")).Get("/ssh-keys", s.handleListSSHKeys)
 			r.With(az.Require("ftp.manage", "ssh.key.add", "ftp_account")).Post("/ssh-keys", s.handleCreateSSHKey)
+			r.With(az.Require("ftp.manage", "ssh.key.rename", "ftp_account")).Post("/ssh-keys/{keyID}", s.handleRenameSSHKey)
 			r.With(az.Require("ftp.manage", "ssh.key.remove", "ftp_account")).Delete("/ssh-keys/{keyID}", s.handleDeleteSSHKey)
 
 			// Environment variables

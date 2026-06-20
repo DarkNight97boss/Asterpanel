@@ -47,6 +47,15 @@ func (s *Store) ListFilters(ctx context.Context, orgID uuid.UUID) ([]MailFilter,
 	return out, rows.Err()
 }
 
+// UpdateFilter edits a Sieve filter rule (the address it belongs to can change too).
+func (s *Store) UpdateFilter(ctx context.Context, orgID, id uuid.UUID, address, name, field, op, value, action, actionArg string, position int) (*MailFilter, error) {
+	const q = `
+		UPDATE mail_filters SET address = $3, name = $4, field = $5, op = $6, value = $7, action = $8, action_arg = $9, position = $10
+		WHERE id = $1 AND organization_id = $2
+		RETURNING id, organization_id, address, name, field, op, value, action, action_arg, position, enabled, created_at`
+	return scanFilter(s.pool.QueryRow(ctx, q, id, orgID, address, name, field, op, value, action, actionArg, position))
+}
+
 func (s *Store) DeleteFilter(ctx context.Context, orgID, id uuid.UUID) error {
 	_, err := s.pool.Exec(ctx, `DELETE FROM mail_filters WHERE id = $1 AND organization_id = $2`, id, orgID)
 	return err

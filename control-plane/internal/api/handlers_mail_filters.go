@@ -103,6 +103,56 @@ func (s *Server) handleCreateFilter(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (s *Server) handleUpdateFilter(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	id, err := uuid.Parse(chi.URLParam(r, "filterID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid id")
+		return
+	}
+	var req createFilterRequest
+	if err := httpx.Decode(w, r, &req); err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid request body")
+		return
+	}
+	address := strings.ToLower(strings.TrimSpace(req.Address))
+	name := strings.TrimSpace(req.Name)
+	value := strings.TrimSpace(req.Value)
+	arg := strings.TrimSpace(req.ActionArg)
+	if !validEmailAddr(address) || name == "" || value == "" ||
+		!validFilterField[req.Field] || !validFilterOp[req.Op] || !validFilterAction[req.Action] {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "address, name, value and a valid field/op/action are required")
+		return
+	}
+	switch req.Action {
+	case "fileinto":
+		if arg == "" {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "fileinto requires a target folder")
+			return
+		}
+	case "redirect":
+		arg = strings.ToLower(arg)
+		if !validEmailAddr(arg) {
+			httpx.Error(w, http.StatusBadRequest, "invalid_request", "redirect requires a valid email address")
+			return
+		}
+	}
+	f, err := s.deps.Store.UpdateFilter(ctx, p.OrgID, id, address, name, req.Field, req.Op, value, req.Action, arg, req.Position)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "filter not found")
+		return
+	}
+	jobID, dispatched := s.applyFilters(ctx, p)
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "email.filter.update", "mail_filter", f.ID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"address": address, "action": req.Action, "job_id": jobID.String()})
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"filter":   filterView(*f),
+		"dispatch": map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 func (s *Server) handleDeleteFilter(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	p := middleware.PrincipalFrom(ctx)
