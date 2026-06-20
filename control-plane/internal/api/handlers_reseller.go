@@ -181,6 +181,16 @@ func (s *Server) handleCreateSubAccount(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Sub-account count limit: a reseller's plan may cap how many customers it
+	// can have (max_accounts). No plan / no cap means unlimited.
+	if _, plimits, perr := s.deps.Store.GetOrgPlanLimits(ctx, p.OrgID); perr == nil && plimits["max_accounts"] > 0 {
+		if n, cerr := s.deps.Store.CountSubAccounts(ctx, p.OrgID); cerr == nil && n >= plimits["max_accounts"] {
+			httpx.ErrorWithDetails(w, http.StatusForbidden, "account_limit",
+				"your plan's sub-account limit is reached", map[string]any{"used": n, "limit": plimits["max_accounts"]})
+			return
+		}
+	}
+
 	ownerRole, err := s.deps.Store.GetSystemRoleID(ctx, "owner")
 	if err != nil {
 		httpx.Error(w, http.StatusInternalServerError, "internal_error", "owner role missing")
@@ -283,6 +293,11 @@ func (s *Server) handleResellerBudget(w http.ResponseWriter, r *http.Request) {
 				"allocated": alloc[key],
 				"limit":     lim,
 			})
+		}
+		// Sub-account COUNT is a budget too — counted, not summed from child plans.
+		if max := limits["max_accounts"]; max > 0 {
+			n, _ := s.deps.Store.CountSubAccounts(ctx, p.OrgID)
+			out = append(out, map[string]any{"resource": "accounts", "allocated": n, "limit": max})
 		}
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"budget": out})

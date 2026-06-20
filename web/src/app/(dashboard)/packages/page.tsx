@@ -29,6 +29,7 @@ const QUOTAS: { key: string; label: string }[] = [
   { key: "max_databases", label: "Databases" },
   { key: "max_mailboxes", label: "Mailboxes" },
   { key: "max_nodes", label: "Nodes" },
+  { key: "max_accounts", label: "Sub-accounts" },
 ];
 
 const emptyLimits = (): Record<string, string> =>
