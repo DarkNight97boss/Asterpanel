@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/ui/badge";
-import { Database, Network, Pencil, Terminal, Trash2, Users, X } from "lucide-react";
+import { Database, KeyRound, Network, Pencil, Terminal, Trash2, Users, X } from "lucide-react";
 
 import { apiDelete, apiGet, apiPost, apiPut, createDatabase, listDatabases, type DatabaseInstance } from "@/lib/api";
 import { PageHeader } from "@/components/page-header";
@@ -325,6 +325,21 @@ export default function DatabasesPage() {
     }
   }
 
+  async function onResetUserPassword(uid: string) {
+    setError(null);
+    setNewUserPw(null);
+    try {
+      const r = await apiPost<{ password: string }>(
+        `/api/v1/databases/${userDbId}/users/${uid}/password`,
+        {},
+      );
+      setNewUserPw(r.password);
+      await loadDBUsers();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not reset password");
+    }
+  }
+
   async function onSavePrivileges(uid: string) {
     setError(null);
     try {
@@ -571,6 +586,18 @@ export default function DatabasesPage() {
                               }}
                             >
                               Edit privileges
+                            </Button>
+                          )}
+                          {editUser !== u.id && (
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => onResetUserPassword(u.id)}
+                              aria-label="Reset password"
+                              title="Reset password"
+                            >
+                              <KeyRound className="h-4 w-4" />
                             </Button>
                           )}
                           <Button

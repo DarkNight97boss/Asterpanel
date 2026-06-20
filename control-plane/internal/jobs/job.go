@@ -37,6 +37,7 @@ const (
 	TypeDatabaseDelete    Type = "database.delete"
 	TypeDatabaseUser      Type = "database.user.create"
 	TypeDatabaseUserGrant Type = "database.user.privileges"
+	TypeDatabaseUserPass  Type = "database.user.password"
 	TypeDatabaseUserDrop  Type = "database.user.delete"
 	TypeDatabaseQuery     Type = "database.query"
 	TypeDatabaseAccess    Type = "database.access.apply"

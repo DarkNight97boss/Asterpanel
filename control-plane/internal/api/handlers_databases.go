@@ -377,6 +377,87 @@ func (s *Server) handleCreateDBUser(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// handleResetDBUserPassword generates a fresh password for an existing database
+// user, re-seals it under the same AAD/secret, and dispatches a signed
+// database.user.password job so the agent runs ALTER USER/ROLE in the container.
+func (s *Server) handleResetDBUserPassword(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	dbID, err := uuid.Parse(chi.URLParam(r, "dbID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid database id")
+		return
+	}
+	userID, err := uuid.Parse(chi.URLParam(r, "userID"))
+	if err != nil {
+		httpx.Error(w, http.StatusBadRequest, "invalid_request", "invalid user id")
+		return
+	}
+	u, err := s.deps.Store.GetDBUser(ctx, p.OrgID, userID)
+	if err != nil || u.DatabaseID != dbID {
+		httpx.Error(w, http.StatusNotFound, "not_found", "user not found")
+		return
+	}
+	if !u.CredentialsSecretID.Valid {
+		httpx.Error(w, http.StatusConflict, "no_secret", "user has no stored credentials")
+		return
+	}
+	db, err := s.deps.Store.GetDatabaseInstance(ctx, p.OrgID, dbID)
+	if err != nil {
+		httpx.Error(w, http.StatusNotFound, "not_found", "database not found")
+		return
+	}
+	nodeID := uuid.Nil
+	if db.ServerNodeID.Valid {
+		nodeID = db.ServerNodeID.UUID
+	} else if n := s.firstNode(ctx, p.OrgID); n != nil {
+		nodeID = n.ID
+	}
+	if nodeID == uuid.Nil {
+		httpx.Error(w, http.StatusBadRequest, "no_nodes", "no node available")
+		return
+	}
+	if ok, reason := s.jobPolicyAllows(ctx, p, jobs.TypeDatabaseUserPass, nodeID); !ok {
+		httpx.Error(w, http.StatusForbidden, "forbidden", "job denied by policy: "+reason)
+		return
+	}
+
+	password, err := crypto.RandomHex(16)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not generate password")
+		return
+	}
+	ct, nonce, err := s.deps.Envelope.Encrypt([]byte(password), []byte("database_user:"+userID.String()))
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not seal credentials")
+		return
+	}
+	if err := s.deps.Store.UpdateSecretByID(ctx, u.CredentialsSecretID.UUID, ct, nonce, s.deps.Envelope.KeyID()); err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not store credentials")
+		return
+	}
+
+	owner := db.Name
+	if db.DBUser != nil && *db.DBUser != "" {
+		owner = *db.DBUser
+	}
+	payload := map[string]any{
+		"database_id": dbID, "engine": db.Engine, "database": db.Name, "owner": owner,
+		"username": u.Username, "host": u.HostScope, "password": password,
+	}
+	jobID, dispatched, _ := s.signPersistDispatch(ctx, p, jobs.TypeDatabaseUserPass, nodeID, payload)
+
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "database.user.password", "database_instance", dbID.String(), audit.OutcomeSuccess, r,
+		map[string]any{"username": u.Username, "job_id": jobID.String()})
+
+	httpx.JSON(w, http.StatusOK, map[string]any{
+		"user":     dbUserView(*u),
+		"password": password,
+		"job":      map[string]any{"id": jobID, "dispatched": dispatched},
+	})
+}
+
 type setDBUserPrivilegesRequest struct {
 	Privileges []string `json:"privileges"`
 }

@@ -242,6 +242,7 @@ func (s *Server) routes() http.Handler {
 			r.With(az.Require("database.read", "database.user.list", "database_instance")).Get("/databases/{dbID}/users", s.handleListDBUsers)
 			r.With(az.Require("database.create", "database.user.create", "database_instance")).Post("/databases/{dbID}/users", s.handleCreateDBUser)
 			r.With(az.Require("database.create", "database.user.privileges", "database_instance")).Put("/databases/{dbID}/users/{userID}/privileges", s.handleSetDBUserPrivileges)
+			r.With(az.Require("database.create", "database.user.password", "database_instance")).Post("/databases/{dbID}/users/{userID}/password", s.handleResetDBUserPassword)
 			r.With(az.Require("database.create", "database.user.delete", "database_instance")).Delete("/databases/{dbID}/users/{userID}", s.handleDeleteDBUser)
 			r.With(az.Require("database.query", "database.query", "database_instance")).Post("/databases/{dbID}/query", s.handleDatabaseQuery)
 			r.With(az.Require("backup.create", "database.export", "database_instance")).Post("/databases/{dbID}/export", s.handleDatabaseExport)

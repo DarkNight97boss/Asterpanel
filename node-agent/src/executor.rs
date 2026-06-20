@@ -87,6 +87,7 @@ impl Executor for DockerExecutor {
             "staging.destroy" => self.staging_destroy(job).await,
             "database.user.create" => self.database_user_create(job).await,
             "database.user.privileges" => self.database_user_privileges(job).await,
+            "database.user.password" => self.database_user_password(job).await,
             "database.user.delete" => self.database_user_delete(job).await,
             "database.query" => self.database_query(job).await,
             "database.access.apply" => self.database_access_apply(job).await,
@@ -1041,6 +1042,41 @@ impl DockerExecutor {
 
     async fn database_user_privileges(&self, job: &Job) -> JobOutcome {
         self.database_user_apply(job, false).await
+    }
+
+    /// Resets a database user's password by running an injection-safe ALTER
+    /// statement inside the DB container (the username, host and password are
+    /// all validated before the SQL is rendered).
+    async fn database_user_password(&self, job: &Job) -> JobOutcome {
+        let pv = |k: &str| job.payload.get(k).and_then(Value::as_str);
+        let db_id = pv("database_id").unwrap_or("unknown");
+        let engine = pv("engine").unwrap_or("postgres");
+        let database = pv("database").unwrap_or("app");
+        let owner = pv("owner").unwrap_or(database);
+        let username = pv("username").unwrap_or("");
+        let host = pv("host").unwrap_or("%");
+        let password = pv("password").unwrap_or("");
+        if username.is_empty() {
+            return JobOutcome::failed("database.user.password: missing username");
+        }
+        let sql = match render_db_user_password(engine, username, host, password) {
+            Some(s) => s,
+            None => {
+                return JobOutcome::failed(
+                    "database.user.password: unsafe input or unsupported engine",
+                )
+            }
+        };
+        let container = format!("astp_db_{db_id}");
+        let args = match db_user_apply_args(engine, &container, owner, database, &sql) {
+            Some(a) => a,
+            None => {
+                return JobOutcome::failed(format!(
+                    "database.user.password: unsupported engine {engine}"
+                ))
+            }
+        };
+        apply_admin_sql(&args, json!({"username": username, "database": database})).await
     }
 
     /// Creates (when `with_password`) or re-grants a database user. The CREATE
@@ -3332,6 +3368,30 @@ fn render_db_user_drop(engine: &str, username: &str, host: &str) -> Option<Strin
     }
 }
 
+/// Renders the SQL to change a database user's password (MySQL `ALTER USER …
+/// IDENTIFIED BY`, Postgres `ALTER ROLE … PASSWORD`). Returns None if the
+/// username, host or password is not injection-safe, or the engine is unknown.
+fn render_db_user_password(engine: &str, username: &str, host: &str, password: &str) -> Option<String> {
+    if !valid_db_username(username) {
+        return None;
+    }
+    if password.is_empty() || password.contains('\'') || password.contains('\\') {
+        return None; // never emit an unescaped credential
+    }
+    match engine {
+        "mysql" | "mariadb" => {
+            if !valid_mysql_host(host) {
+                return None;
+            }
+            Some(format!(
+                "ALTER USER '{username}'@'{host}' IDENTIFIED BY '{password}';\nFLUSH PRIVILEGES;\n"
+            ))
+        }
+        "postgres" => Some(format!("ALTER ROLE \"{username}\" WITH PASSWORD '{password}';\n")),
+        _ => None,
+    }
+}
+
 /// Builds the `docker exec` argv that runs DB-user admin SQL inside the container.
 fn db_user_apply_args(
     engine: &str,
@@ -4425,6 +4485,24 @@ mod tests {
             .unwrap()
             .contains("DROP USER IF EXISTS 'shop_ro'@'10.0.0.5'"));
         assert!(render_db_user_drop("mysql", "bad name", "%").is_none());
+    }
+
+    #[test]
+    fn db_user_password_reset() {
+        // MySQL ALTER USER keeps the host scope and flushes privileges
+        let my = render_db_user_password("mysql", "shop_ro", "10.0.0.5", "newhex").unwrap();
+        assert!(my.contains("ALTER USER 'shop_ro'@'10.0.0.5' IDENTIFIED BY 'newhex'"), "{my}");
+        assert!(my.contains("FLUSH PRIVILEGES"), "{my}");
+        // Postgres ALTER ROLE
+        let pg = render_db_user_password("postgres", "reader", "%", "newhex").unwrap();
+        assert!(pg.contains("ALTER ROLE \"reader\" WITH PASSWORD 'newhex'"), "{pg}");
+        // unsafe inputs are refused before any SQL is emitted
+        assert!(render_db_user_password("mysql", "shop_ro", "%", "p'x").is_none()); // quote in pw
+        assert!(render_db_user_password("mysql", "shop_ro", "%", "p\\x").is_none()); // backslash in pw
+        assert!(render_db_user_password("postgres", "u", "%", "").is_none()); // empty pw
+        assert!(render_db_user_password("mysql", "bad name", "%", "p").is_none()); // bad username
+        assert!(render_db_user_password("mysql", "u", "ho'st", "p").is_none()); // bad host
+        assert!(render_db_user_password("redis", "u", "%", "p").is_none()); // unsupported engine
     }
 
     #[test]
