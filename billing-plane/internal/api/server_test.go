@@ -158,7 +158,7 @@ func TestDunningSuspendsThenPaymentReactivates(t *testing.T) {
 	c, _ := st.CreateClient("Acme", "a@acme.example")
 	svc, _ := st.CreateService(store.Service{ClientID: c.ID, Backend: "fake", HostingAccountID: "acct-9", Status: "active"})
 	// An invoice already past due.
-	inv, _ := st.CreateInvoice(c.ID, []store.InvoiceLine{{Description: "Pro", AmountCents: 2900}}, -5)
+	inv, _ := st.CreateInvoice(c.ID, svc.ID, []store.InvoiceLine{{Description: "Pro", AmountCents: 2900}}, -5)
 
 	// Dunning must suspend the client's service via the hosting seam.
 	if rec, out := do(t, h, "POST", "/api/dunning", ""); rec.Code != http.StatusOK || out["suspended"].(float64) != 1 {
@@ -178,6 +178,21 @@ func TestDunningSuspendsThenPaymentReactivates(t *testing.T) {
 	}
 	if got, _ := st.GetService(svc.ID); got.Status != "active" || got.SuspendReason != "" {
 		t.Fatalf("service not reactivated after payment: %#v", got)
+	}
+}
+
+func TestRecurringBillingIsIdempotentPerPeriod(t *testing.T) {
+	h := newTestServer(&fakeBackend{})
+	_, cres := do(t, h, "POST", "/api/clients", `{"name":"Acme","email":"a@acme.example"}`)
+	clientID := cres["client"].(map[string]any)["id"].(string)
+	_, pres := do(t, h, "POST", "/api/products", `{"name":"Pro","plan_code":"pro","price_cents":2900}`)
+	productID := pres["product"].(map[string]any)["id"].(string)
+	// Provisioning already raised this period's first invoice for the service.
+	do(t, h, "POST", "/api/services", `{"client_id":"`+clientID+`","product_id":"`+productID+`"}`)
+
+	// A billing run this same period must NOT double-bill the service.
+	if _, out := do(t, h, "POST", "/api/billing/run", ""); out["generated"].(float64) != 0 || out["skipped"].(float64) != 1 {
+		t.Fatalf("recurring run should skip the already-billed service: %#v", out)
 	}
 }
 

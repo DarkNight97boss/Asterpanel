@@ -144,7 +144,7 @@ func (m *Memory) SetServiceStatus(id, status, reason string) (Service, error) {
 	return s, nil
 }
 
-func (m *Memory) CreateInvoice(clientID string, lines []InvoiceLine, dueDays int) (Invoice, error) {
+func (m *Memory) CreateInvoice(clientID, serviceID string, lines []InvoiceLine, dueDays int) (Invoice, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	total := 0
@@ -156,6 +156,7 @@ func (m *Memory) CreateInvoice(clientID string, lines []InvoiceLine, dueDays int
 	inv := Invoice{
 		ID:         NewID("inv"),
 		ClientID:   clientID,
+		ServiceID:  serviceID,
 		Number:     fmt.Sprintf("INV-%d-%04d", now.Year(), m.invSeq),
 		Status:     "open",
 		TotalCents: total,

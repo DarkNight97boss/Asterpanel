@@ -53,6 +53,24 @@ export default function InvoicesPage() {
     }
   }
 
+  async function runBilling() {
+    setError(null);
+    setNotice(null);
+    try {
+      const { generated, skipped } = await apiPost<{ generated: number; skipped: number }>(
+        "/api/billing/run",
+        {},
+      );
+      setNotice(
+        `Fatturazione: ${generated} ${generated === 1 ? "fattura generata" : "fatture generate"}` +
+          (skipped ? `, ${skipped} già fatturate questo mese.` : "."),
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Fatturazione non riuscita");
+    }
+  }
+
   async function load() {
     try {
       const [inv, cli] = await Promise.all([
@@ -95,9 +113,14 @@ export default function InvoicesPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Fatture ({invoices.length})</CardTitle>
-          <Button variant="outline" size="sm" onClick={runDunning} title="Sospendi i clienti con fatture scadute">
-            Esegui dunning
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={runBilling} title="Genera le fatture del periodo per i servizi attivi">
+              Esegui fatturazione
+            </Button>
+            <Button variant="outline" size="sm" onClick={runDunning} title="Sospendi i clienti con fatture scadute">
+              Esegui dunning
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">

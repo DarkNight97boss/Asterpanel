@@ -43,6 +43,7 @@ type Service struct {
 	HostingAccountID string    `json:"hosting_account_id"` // the panel's id for the account
 	Status           string    `json:"status"`             // pending, active, suspended, terminated
 	SuspendReason    string    `json:"suspend_reason"`     // "", manual, dunning
+	PriceCents       int       `json:"price_cents"`        // recurring price (from the product)
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -55,6 +56,7 @@ type InvoiceLine struct {
 type Invoice struct {
 	ID         string        `json:"id"`
 	ClientID   string        `json:"client_id"`
+	ServiceID  string        `json:"service_id"` // the service this invoice bills (recurring)
 	Number     string        `json:"number"`
 	Status     string        `json:"status"` // open, paid, void
 	TotalCents int           `json:"total_cents"`
@@ -81,7 +83,7 @@ type Store interface {
 	GetService(id string) (Service, error)
 	SetServiceStatus(id, status, reason string) (Service, error)
 
-	CreateInvoice(clientID string, lines []InvoiceLine, dueDays int) (Invoice, error)
+	CreateInvoice(clientID, serviceID string, lines []InvoiceLine, dueDays int) (Invoice, error)
 	ListInvoices() []Invoice
 	GetInvoice(id string) (Invoice, error)
 	SetInvoiceStatus(id, status string) (Invoice, error)

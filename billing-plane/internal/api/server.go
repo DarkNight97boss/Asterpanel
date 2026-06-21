@@ -42,6 +42,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/invoices", s.listInvoices)
 	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
 	mux.HandleFunc("POST /api/dunning", s.runDunning)
+	mux.HandleFunc("POST /api/billing/run", s.runBilling)
 	return mux
 }
 
@@ -158,7 +159,7 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	}
 	svc, err := s.store.CreateService(store.Service{
 		ClientID: client.ID, Product: productName, PlanCode: planCode,
-		Backend: backendName, HostingAccountID: acc.ID, Status: "active",
+		Backend: backendName, HostingAccountID: acc.ID, Status: "active", PriceCents: priceCents,
 	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal_error", "provisioned but could not record service")
@@ -167,7 +168,7 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	// First invoice for the new service, billed at the product's price.
 	var invoice *store.Invoice
 	if priceCents > 0 {
-		if inv, ierr := s.store.CreateInvoice(client.ID,
+		if inv, ierr := s.store.CreateInvoice(client.ID, svc.ID,
 			[]store.InvoiceLine{{Description: productName, AmountCents: priceCents}}, 14); ierr == nil {
 			invoice = &inv
 		}
@@ -177,6 +178,33 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) listInvoices(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"invoices": s.store.ListInvoices()})
+}
+
+// runBilling is the recurring engine: it raises this month's invoice for every
+// active, priced service not yet billed for the current period. Idempotent.
+func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
+	now := time.Now().UTC()
+	billed := map[string]bool{}
+	for _, inv := range s.store.ListInvoices() {
+		if inv.ServiceID != "" && inv.IssuedAt.Year() == now.Year() && inv.IssuedAt.Month() == now.Month() {
+			billed[inv.ServiceID] = true
+		}
+	}
+	generated, skipped := 0, 0
+	for _, svc := range s.store.ListServices() {
+		if svc.Status != "active" || svc.PriceCents <= 0 {
+			continue
+		}
+		if billed[svc.ID] {
+			skipped++
+			continue
+		}
+		if _, err := s.store.CreateInvoice(svc.ClientID, svc.ID,
+			[]store.InvoiceLine{{Description: svc.Product, AmountCents: svc.PriceCents}}, 14); err == nil {
+			generated++
+		}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
 }
 
 func (s *Server) payInvoice(w http.ResponseWriter, r *http.Request) {
