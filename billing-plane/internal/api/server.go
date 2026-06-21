@@ -43,6 +43,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
 	mux.HandleFunc("POST /api/dunning", s.runDunning)
 	mux.HandleFunc("POST /api/billing/run", s.runBilling)
+	mux.HandleFunc("GET /api/backends", s.listBackends)
 	mux.HandleFunc("GET /api/tickets", s.listTickets)
 	mux.HandleFunc("POST /api/tickets", s.createTicket)
 	mux.HandleFunc("GET /api/tickets/{id}", s.getTicket)
@@ -210,6 +211,18 @@ func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
+}
+
+// listBackends reports the configured hosting modules and whether each is
+// reachable — the integration seam, made observable for the admin.
+func (s *Server) listBackends(w http.ResponseWriter, r *http.Request) {
+	out := make([]map[string]any, 0)
+	for _, name := range s.backends.Names() {
+		b, _ := s.backends.Get(name)
+		connected := b.TestConnection(r.Context()) == nil
+		out = append(out, map[string]any{"name": name, "configured": true, "connected": connected})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"backends": out})
 }
 
 var ticketPriorities = map[string]bool{"low": true, "normal": true, "high": true}

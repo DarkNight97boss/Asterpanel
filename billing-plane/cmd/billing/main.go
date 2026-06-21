@@ -22,6 +22,10 @@ func main() {
 	// is built in; cPanel/Plesk modules register here too once they exist.
 	reg := hosting.NewRegistry()
 	reg.Register(hosting.NewAsterPanel(cfg.HostingBaseURL, cfg.HostingAPIToken))
+	// cPanel/WHM is a pluggable module; register it only when configured.
+	if cfg.CPanelURL != "" {
+		reg.Register(hosting.NewCPanel(cfg.CPanelURL, cfg.CPanelUser, cfg.CPanelToken))
+	}
 
 	srv := api.NewServer(store.NewMemory(), reg, cfg.HostingBackend)
 

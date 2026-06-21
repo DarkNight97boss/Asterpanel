@@ -26,12 +26,12 @@ const NAV = [
   { href: "/admin/services", label: "Servizi", icon: Server },
   { href: "/admin/invoices", label: "Fatture", icon: FileText },
   { href: "/admin/support", label: "Supporto", icon: LifeBuoy },
+  { href: "/admin/hosting", label: "Hosting", icon: Plug },
 ];
 
 const SOON = [
   { label: "Ordini", icon: ShoppingCart },
   { label: "Automazione", icon: Bot },
-  { label: "Hosting", icon: Plug },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

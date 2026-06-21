@@ -26,6 +26,7 @@ type CreateAccountRequest struct {
 	Name     string // company / account display name
 	Email    string // owner email
 	PlanCode string // the hosting package to provision (maps to a panel plan)
+	Domain   string // primary domain (some panels, e.g. cPanel, require it)
 }
 
 // Backend is a hosting control panel a billing service can drive. Every method

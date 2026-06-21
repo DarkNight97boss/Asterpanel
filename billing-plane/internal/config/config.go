@@ -11,6 +11,10 @@ type Config struct {
 	HostingBackend  string // "asterpanel" (the registered module to use by default)
 	HostingBaseURL  string // control-plane root, e.g. https://panel.example.com
 	HostingAPIToken string // reseller-scoped API token for that control plane
+	// Optional cPanel/WHM backend — registered only when a URL is configured.
+	CPanelURL   string
+	CPanelUser  string
+	CPanelToken string
 }
 
 func env(key, def string) string {
@@ -27,5 +31,8 @@ func Load() Config {
 		HostingBackend:  env("BILLING_HOSTING_BACKEND", "asterpanel"),
 		HostingBaseURL:  env("BILLING_HOSTING_BASE_URL", "http://localhost:8080"),
 		HostingAPIToken: os.Getenv("BILLING_HOSTING_API_TOKEN"),
+		CPanelURL:       os.Getenv("BILLING_CPANEL_URL"),
+		CPanelUser:      env("BILLING_CPANEL_USER", "root"),
+		CPanelToken:     os.Getenv("BILLING_CPANEL_TOKEN"),
 	}
 }
