@@ -187,6 +187,47 @@ func (s *Store) SumSubAccountPlanLimits(ctx context.Context, parentOrgID uuid.UU
 	return sum, rows.Err()
 }
 
+// SuspendOverdueSubAccounts is the dunning sweep: it suspends a reseller's
+// active direct sub-accounts that have at least one unpaid invoice past its due
+// date, tagging the suspension 'overdue' so payment can later auto-reactivate
+// exactly those. Returns how many were suspended.
+func (s *Store) SuspendOverdueSubAccounts(ctx context.Context, parentOrgID uuid.UUID) (int, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE organizations o
+		SET status = 'suspended', suspension_source = 'overdue'
+		WHERE o.parent_org_id = $1 AND o.deleted_at IS NULL AND o.status = 'active'
+		  AND EXISTS (
+		    SELECT 1 FROM invoices i
+		    WHERE i.organization_id = o.id
+		      AND i.status IN ('draft', 'open')
+		      AND i.due_at IS NOT NULL AND i.due_at < now()
+		  )`, parentOrgID)
+	if err != nil {
+		return 0, err
+	}
+	return int(tag.RowsAffected()), nil
+}
+
+// ClearOverdueSuspension reactivates an org that was suspended for non-payment
+// once it no longer has any overdue invoice. No-op for orgs suspended for any
+// other reason. Returns whether it reactivated.
+func (s *Store) ClearOverdueSuspension(ctx context.Context, orgID uuid.UUID) (bool, error) {
+	tag, err := s.pool.Exec(ctx, `
+		UPDATE organizations o
+		SET status = 'active', suspension_source = NULL
+		WHERE o.id = $1 AND o.suspension_source = 'overdue'
+		  AND NOT EXISTS (
+		    SELECT 1 FROM invoices i
+		    WHERE i.organization_id = o.id
+		      AND i.status IN ('draft', 'open')
+		      AND i.due_at IS NOT NULL AND i.due_at < now()
+		  )`, orgID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
 // CountSubAccounts is used to enforce a reseller's sub-account quota.
 func (s *Store) CountSubAccounts(ctx context.Context, parentOrgID uuid.UUID) (int, error) {
 	var n int

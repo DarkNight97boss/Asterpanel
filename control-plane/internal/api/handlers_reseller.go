@@ -419,6 +419,22 @@ func (s *Server) resellerOwnsAccount(w http.ResponseWriter, ctx context.Context,
 	return true
 }
 
+// handleRunDunning runs the dunning sweep: suspends the caller's customers that
+// have an overdue invoice. Paying the invoice reactivates them automatically.
+func (s *Server) handleRunDunning(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	n, err := s.deps.Store.SuspendOverdueSubAccounts(ctx, p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not run dunning")
+		return
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.dunning.run", "organization", org.String(), audit.OutcomeSuccess, r,
+		map[string]any{"suspended": n})
+	httpx.JSON(w, http.StatusOK, map[string]any{"suspended": n})
+}
+
 // handleInvoiceSubAccount issues an invoice from a customer's plan — the reseller
 // billing its customer (the WHMCS relationship). The invoice belongs to the
 // sub-account org; the customer settles it from their own billing area.

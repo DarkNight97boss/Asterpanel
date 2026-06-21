@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, LogIn, Pencil, Receipt, X } from "lucide-react";
+import { AlarmClock, Copy, LogIn, Pencil, Receipt, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -209,6 +209,23 @@ export default function ResellerPage() {
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to update status");
+    }
+  }
+
+  // Dunning: suspend customers with overdue invoices (paying reactivates them).
+  async function runDunning() {
+    setError(null);
+    setNotice(null);
+    try {
+      const { suspended } = await apiPost<{ suspended: number }>("/api/v1/reseller/dunning", {});
+      setNotice(
+        suspended > 0
+          ? `Dunning: suspended ${suspended} ${suspended === 1 ? "customer" : "customers"} with overdue invoices.`
+          : "Dunning: no customers with overdue invoices.",
+      );
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not run dunning");
     }
   }
 
@@ -430,8 +447,12 @@ export default function ResellerPage() {
       </Card>
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Sub-accounts ({accounts.length})</CardTitle>
+          <Button variant="outline" size="sm" onClick={runDunning} title="Suspend customers with overdue invoices">
+            <AlarmClock className="h-4 w-4" />
+            Run dunning
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">

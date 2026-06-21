@@ -194,6 +194,11 @@ func (s *Server) handlePayInvoice(w http.ResponseWriter, r *http.Request) {
 		s.deps.Webhooks.Fire(ctx, p.OrgID, "invoice.paid",
 			map[string]any{"id": inv.ID, "number": inv.Number, "total_cents": inv.TotalCents, "currency": inv.Currency, "reference": ref})
 	}
+	// Dunning reversal: if this org was suspended for non-payment and now has no
+	// overdue invoices left, bring it back online automatically.
+	if reactivated, _ := s.deps.Store.ClearOverdueSuspension(ctx, p.OrgID); reactivated {
+		s.audit(ctx, &org, &p.UserID, "billing.dunning.reactivated", "organization", p.OrgID.String(), audit.OutcomeSuccess, r, nil)
+	}
 
 	updated, _ := s.deps.Store.GetInvoice(ctx, p.OrgID, id)
 	if updated == nil {
