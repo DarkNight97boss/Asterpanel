@@ -196,6 +196,24 @@ func TestRecurringBillingIsIdempotentPerPeriod(t *testing.T) {
 	}
 }
 
+func TestListsScopeByClient(t *testing.T) {
+	h := newTestServer(&fakeBackend{})
+	_, a := do(t, h, "POST", "/api/clients", `{"name":"A","email":"a@a.example"}`)
+	_, b := do(t, h, "POST", "/api/clients", `{"name":"B","email":"b@b.example"}`)
+	aid := a["client"].(map[string]any)["id"].(string)
+	bid := b["client"].(map[string]any)["id"].(string)
+	_, p := do(t, h, "POST", "/api/products", `{"name":"Pro","plan_code":"pro","price_cents":2900}`)
+	pid := p["product"].(map[string]any)["id"].(string)
+	do(t, h, "POST", "/api/services", `{"client_id":"`+aid+`","product_id":"`+pid+`"}`)
+	do(t, h, "POST", "/api/services", `{"client_id":"`+bid+`","product_id":"`+pid+`"}`)
+
+	_, out := do(t, h, "GET", "/api/invoices?client_id="+aid, "")
+	invs := out["invoices"].([]any)
+	if len(invs) != 1 || invs[0].(map[string]any)["client_id"] != aid {
+		t.Fatalf("client scoping leaked other clients' invoices: %#v", invs)
+	}
+}
+
 func TestSupportTicketThread(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	_, cres := do(t, h, "POST", "/api/tickets",

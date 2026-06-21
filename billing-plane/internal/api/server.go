@@ -113,8 +113,18 @@ func (s *Server) deleteProduct(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
 }
 
-func (s *Server) listServices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"services": s.store.ListServices()})
+func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
+	out := s.store.ListServices()
+	if cid := r.URL.Query().Get("client_id"); cid != "" {
+		filtered := out[:0:0]
+		for _, v := range out {
+			if v.ClientID == cid {
+				filtered = append(filtered, v)
+			}
+		}
+		out = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
 
 // createService provisions a hosting account for a client and records the bound
@@ -182,8 +192,18 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"service": svc, "temp_password": acc.TempPassword, "invoice": invoice})
 }
 
-func (s *Server) listInvoices(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"invoices": s.store.ListInvoices()})
+func (s *Server) listInvoices(w http.ResponseWriter, r *http.Request) {
+	out := s.store.ListInvoices()
+	if cid := r.URL.Query().Get("client_id"); cid != "" {
+		filtered := out[:0:0]
+		for _, v := range out {
+			if v.ClientID == cid {
+				filtered = append(filtered, v)
+			}
+		}
+		out = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"invoices": out})
 }
 
 // runBilling is the recurring engine: it raises this month's invoice for every
@@ -227,8 +247,18 @@ func (s *Server) listBackends(w http.ResponseWriter, r *http.Request) {
 
 var ticketPriorities = map[string]bool{"low": true, "normal": true, "high": true}
 
-func (s *Server) listTickets(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"tickets": s.store.ListTickets()})
+func (s *Server) listTickets(w http.ResponseWriter, r *http.Request) {
+	out := s.store.ListTickets()
+	if cid := r.URL.Query().Get("client_id"); cid != "" {
+		filtered := out[:0:0]
+		for _, v := range out {
+			if v.ClientID == cid {
+				filtered = append(filtered, v)
+			}
+		}
+		out = filtered
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"tickets": out})
 }
 
 func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
