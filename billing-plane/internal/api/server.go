@@ -21,10 +21,14 @@ type Server struct {
 	backends       *hosting.Registry
 	defaultBackend string
 	payments       payments.Provider
+	auto           *automation
 }
 
 func NewServer(st store.Store, reg *hosting.Registry, defaultBackend string) *Server {
-	return &Server{store: st, backends: reg, defaultBackend: defaultBackend, payments: payments.Manual{}}
+	return &Server{
+		store: st, backends: reg, defaultBackend: defaultBackend, payments: payments.Manual{},
+		auto: &automation{enabled: true, intervalSeconds: 86400},
+	}
 }
 
 // Routes wires the billing API (Go 1.22+ method-aware patterns, stdlib only).
@@ -43,6 +47,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
 	mux.HandleFunc("POST /api/dunning", s.runDunning)
 	mux.HandleFunc("POST /api/billing/run", s.runBilling)
+	mux.HandleFunc("GET /api/automation", s.getAutomation)
+	mux.HandleFunc("POST /api/automation", s.setAutomation)
+	mux.HandleFunc("POST /api/automation/run", s.runAutomationNow)
 	mux.HandleFunc("GET /api/backends", s.listBackends)
 	mux.HandleFunc("GET /api/tickets", s.listTickets)
 	mux.HandleFunc("POST /api/tickets", s.createTicket)
@@ -206,9 +213,10 @@ func (s *Server) listInvoices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"invoices": out})
 }
 
-// runBilling is the recurring engine: it raises this month's invoice for every
+// billingSweep is the recurring engine: it raises this month's invoice for every
 // active, priced service not yet billed for the current period. Idempotent.
-func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
+// Shared by the HTTP endpoint and the scheduler.
+func (s *Server) billingSweep() (generated, skipped int) {
 	now := time.Now().UTC()
 	billed := map[string]bool{}
 	for _, inv := range s.store.ListInvoices() {
@@ -216,7 +224,6 @@ func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
 			billed[inv.ServiceID] = true
 		}
 	}
-	generated, skipped := 0, 0
 	for _, svc := range s.store.ListServices() {
 		if svc.Status != "active" || svc.PriceCents <= 0 {
 			continue
@@ -230,6 +237,11 @@ func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
 			generated++
 		}
 	}
+	return generated, skipped
+}
+
+func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
+	generated, skipped := s.billingSweep()
 	writeJSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
 }
 
@@ -397,25 +409,28 @@ func (s *Server) clientHasOverdue(clientID string, now time.Time) bool {
 	return false
 }
 
-// runDunning suspends the active services of every client with an overdue
+// dunningSweep suspends the active services of every client with an overdue
 // invoice — driving the hosting panel through the seam — and tags them 'dunning'
-// so payment can reactivate exactly those.
-func (s *Server) runDunning(w http.ResponseWriter, r *http.Request) {
+// so payment can reactivate exactly those. Shared by the endpoint + scheduler.
+func (s *Server) dunningSweep(ctx context.Context) (suspended int) {
 	now := time.Now().UTC()
-	suspended := 0
 	for _, svc := range s.store.ListServices() {
 		if svc.Status != "active" || !s.clientHasOverdue(svc.ClientID, now) {
 			continue
 		}
 		if backend, ok := s.backends.Get(svc.Backend); ok {
-			if err := backend.SuspendAccount(r.Context(), svc.HostingAccountID); err != nil && !errors.Is(err, hosting.ErrUnsupported) {
+			if err := backend.SuspendAccount(ctx, svc.HostingAccountID); err != nil && !errors.Is(err, hosting.ErrUnsupported) {
 				continue
 			}
 		}
 		s.store.SetServiceStatus(svc.ID, "suspended", "dunning")
 		suspended++
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"suspended": suspended})
+	return suspended
+}
+
+func (s *Server) runDunning(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"suspended": s.dunningSweep(r.Context())})
 }
 
 // reactivateDunning brings a client's dunning-suspended services back online once

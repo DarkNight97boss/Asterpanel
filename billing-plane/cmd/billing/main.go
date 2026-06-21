@@ -5,6 +5,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -28,6 +29,7 @@ func main() {
 	}
 
 	srv := api.NewServer(store.NewMemory(), reg, cfg.HostingBackend)
+	srv.StartScheduler(context.Background()) // unattended billing + dunning cron
 
 	mux := srv.Routes()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
