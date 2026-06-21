@@ -445,6 +445,31 @@ func (s *Server) handleRunBilling(w http.ResponseWriter, r *http.Request) {
 	httpx.JSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
 }
 
+// handleListResellerTickets is the reseller's support queue: every ticket its
+// customers have opened, so staff can triage and jump in via impersonation.
+func (s *Server) handleListResellerTickets(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	tickets, err := s.deps.Store.ListResellerTickets(ctx, p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list tickets")
+		return
+	}
+	views := make([]map[string]any, 0, len(tickets))
+	for _, t := range tickets {
+		var owner any
+		if t.OwnerUserID.Valid {
+			owner = t.OwnerUserID.UUID
+		}
+		views = append(views, map[string]any{
+			"id": t.ID, "subject": t.Subject, "status": t.Status, "priority": t.Priority,
+			"message_count": t.MessageCount, "updated_at": t.UpdatedAt,
+			"customer_name": t.CustomerName, "customer_org": t.CustomerOrg, "owner_user_id": owner,
+		})
+	}
+	httpx.JSON(w, http.StatusOK, map[string]any{"tickets": views})
+}
+
 // handleRunDunning runs the dunning sweep: suspends the caller's customers that
 // have an overdue invoice. Paying the invoice reactivates them automatically.
 func (s *Server) handleRunDunning(w http.ResponseWriter, r *http.Request) {

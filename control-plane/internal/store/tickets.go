@@ -143,6 +143,43 @@ func (s *Store) AddTicketMessage(ctx context.Context, orgID, ticketID, author uu
 	return &m, nil
 }
 
+type ResellerTicket struct {
+	Ticket
+	CustomerName string
+	CustomerOrg  uuid.UUID
+	OwnerUserID  uuid.NullUUID
+}
+
+// ListResellerTickets is the staff queue: every ticket opened by one of the
+// reseller's direct customers, newest activity first, with the customer name and
+// its owner user (so staff can jump in via impersonation).
+func (s *Store) ListResellerTickets(ctx context.Context, parentOrgID uuid.UUID) ([]ResellerTicket, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT t.id, t.subject, t.status, t.priority, t.created_by, t.created_at, t.updated_at,
+		       (SELECT count(*) FROM support_ticket_messages m WHERE m.ticket_id = t.id),
+		       o.id, o.name,
+		       (SELECT mm.user_id FROM memberships mm JOIN users u ON u.id = mm.user_id
+		        WHERE mm.organization_id = o.id AND u.deleted_at IS NULL ORDER BY u.created_at LIMIT 1)
+		FROM support_tickets t
+		JOIN organizations o ON o.id = t.organization_id
+		WHERE o.parent_org_id = $1 AND o.deleted_at IS NULL
+		ORDER BY t.updated_at DESC`, parentOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ResellerTicket
+	for rows.Next() {
+		var t ResellerTicket
+		if err := rows.Scan(&t.ID, &t.Subject, &t.Status, &t.Priority, &t.CreatedBy,
+			&t.CreatedAt, &t.UpdatedAt, &t.MessageCount, &t.CustomerOrg, &t.CustomerName, &t.OwnerUserID); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // SetTicketStatus closes/reopens a ticket, scoped to the org.
 func (s *Store) SetTicketStatus(ctx context.Context, orgID, id uuid.UUID, status string) (*Ticket, error) {
 	return scanTicket(s.pool.QueryRow(ctx, `

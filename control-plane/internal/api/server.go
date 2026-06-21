@@ -430,6 +430,7 @@ func (s *Server) routes() http.Handler {
 				r.With(az.Require("reseller.manage", "reseller.invoice.create", "invoice")).Post("/reseller/accounts/{accountID}/invoice", s.handleInvoiceSubAccount)
 				r.With(az.Require("reseller.manage", "reseller.billing.run", "invoice")).Post("/reseller/billing/run", s.handleRunBilling)
 				r.With(az.Require("reseller.manage", "reseller.dunning", "organization")).Post("/reseller/dunning", s.handleRunDunning)
+				r.With(az.Require("reseller.read", "reseller.tickets.list", "support_ticket")).Get("/reseller/tickets", s.handleListResellerTickets)
 				r.With(az.Require("reseller.read", "reseller.package.list", "billing")).Get("/reseller/packages", s.handleListResellerPackages)
 				r.With(az.Require("reseller.manage", "reseller.package.create", "billing")).Post("/reseller/packages", s.handleCreateResellerPackage)
 				r.With(az.Require("reseller.manage", "reseller.package.update", "billing")).Post("/reseller/packages/{planID}", s.handleUpdateResellerPackage)

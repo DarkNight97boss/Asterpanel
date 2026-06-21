@@ -45,6 +45,23 @@ interface MyPackage {
   limits: Record<string, number>;
 }
 
+interface CustomerTicket {
+  id: string;
+  subject: string;
+  status: "open" | "pending" | "closed";
+  priority: "low" | "normal" | "high";
+  message_count: number;
+  updated_at: string;
+  customer_name: string;
+  owner_user_id?: string | null;
+}
+
+const ticketStatusBadge: Record<string, string> = {
+  open: "bg-emerald-500/15 text-emerald-600",
+  pending: "bg-amber-500/15 text-amber-600",
+  closed: "bg-muted text-muted-foreground",
+};
+
 const statusBadge: Record<string, string> = {
   active: "bg-emerald-500/15 text-emerald-600",
   suspended: "bg-amber-500/15 text-amber-600",
@@ -65,6 +82,7 @@ export default function ResellerPage() {
   const [budget, setBudget] = useState<BudgetRow[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [myPackages, setMyPackages] = useState<MyPackage[]>([]);
+  const [custTickets, setCustTickets] = useState<CustomerTicket[]>([]);
   const [pkgName, setPkgName] = useState("");
   const [pkgLimits, setPkgLimits] = useState({ max_sites: "", max_mailboxes: "", max_databases: "" });
   const [pkgBusy, setPkgBusy] = useState(false);
@@ -145,9 +163,31 @@ export default function ResellerPage() {
       setBudget([]);
     }
   }
+  async function loadTickets() {
+    try {
+      const { tickets } = await apiGet<{ tickets: CustomerTicket[] }>("/api/v1/reseller/tickets");
+      setCustTickets(tickets ?? []);
+    } catch {
+      setCustTickets([]);
+    }
+  }
+
+  // Jump into a customer's account to handle their ticket on the support thread.
+  async function handleTicket(t: CustomerTicket) {
+    if (!t.owner_user_id) return;
+    setError(null);
+    try {
+      await impersonate(t.owner_user_id);
+      router.push("/support");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not open the customer's desk");
+    }
+  }
+
   useEffect(() => {
     load();
     loadPackages();
+    loadTickets();
     apiGet<{ plans: { code: string; name: string; is_active: boolean }[] }>("/api/v1/plans")
       .then((r) => setPlans((r.plans ?? []).filter((p) => p.is_active)))
       .catch(() => setPlans([]));
@@ -463,6 +503,38 @@ export default function ResellerPage() {
           </form>
         </CardContent>
       </Card>
+
+      {custTickets.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Customer tickets ({custTickets.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <ul className="divide-y divide-border/60">
+              {custTickets.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-6 py-3 text-sm">
+                  <div className="min-w-0">
+                    <div className="truncate font-medium">{t.subject}</div>
+                    <div className="text-xs text-muted-foreground">{t.customer_name}</div>
+                  </div>
+                  <span className={cn("text-xs font-medium uppercase", t.priority === "high" ? "text-red-600" : "text-muted-foreground")}>
+                    {t.priority}
+                  </span>
+                  <span className={cn("ml-auto rounded-full px-2 py-0.5 text-xs font-medium capitalize", ticketStatusBadge[t.status])}>
+                    {t.status}
+                  </span>
+                  {t.owner_user_id && (
+                    <Button variant="ghost" size="sm" onClick={() => handleTicket(t)} title="Open the customer's support desk">
+                      <LogIn className="h-4 w-4" />
+                      Handle
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
