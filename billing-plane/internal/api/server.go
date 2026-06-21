@@ -28,6 +28,9 @@ func (s *Server) Routes() *http.ServeMux {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/clients", s.listClients)
 	mux.HandleFunc("POST /api/clients", s.createClient)
+	mux.HandleFunc("GET /api/products", s.listProducts)
+	mux.HandleFunc("POST /api/products", s.createProduct)
+	mux.HandleFunc("DELETE /api/products/{id}", s.deleteProduct)
 	mux.HandleFunc("GET /api/services", s.listServices)
 	mux.HandleFunc("POST /api/services", s.createService)
 	mux.HandleFunc("POST /api/services/{id}/suspend", s.suspendService)
@@ -64,6 +67,38 @@ func (s *Server) createClient(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]any{"client": c})
 }
 
+func (s *Server) listProducts(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"products": s.store.ListProducts()})
+}
+
+func (s *Server) createProduct(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name       string `json:"name"`
+		PlanCode   string `json:"plan_code"`
+		PriceCents int    `json:"price_cents"`
+		Cycle      string `json:"cycle"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.PlanCode) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "name and plan_code are required")
+		return
+	}
+	p, err := s.store.CreateProduct(strings.TrimSpace(req.Name), strings.TrimSpace(req.PlanCode), req.PriceCents, req.Cycle)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", "could not create product")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"product": p})
+}
+
+func (s *Server) deleteProduct(w http.ResponseWriter, r *http.Request) {
+	if err := s.store.DeleteProduct(r.PathValue("id")); err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "product not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": true})
+}
+
 func (s *Server) listServices(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": s.store.ListServices()})
 }
@@ -72,10 +107,11 @@ func (s *Server) listServices(w http.ResponseWriter, _ *http.Request) {
 // service. This is the integration spine: billing intent → hosting.Backend.
 func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		ClientID string `json:"client_id"`
-		Product  string `json:"product"`
-		PlanCode string `json:"plan_code"`
-		Backend  string `json:"backend"`
+		ClientID  string `json:"client_id"`
+		ProductID string `json:"product_id"`
+		Product   string `json:"product"`
+		PlanCode  string `json:"plan_code"`
+		Backend   string `json:"backend"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.ClientID) == "" {
 		writeErr(w, http.StatusBadRequest, "invalid_request", "client_id is required")
@@ -85,6 +121,16 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusNotFound, "not_found", "client not found")
 		return
+	}
+	// When a catalog product is chosen, it drives the product name + plan_code.
+	productName, planCode := strings.TrimSpace(req.Product), req.PlanCode
+	if req.ProductID != "" {
+		prod, perr := s.store.GetProduct(req.ProductID)
+		if perr != nil {
+			writeErr(w, http.StatusBadRequest, "unknown_product", "product not found")
+			return
+		}
+		productName, planCode = prod.Name, prod.PlanCode
 	}
 	backendName := req.Backend
 	if backendName == "" {
@@ -96,14 +142,14 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	acc, err := backend.CreateAccount(r.Context(), hosting.CreateAccountRequest{
-		Name: client.Name, Email: client.Email, PlanCode: req.PlanCode,
+		Name: client.Name, Email: client.Email, PlanCode: planCode,
 	})
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, "provisioning_failed", "hosting backend: "+err.Error())
 		return
 	}
 	svc, err := s.store.CreateService(store.Service{
-		ClientID: client.ID, Product: strings.TrimSpace(req.Product), PlanCode: req.PlanCode,
+		ClientID: client.ID, Product: productName, PlanCode: planCode,
 		Backend: backendName, HostingAccountID: acc.ID, Status: "active",
 	})
 	if err != nil {

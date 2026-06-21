@@ -11,6 +11,7 @@ import (
 type Memory struct {
 	mu       sync.RWMutex
 	clients  map[string]Client
+	products map[string]Product
 	services map[string]Service
 	now      func() time.Time
 }
@@ -18,9 +19,51 @@ type Memory struct {
 func NewMemory() *Memory {
 	return &Memory{
 		clients:  map[string]Client{},
+		products: map[string]Product{},
 		services: map[string]Service{},
 		now:      time.Now,
 	}
+}
+
+func (m *Memory) CreateProduct(name, planCode string, priceCents int, cycle string) (Product, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if cycle == "" {
+		cycle = "monthly"
+	}
+	p := Product{ID: NewID("prod"), Name: name, PlanCode: planCode, PriceCents: priceCents, Cycle: cycle, CreatedAt: m.now().UTC()}
+	m.products[p.ID] = p
+	return p, nil
+}
+
+func (m *Memory) ListProducts() []Product {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Product, 0, len(m.products))
+	for _, p := range m.products {
+		out = append(out, p)
+	}
+	return out
+}
+
+func (m *Memory) GetProduct(id string) (Product, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	p, ok := m.products[id]
+	if !ok {
+		return Product{}, ErrNotFound
+	}
+	return p, nil
+}
+
+func (m *Memory) DeleteProduct(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.products[id]; !ok {
+		return ErrNotFound
+	}
+	delete(m.products, id)
+	return nil
 }
 
 func (m *Memory) CreateClient(name, email string) (Client, error) {

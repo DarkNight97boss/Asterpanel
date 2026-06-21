@@ -22,13 +22,13 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/clients", label: "Clienti", icon: Users },
+  { href: "/admin/products", label: "Prodotti", icon: Box },
   { href: "/admin/services", label: "Servizi", icon: Server },
 ];
 
 const SOON = [
   { label: "Ordini", icon: ShoppingCart },
   { label: "Fatture", icon: FileText },
-  { label: "Prodotti", icon: Box },
   { label: "Supporto", icon: LifeBuoy },
   { label: "Automazione", icon: Bot },
   { label: "Hosting", icon: Plug },

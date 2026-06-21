@@ -22,6 +22,17 @@ type Client struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// Product is a sellable item in the catalog: a hosting package the billing
+// panel offers, mapped to a plan_code the hosting backend understands.
+type Product struct {
+	ID         string    `json:"id"`
+	Name       string    `json:"name"`
+	PlanCode   string    `json:"plan_code"`   // the hosting backend's package code
+	PriceCents int       `json:"price_cents"` // recurring price
+	Cycle      string    `json:"cycle"`       // monthly, yearly
+	CreatedAt  time.Time `json:"created_at"`
+}
+
 // Service is a sold product instance bound to a provisioned hosting account.
 type Service struct {
 	ID               string    `json:"id"`
@@ -40,6 +51,11 @@ type Store interface {
 	CreateClient(name, email string) (Client, error)
 	ListClients() []Client
 	GetClient(id string) (Client, error)
+
+	CreateProduct(name, planCode string, priceCents int, cycle string) (Product, error)
+	ListProducts() []Product
+	GetProduct(id string) (Product, error)
+	DeleteProduct(id string) error
 
 	CreateService(s Service) (Service, error)
 	ListServices() []Service

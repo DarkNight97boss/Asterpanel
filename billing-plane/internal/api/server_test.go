@@ -99,6 +99,30 @@ func TestSuspendServiceDrivesBackend(t *testing.T) {
 	}
 }
 
+func TestCreateServiceFromCatalogProduct(t *testing.T) {
+	fb := &fakeBackend{}
+	h := newTestServer(fb)
+
+	_, cres := do(t, h, "POST", "/api/clients", `{"name":"Acme","email":"a@acme.example"}`)
+	clientID := cres["client"].(map[string]any)["id"].(string)
+	_, pres := do(t, h, "POST", "/api/products",
+		`{"name":"Business","plan_code":"scale","price_cents":9900,"cycle":"monthly"}`)
+	productID := pres["product"].(map[string]any)["id"].(string)
+
+	// Ordering by product_id must drive the plan_code + product name from the catalog.
+	rec, sres := do(t, h, "POST", "/api/services",
+		`{"client_id":"`+clientID+`","product_id":"`+productID+`"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create service status = %d, body %s", rec.Code, rec.Body)
+	}
+	if fb.created.PlanCode != "scale" {
+		t.Fatalf("product plan_code not used for provisioning: %q", fb.created.PlanCode)
+	}
+	if sres["service"].(map[string]any)["product"] != "Business" {
+		t.Fatalf("product name not carried onto the service: %#v", sres["service"])
+	}
+}
+
 func TestCreateServiceRejectsUnknownClientAndBackend(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	if rec, _ := do(t, h, "POST", "/api/services", `{"client_id":"nope","plan_code":"pro"}`); rec.Code != http.StatusNotFound {

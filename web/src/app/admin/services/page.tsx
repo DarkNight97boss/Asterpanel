@@ -5,7 +5,6 @@ import { Server } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { apiGet, apiPost } from "@/lib/api";
@@ -13,6 +12,11 @@ import { apiGet, apiPost } from "@/lib/api";
 interface Client {
   id: string;
   name: string;
+}
+interface Product {
+  id: string;
+  name: string;
+  plan_code: string;
 }
 interface Service {
   id: string;
@@ -34,22 +38,25 @@ const statusBadge: Record<string, string> = {
 export default function ServicesPage() {
   const [services, setServices] = useState<Service[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [clientId, setClientId] = useState("");
-  const [product, setProduct] = useState("Starter hosting");
-  const [planCode, setPlanCode] = useState("free");
+  const [productId, setProductId] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   async function load() {
     try {
-      const [s, c] = await Promise.all([
+      const [s, c, p] = await Promise.all([
         apiGet<{ services: Service[] }>("/api/billing/services"),
         apiGet<{ clients: Client[] }>("/api/billing/clients"),
+        apiGet<{ products: Product[] }>("/api/billing/products"),
       ]);
       setServices(s.services ?? []);
       setClients(c.clients ?? []);
+      setProducts(p.products ?? []);
       if (!clientId && c.clients?.length) setClientId(c.clients[0].id);
+      if (!productId && p.products?.length) setProductId(p.products[0].id);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Errore di caricamento");
     }
@@ -69,8 +76,7 @@ export default function ServicesPage() {
     try {
       const res = await apiPost<{ temp_password?: string }>("/api/billing/services", {
         client_id: clientId,
-        product: product.trim(),
-        plan_code: planCode,
+        product_id: productId,
       });
       setNotice(
         res.temp_password
@@ -130,22 +136,20 @@ export default function ServicesPage() {
             </div>
             <div className="grow space-y-1">
               <Label htmlFor="product">Prodotto</Label>
-              <Input id="product" value={product} onChange={(e) => setProduct(e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="plan">Piano</Label>
               <select
-                id="plan"
-                className="flex h-9 w-32 rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                value={planCode}
-                onChange={(e) => setPlanCode(e.target.value)}
+                id="product"
+                className="flex h-9 w-full rounded-md border border-border bg-transparent px-3 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                value={productId}
+                onChange={(e) => setProductId(e.target.value)}
               >
-                <option value="free" className="bg-card">free</option>
-                <option value="pro" className="bg-card">pro</option>
-                <option value="scale" className="bg-card">scale</option>
+                {products.map((pr) => (
+                  <option key={pr.id} value={pr.id} className="bg-card">
+                    {pr.name} ({pr.plan_code})
+                  </option>
+                ))}
               </select>
             </div>
-            <Button type="submit" disabled={busy || !clientId}>
+            <Button type="submit" disabled={busy || !clientId || !productId}>
               {busy ? "Provisioning…" : "Provisiona"}
             </Button>
           </form>
