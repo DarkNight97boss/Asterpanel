@@ -409,6 +409,15 @@ func (s *Server) routes() http.Handler {
 				r.With(az.Require("billing.manage", "invoice.pay", "invoice")).Post("/billing/invoices/{invoiceID}/pay", s.handlePayInvoice)
 			})
 
+			// Support desk — tickets with threaded messages.
+			r.Group(func(r chi.Router) {
+				r.With(az.Require("support.read", "support.list", "support_ticket")).Get("/support/tickets", s.handleListTickets)
+				r.With(az.Require("support.manage", "support.create", "support_ticket")).Post("/support/tickets", s.handleCreateTicket)
+				r.With(az.Require("support.read", "support.get", "support_ticket")).Get("/support/tickets/{ticketID}", s.handleGetTicket)
+				r.With(az.Require("support.manage", "support.reply", "support_ticket")).Post("/support/tickets/{ticketID}/reply", s.handleReplyTicket)
+				r.With(az.Require("support.manage", "support.status", "support_ticket")).Post("/support/tickets/{ticketID}/status", s.handleSetTicketStatus)
+			})
+
 			// Reseller — sub-account hierarchy (Pro)
 			r.Group(func(r chi.Router) {
 				r.Use(s.requireFeature(licensing.FeatureReseller))
