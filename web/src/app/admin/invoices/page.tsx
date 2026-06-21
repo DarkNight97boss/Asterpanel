@@ -36,6 +36,22 @@ export default function InvoicesPage() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  async function runDunning() {
+    setError(null);
+    setNotice(null);
+    try {
+      const { suspended } = await apiPost<{ suspended: number }>("/api/billing/dunning", {});
+      setNotice(
+        suspended > 0
+          ? `Dunning: sospesi ${suspended} ${suspended === 1 ? "servizio" : "servizi"} per insoluto.`
+          : "Dunning: nessun cliente con fatture scadute.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Dunning non riuscito");
+    }
+  }
 
   async function load() {
     try {
@@ -74,10 +90,14 @@ export default function InvoicesPage() {
         </p>
       </div>
       {error && <p className="text-sm text-red-600">{error}</p>}
+      {notice && <p className="text-sm text-emerald-600">{notice}</p>}
 
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Fatture ({invoices.length})</CardTitle>
+          <Button variant="outline" size="sm" onClick={runDunning} title="Sospendi i clienti con fatture scadute">
+            Esegui dunning
+          </Button>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">

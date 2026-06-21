@@ -4,10 +4,12 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/hosting"
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/payments"
@@ -39,6 +41,7 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/services/{id}/unsuspend", s.unsuspendService)
 	mux.HandleFunc("GET /api/invoices", s.listInvoices)
 	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
+	mux.HandleFunc("POST /api/dunning", s.runDunning)
 	return mux
 }
 
@@ -194,6 +197,9 @@ func (s *Server) payInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	updated, _ := s.store.SetInvoiceStatus(inv.ID, "paid")
+	// Dunning reversal: settling the client's last overdue invoice brings their
+	// dunning-suspended services back online automatically.
+	s.reactivateDunning(r.Context(), inv.ClientID)
 	writeJSON(w, http.StatusOK, map[string]any{"invoice": updated, "reference": ref})
 }
 
@@ -217,10 +223,10 @@ func (s *Server) toggleService(w http.ResponseWriter, r *http.Request, suspend b
 		return
 	}
 	var op error
-	status := "active"
+	status, reason := "active", ""
 	if suspend {
 		op = backend.SuspendAccount(r.Context(), svc.HostingAccountID)
-		status = "suspended"
+		status, reason = "suspended", "manual"
 	} else {
 		op = backend.UnsuspendAccount(r.Context(), svc.HostingAccountID)
 	}
@@ -228,6 +234,54 @@ func (s *Server) toggleService(w http.ResponseWriter, r *http.Request, suspend b
 		writeErr(w, http.StatusBadGateway, "hosting_error", "hosting backend: "+op.Error())
 		return
 	}
-	updated, _ := s.store.SetServiceStatus(svc.ID, status)
+	updated, _ := s.store.SetServiceStatus(svc.ID, status, reason)
 	writeJSON(w, http.StatusOK, map[string]any{"service": updated})
+}
+
+// clientHasOverdue reports whether a client has an unpaid invoice past its due date.
+func (s *Server) clientHasOverdue(clientID string, now time.Time) bool {
+	for _, inv := range s.store.ListInvoices() {
+		if inv.ClientID == clientID && inv.Status == "open" && inv.DueAt.Before(now) {
+			return true
+		}
+	}
+	return false
+}
+
+// runDunning suspends the active services of every client with an overdue
+// invoice — driving the hosting panel through the seam — and tags them 'dunning'
+// so payment can reactivate exactly those.
+func (s *Server) runDunning(w http.ResponseWriter, r *http.Request) {
+	now := time.Now().UTC()
+	suspended := 0
+	for _, svc := range s.store.ListServices() {
+		if svc.Status != "active" || !s.clientHasOverdue(svc.ClientID, now) {
+			continue
+		}
+		if backend, ok := s.backends.Get(svc.Backend); ok {
+			if err := backend.SuspendAccount(r.Context(), svc.HostingAccountID); err != nil && !errors.Is(err, hosting.ErrUnsupported) {
+				continue
+			}
+		}
+		s.store.SetServiceStatus(svc.ID, "suspended", "dunning")
+		suspended++
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"suspended": suspended})
+}
+
+// reactivateDunning brings a client's dunning-suspended services back online once
+// the client has no overdue invoices left (manual suspensions are left alone).
+func (s *Server) reactivateDunning(ctx context.Context, clientID string) {
+	if s.clientHasOverdue(clientID, time.Now().UTC()) {
+		return
+	}
+	for _, svc := range s.store.ListServices() {
+		if svc.ClientID != clientID || svc.SuspendReason != "dunning" {
+			continue
+		}
+		if backend, ok := s.backends.Get(svc.Backend); ok {
+			_ = backend.UnsuspendAccount(ctx, svc.HostingAccountID)
+		}
+		s.store.SetServiceStatus(svc.ID, "active", "")
+	}
 }

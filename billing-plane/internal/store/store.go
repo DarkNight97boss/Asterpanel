@@ -42,6 +42,7 @@ type Service struct {
 	Backend          string    `json:"backend"`            // which hosting module provisioned it
 	HostingAccountID string    `json:"hosting_account_id"` // the panel's id for the account
 	Status           string    `json:"status"`             // pending, active, suspended, terminated
+	SuspendReason    string    `json:"suspend_reason"`     // "", manual, dunning
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -78,7 +79,7 @@ type Store interface {
 	CreateService(s Service) (Service, error)
 	ListServices() []Service
 	GetService(id string) (Service, error)
-	SetServiceStatus(id, status string) (Service, error)
+	SetServiceStatus(id, status, reason string) (Service, error)
 
 	CreateInvoice(clientID string, lines []InvoiceLine, dueDays int) (Invoice, error)
 	ListInvoices() []Invoice

@@ -147,6 +147,40 @@ func TestOrderingAProductInvoicesAndPays(t *testing.T) {
 	}
 }
 
+func TestDunningSuspendsThenPaymentReactivates(t *testing.T) {
+	fb := &fakeBackend{}
+	reg := hosting.NewRegistry()
+	reg.Register(fb)
+	st := store.NewMemory()
+	srv := NewServer(st, reg, "fake")
+	h := srv.Routes()
+
+	c, _ := st.CreateClient("Acme", "a@acme.example")
+	svc, _ := st.CreateService(store.Service{ClientID: c.ID, Backend: "fake", HostingAccountID: "acct-9", Status: "active"})
+	// An invoice already past due.
+	inv, _ := st.CreateInvoice(c.ID, []store.InvoiceLine{{Description: "Pro", AmountCents: 2900}}, -5)
+
+	// Dunning must suspend the client's service via the hosting seam.
+	if rec, out := do(t, h, "POST", "/api/dunning", ""); rec.Code != http.StatusOK || out["suspended"].(float64) != 1 {
+		t.Fatalf("dunning did not suspend: %d %#v", rec.Code, out)
+	}
+	if fb.suspended != "acct-9" {
+		t.Fatalf("hosting backend not driven to suspend: %q", fb.suspended)
+	}
+	if got, _ := st.GetService(svc.ID); got.Status != "suspended" || got.SuspendReason != "dunning" {
+		t.Fatalf("service not marked dunning-suspended: %#v", got)
+	}
+
+	// Paying the overdue invoice must reactivate the dunning-suspended service.
+	do(t, h, "POST", "/api/invoices/"+inv.ID+"/pay", "")
+	if fb.unsuspend != "acct-9" {
+		t.Fatalf("hosting backend not driven to unsuspend on payment: %q", fb.unsuspend)
+	}
+	if got, _ := st.GetService(svc.ID); got.Status != "active" || got.SuspendReason != "" {
+		t.Fatalf("service not reactivated after payment: %#v", got)
+	}
+}
+
 func TestCreateServiceRejectsUnknownClientAndBackend(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	if rec, _ := do(t, h, "POST", "/api/services", `{"client_id":"nope","plan_code":"pro"}`); rec.Code != http.StatusNotFound {

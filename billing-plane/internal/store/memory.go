@@ -131,7 +131,7 @@ func (m *Memory) GetService(id string) (Service, error) {
 	return s, nil
 }
 
-func (m *Memory) SetServiceStatus(id, status string) (Service, error) {
+func (m *Memory) SetServiceStatus(id, status, reason string) (Service, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	s, ok := m.services[id]
@@ -139,6 +139,7 @@ func (m *Memory) SetServiceStatus(id, status string) (Service, error) {
 		return Service{}, ErrNotFound
 	}
 	s.Status = status
+	s.SuspendReason = reason
 	m.services[id] = s
 	return s, nil
 }
