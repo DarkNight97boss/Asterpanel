@@ -96,6 +96,11 @@ func (s *Server) billOrg(ctx context.Context, orgID uuid.UUID) (*store.Invoice, 
 	end := start.AddDate(0, 1, -1)
 	due := start.AddDate(0, 0, 14)
 
+	// Idempotency: never bill the same org twice for one period (recurring runs).
+	if billed, err := s.deps.Store.HasInvoiceForPeriod(ctx, orgID, start); err == nil && billed {
+		return nil, "already_billed"
+	}
+
 	count, _ := s.deps.Store.CountOrgInvoices(ctx, orgID)
 	number := fmt.Sprintf("INV-%d-%04d", now.Year(), count+1)
 
@@ -126,6 +131,8 @@ func billErrorStatus(w http.ResponseWriter, code string) bool {
 		return false
 	case "no_plan":
 		httpx.Error(w, http.StatusBadRequest, "no_plan", "organization has no billing plan")
+	case "already_billed":
+		httpx.Error(w, http.StatusConflict, "already_billed", "already billed for this period")
 	case "create_failed":
 		httpx.Error(w, http.StatusConflict, "create_failed", "could not create invoice (already billed this period?)")
 	default:

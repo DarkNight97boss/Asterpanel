@@ -187,6 +187,28 @@ func (s *Store) SumSubAccountPlanLimits(ctx context.Context, parentOrgID uuid.UU
 	return sum, rows.Err()
 }
 
+// ListBillableSubAccounts returns the ids of a reseller's direct sub-accounts
+// that have a billing plan (so the recurring billing run knows whom to invoice).
+func (s *Store) ListBillableSubAccounts(ctx context.Context, parentOrgID uuid.UUID) ([]uuid.UUID, error) {
+	rows, err := s.pool.Query(ctx,
+		`SELECT id FROM organizations
+		 WHERE parent_org_id = $1 AND deleted_at IS NULL AND billing_plan_id IS NOT NULL
+		 ORDER BY created_at`, parentOrgID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // SuspendOverdueSubAccounts is the dunning sweep: it suspends a reseller's
 // active direct sub-accounts that have at least one unpaid invoice past its due
 // date, tagging the suspension 'overdue' so payment can later auto-reactivate

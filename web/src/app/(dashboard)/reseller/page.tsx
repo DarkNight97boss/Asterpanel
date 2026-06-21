@@ -212,6 +212,24 @@ export default function ResellerPage() {
     }
   }
 
+  // Recurring billing: issue this period's invoice for every customer with a plan.
+  async function runBilling() {
+    setError(null);
+    setNotice(null);
+    try {
+      const { generated, skipped } = await apiPost<{ generated: number; skipped: number }>(
+        "/api/v1/reseller/billing/run",
+        {},
+      );
+      setNotice(
+        `Billing run: ${generated} invoice${generated === 1 ? "" : "s"} generated` +
+          (skipped ? `, ${skipped} already billed this period.` : "."),
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not run billing");
+    }
+  }
+
   // Dunning: suspend customers with overdue invoices (paying reactivates them).
   async function runDunning() {
     setError(null);
@@ -449,10 +467,16 @@ export default function ResellerPage() {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">Sub-accounts ({accounts.length})</CardTitle>
-          <Button variant="outline" size="sm" onClick={runDunning} title="Suspend customers with overdue invoices">
-            <AlarmClock className="h-4 w-4" />
-            Run dunning
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={runBilling} title="Issue this period's invoice for every customer">
+              <Receipt className="h-4 w-4" />
+              Run billing
+            </Button>
+            <Button variant="outline" size="sm" onClick={runDunning} title="Suspend customers with overdue invoices">
+              <AlarmClock className="h-4 w-4" />
+              Run dunning
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="p-0">
           <table className="w-full text-sm">

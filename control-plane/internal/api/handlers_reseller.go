@@ -419,6 +419,32 @@ func (s *Server) resellerOwnsAccount(w http.ResponseWriter, ctx context.Context,
 	return true
 }
 
+// handleRunBilling is the recurring billing run: it issues this period's invoice
+// for every customer with a plan that hasn't been billed yet for the period.
+// Idempotent — re-running only bills customers still missing an invoice.
+func (s *Server) handleRunBilling(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	p := middleware.PrincipalFrom(ctx)
+	ids, err := s.deps.Store.ListBillableSubAccounts(ctx, p.OrgID)
+	if err != nil {
+		httpx.Error(w, http.StatusInternalServerError, "internal_error", "could not list customers")
+		return
+	}
+	generated, skipped := 0, 0
+	for _, id := range ids {
+		switch _, code := s.billOrg(ctx, id); code {
+		case "":
+			generated++
+		case "already_billed":
+			skipped++
+		}
+	}
+	org := p.OrgID
+	s.audit(ctx, &org, &p.UserID, "reseller.billing.run", "organization", org.String(), audit.OutcomeSuccess, r,
+		map[string]any{"generated": generated, "skipped": skipped})
+	httpx.JSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
+}
+
 // handleRunDunning runs the dunning sweep: suspends the caller's customers that
 // have an overdue invoice. Paying the invoice reactivates them automatically.
 func (s *Server) handleRunDunning(w http.ResponseWriter, r *http.Request) {

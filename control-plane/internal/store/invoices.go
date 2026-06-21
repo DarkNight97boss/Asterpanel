@@ -71,6 +71,17 @@ func scanInvoice(row rowScanner, orgID uuid.UUID) (*Invoice, error) {
 	return &inv, nil
 }
 
+// HasInvoiceForPeriod reports whether the org already has an invoice covering
+// the given billing period — the idempotency guard for recurring billing so a
+// re-run never double-bills the same month.
+func (s *Store) HasInvoiceForPeriod(ctx context.Context, orgID uuid.UUID, periodStart time.Time) (bool, error) {
+	var ok bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM invoices WHERE organization_id = $1 AND period_start = $2::date)`,
+		orgID, periodStart).Scan(&ok)
+	return ok, err
+}
+
 // CountOrgInvoices is used to number new invoices (INV-YYYY-NNNN).
 func (s *Store) CountOrgInvoices(ctx context.Context, orgID uuid.UUID) (int, error) {
 	var n int
