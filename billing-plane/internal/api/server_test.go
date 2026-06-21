@@ -123,6 +123,30 @@ func TestCreateServiceFromCatalogProduct(t *testing.T) {
 	}
 }
 
+func TestOrderingAProductInvoicesAndPays(t *testing.T) {
+	h := newTestServer(&fakeBackend{})
+	_, cres := do(t, h, "POST", "/api/clients", `{"name":"Acme","email":"a@acme.example"}`)
+	clientID := cres["client"].(map[string]any)["id"].(string)
+	_, pres := do(t, h, "POST", "/api/products", `{"name":"Pro","plan_code":"pro","price_cents":2900}`)
+	productID := pres["product"].(map[string]any)["id"].(string)
+
+	// Ordering a paid product must raise a first invoice for its price.
+	_, sres := do(t, h, "POST", "/api/services", `{"client_id":"`+clientID+`","product_id":"`+productID+`"}`)
+	inv := sres["invoice"].(map[string]any)
+	if inv == nil || inv["total_cents"].(float64) != 2900 || inv["status"] != "open" {
+		t.Fatalf("first invoice not raised at product price: %#v", inv)
+	}
+	invID := inv["id"].(string)
+
+	rec, payRes := do(t, h, "POST", "/api/invoices/"+invID+"/pay", "")
+	if rec.Code != http.StatusOK || payRes["invoice"].(map[string]any)["status"] != "paid" {
+		t.Fatalf("pay did not settle the invoice: %d %#v", rec.Code, payRes)
+	}
+	if ref, _ := payRes["reference"].(string); ref == "" {
+		t.Fatalf("manual payment reference missing")
+	}
+}
+
 func TestCreateServiceRejectsUnknownClientAndBackend(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	if rec, _ := do(t, h, "POST", "/api/services", `{"client_id":"nope","plan_code":"pro"}`); rec.Code != http.StatusNotFound {

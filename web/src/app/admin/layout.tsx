@@ -24,11 +24,11 @@ const NAV = [
   { href: "/admin/clients", label: "Clienti", icon: Users },
   { href: "/admin/products", label: "Prodotti", icon: Box },
   { href: "/admin/services", label: "Servizi", icon: Server },
+  { href: "/admin/invoices", label: "Fatture", icon: FileText },
 ];
 
 const SOON = [
   { label: "Ordini", icon: ShoppingCart },
-  { label: "Fatture", icon: FileText },
   { label: "Supporto", icon: LifeBuoy },
   { label: "Automazione", icon: Bot },
   { label: "Hosting", icon: Plug },

@@ -45,6 +45,24 @@ type Service struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+type InvoiceLine struct {
+	Description string `json:"description"`
+	AmountCents int    `json:"amount_cents"`
+}
+
+// Invoice is a bill the billing panel owns (not the hosting control plane).
+type Invoice struct {
+	ID         string        `json:"id"`
+	ClientID   string        `json:"client_id"`
+	Number     string        `json:"number"`
+	Status     string        `json:"status"` // open, paid, void
+	TotalCents int           `json:"total_cents"`
+	Lines      []InvoiceLine `json:"lines"`
+	IssuedAt   time.Time     `json:"issued_at"`
+	DueAt      time.Time     `json:"due_at"`
+	PaidAt     *time.Time    `json:"paid_at"`
+}
+
 // Store is the persistence seam. An in-memory implementation backs the MVP; a
 // Postgres implementation drops in behind the same interface later.
 type Store interface {
@@ -61,6 +79,11 @@ type Store interface {
 	ListServices() []Service
 	GetService(id string) (Service, error)
 	SetServiceStatus(id, status string) (Service, error)
+
+	CreateInvoice(clientID string, lines []InvoiceLine, dueDays int) (Invoice, error)
+	ListInvoices() []Invoice
+	GetInvoice(id string) (Invoice, error)
+	SetInvoiceStatus(id, status string) (Invoice, error)
 }
 
 // NewID returns a prefixed random identifier (no external uuid dependency).

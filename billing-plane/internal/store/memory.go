@@ -1,6 +1,7 @@
 package store
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -13,6 +14,8 @@ type Memory struct {
 	clients  map[string]Client
 	products map[string]Product
 	services map[string]Service
+	invoices map[string]Invoice
+	invSeq   int
 	now      func() time.Time
 }
 
@@ -21,6 +24,7 @@ func NewMemory() *Memory {
 		clients:  map[string]Client{},
 		products: map[string]Product{},
 		services: map[string]Service{},
+		invoices: map[string]Invoice{},
 		now:      time.Now,
 	}
 }
@@ -137,4 +141,63 @@ func (m *Memory) SetServiceStatus(id, status string) (Service, error) {
 	s.Status = status
 	m.services[id] = s
 	return s, nil
+}
+
+func (m *Memory) CreateInvoice(clientID string, lines []InvoiceLine, dueDays int) (Invoice, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	total := 0
+	for _, l := range lines {
+		total += l.AmountCents
+	}
+	m.invSeq++
+	now := m.now().UTC()
+	inv := Invoice{
+		ID:         NewID("inv"),
+		ClientID:   clientID,
+		Number:     fmt.Sprintf("INV-%d-%04d", now.Year(), m.invSeq),
+		Status:     "open",
+		TotalCents: total,
+		Lines:      lines,
+		IssuedAt:   now,
+		DueAt:      now.AddDate(0, 0, dueDays),
+	}
+	m.invoices[inv.ID] = inv
+	return inv, nil
+}
+
+func (m *Memory) ListInvoices() []Invoice {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Invoice, 0, len(m.invoices))
+	for _, i := range m.invoices {
+		out = append(out, i)
+	}
+	return out
+}
+
+func (m *Memory) GetInvoice(id string) (Invoice, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	i, ok := m.invoices[id]
+	if !ok {
+		return Invoice{}, ErrNotFound
+	}
+	return i, nil
+}
+
+func (m *Memory) SetInvoiceStatus(id, status string) (Invoice, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	i, ok := m.invoices[id]
+	if !ok {
+		return Invoice{}, ErrNotFound
+	}
+	i.Status = status
+	if status == "paid" {
+		t := m.now().UTC()
+		i.PaidAt = &t
+	}
+	m.invoices[id] = i
+	return i, nil
 }

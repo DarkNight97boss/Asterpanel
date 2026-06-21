@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/hosting"
+	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/payments"
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/store"
 )
 
@@ -17,10 +18,11 @@ type Server struct {
 	store          store.Store
 	backends       *hosting.Registry
 	defaultBackend string
+	payments       payments.Provider
 }
 
 func NewServer(st store.Store, reg *hosting.Registry, defaultBackend string) *Server {
-	return &Server{store: st, backends: reg, defaultBackend: defaultBackend}
+	return &Server{store: st, backends: reg, defaultBackend: defaultBackend, payments: payments.Manual{}}
 }
 
 // Routes wires the billing API (Go 1.22+ method-aware patterns, stdlib only).
@@ -35,6 +37,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/services", s.createService)
 	mux.HandleFunc("POST /api/services/{id}/suspend", s.suspendService)
 	mux.HandleFunc("POST /api/services/{id}/unsuspend", s.unsuspendService)
+	mux.HandleFunc("GET /api/invoices", s.listInvoices)
+	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
 	return mux
 }
 
@@ -122,15 +126,16 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "client not found")
 		return
 	}
-	// When a catalog product is chosen, it drives the product name + plan_code.
-	productName, planCode := strings.TrimSpace(req.Product), req.PlanCode
+	// When a catalog product is chosen, it drives the product name + plan_code
+	// (and the recurring price the first invoice is billed at).
+	productName, planCode, priceCents := strings.TrimSpace(req.Product), req.PlanCode, 0
 	if req.ProductID != "" {
 		prod, perr := s.store.GetProduct(req.ProductID)
 		if perr != nil {
 			writeErr(w, http.StatusBadRequest, "unknown_product", "product not found")
 			return
 		}
-		productName, planCode = prod.Name, prod.PlanCode
+		productName, planCode, priceCents = prod.Name, prod.PlanCode, prod.PriceCents
 	}
 	backendName := req.Backend
 	if backendName == "" {
@@ -156,7 +161,40 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "internal_error", "provisioned but could not record service")
 		return
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"service": svc, "temp_password": acc.TempPassword})
+	// First invoice for the new service, billed at the product's price.
+	var invoice *store.Invoice
+	if priceCents > 0 {
+		if inv, ierr := s.store.CreateInvoice(client.ID,
+			[]store.InvoiceLine{{Description: productName, AmountCents: priceCents}}, 14); ierr == nil {
+			invoice = &inv
+		}
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"service": svc, "temp_password": acc.TempPassword, "invoice": invoice})
+}
+
+func (s *Server) listInvoices(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"invoices": s.store.ListInvoices()})
+}
+
+func (s *Server) payInvoice(w http.ResponseWriter, r *http.Request) {
+	inv, err := s.store.GetInvoice(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "invoice not found")
+		return
+	}
+	if inv.Status == "paid" {
+		writeJSON(w, http.StatusOK, map[string]any{"invoice": inv})
+		return
+	}
+	// Settlement goes through the gateway-agnostic PaymentProvider seam — manual
+	// (offline) by default, so this works with no payment processor configured.
+	ref, perr := s.payments.Charge(r.Context(), inv.ID, inv.TotalCents)
+	if perr != nil {
+		writeErr(w, http.StatusPaymentRequired, "payment_failed", "payment was declined")
+		return
+	}
+	updated, _ := s.store.SetInvoiceStatus(inv.ID, "paid")
+	writeJSON(w, http.StatusOK, map[string]any{"invoice": updated, "reference": ref})
 }
 
 func (s *Server) suspendService(w http.ResponseWriter, r *http.Request) {
