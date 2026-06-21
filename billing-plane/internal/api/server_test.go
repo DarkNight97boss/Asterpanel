@@ -196,6 +196,29 @@ func TestRecurringBillingIsIdempotentPerPeriod(t *testing.T) {
 	}
 }
 
+func TestSupportTicketThread(t *testing.T) {
+	h := newTestServer(&fakeBackend{})
+	_, cres := do(t, h, "POST", "/api/tickets",
+		`{"client_id":"cli_x","subject":"SSL down","priority":"high","body":"my cert broke"}`)
+	tkt := cres["ticket"].(map[string]any)
+	if tkt["status"] != "open" || tkt["priority"] != "high" || tkt["message_count"].(float64) != 1 {
+		t.Fatalf("ticket not opened correctly: %#v", tkt)
+	}
+	id := tkt["id"].(string)
+
+	// Staff reply lands on the thread flagged staff.
+	do(t, h, "POST", "/api/tickets/"+id+"/reply", `{"body":"reissuing now"}`)
+	_, gres := do(t, h, "GET", "/api/tickets/"+id, "")
+	msgs := gres["ticket"].(map[string]any)["messages"].([]any)
+	if len(msgs) != 2 || msgs[0].(map[string]any)["staff"] != false || msgs[1].(map[string]any)["staff"] != true {
+		t.Fatalf("thread/sides wrong: %#v", msgs)
+	}
+
+	if _, sres := do(t, h, "POST", "/api/tickets/"+id+"/status", `{"status":"closed"}`); sres["ticket"].(map[string]any)["status"] != "closed" {
+		t.Fatalf("close failed: %#v", sres)
+	}
+}
+
 func TestCreateServiceRejectsUnknownClientAndBackend(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	if rec, _ := do(t, h, "POST", "/api/services", `{"client_id":"nope","plan_code":"pro"}`); rec.Code != http.StatusNotFound {

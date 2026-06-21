@@ -15,6 +15,7 @@ type Memory struct {
 	products map[string]Product
 	services map[string]Service
 	invoices map[string]Invoice
+	tickets  map[string]Ticket
 	invSeq   int
 	now      func() time.Time
 }
@@ -25,6 +26,7 @@ func NewMemory() *Memory {
 		products: map[string]Product{},
 		services: map[string]Service{},
 		invoices: map[string]Invoice{},
+		tickets:  map[string]Ticket{},
 		now:      time.Now,
 	}
 }
@@ -202,4 +204,71 @@ func (m *Memory) SetInvoiceStatus(id, status string) (Invoice, error) {
 	}
 	m.invoices[id] = i
 	return i, nil
+}
+
+func (m *Memory) CreateTicket(clientID, subject, priority, body string) (Ticket, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	now := m.now().UTC()
+	t := Ticket{
+		ID: NewID("tkt"), ClientID: clientID, Subject: subject, Status: "open", Priority: priority,
+		CreatedAt: now, UpdatedAt: now,
+		Messages: []TicketMessage{{ID: NewID("msg"), Body: body, Staff: false, CreatedAt: now}},
+	}
+	m.tickets[t.ID] = t
+	return m.withCount(t), nil
+}
+
+func (m *Memory) withCount(t Ticket) Ticket {
+	t.MessageCount = len(t.Messages)
+	return t
+}
+
+func (m *Memory) ListTickets() []Ticket {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Ticket, 0, len(m.tickets))
+	for _, t := range m.tickets {
+		h := m.withCount(t)
+		h.Messages = nil // headers only
+		out = append(out, h)
+	}
+	return out
+}
+
+func (m *Memory) GetTicket(id string) (Ticket, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	t, ok := m.tickets[id]
+	if !ok {
+		return Ticket{}, ErrNotFound
+	}
+	return m.withCount(t), nil
+}
+
+func (m *Memory) AddTicketMessage(id, body string, staff bool) (TicketMessage, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tickets[id]
+	if !ok {
+		return TicketMessage{}, ErrNotFound
+	}
+	msg := TicketMessage{ID: NewID("msg"), Body: body, Staff: staff, CreatedAt: m.now().UTC()}
+	t.Messages = append(t.Messages, msg)
+	t.UpdatedAt = msg.CreatedAt
+	m.tickets[id] = t
+	return msg, nil
+}
+
+func (m *Memory) SetTicketStatus(id, status string) (Ticket, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	t, ok := m.tickets[id]
+	if !ok {
+		return Ticket{}, ErrNotFound
+	}
+	t.Status = status
+	t.UpdatedAt = m.now().UTC()
+	m.tickets[id] = t
+	return m.withCount(t), nil
 }

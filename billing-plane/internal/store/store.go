@@ -66,6 +66,26 @@ type Invoice struct {
 	PaidAt     *time.Time    `json:"paid_at"`
 }
 
+type TicketMessage struct {
+	ID        string    `json:"id"`
+	Body      string    `json:"body"`
+	Staff     bool      `json:"staff"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// Ticket is a support thread a client opens; staff reply on the same thread.
+type Ticket struct {
+	ID           string          `json:"id"`
+	ClientID     string          `json:"client_id"`
+	Subject      string          `json:"subject"`
+	Status       string          `json:"status"`   // open, pending, closed
+	Priority     string          `json:"priority"` // low, normal, high
+	CreatedAt    time.Time       `json:"created_at"`
+	UpdatedAt    time.Time       `json:"updated_at"`
+	MessageCount int             `json:"message_count"`
+	Messages     []TicketMessage `json:"messages,omitempty"`
+}
+
 // Store is the persistence seam. An in-memory implementation backs the MVP; a
 // Postgres implementation drops in behind the same interface later.
 type Store interface {
@@ -87,6 +107,12 @@ type Store interface {
 	ListInvoices() []Invoice
 	GetInvoice(id string) (Invoice, error)
 	SetInvoiceStatus(id, status string) (Invoice, error)
+
+	CreateTicket(clientID, subject, priority, body string) (Ticket, error)
+	ListTickets() []Ticket
+	GetTicket(id string) (Ticket, error)
+	AddTicketMessage(id, body string, staff bool) (TicketMessage, error)
+	SetTicketStatus(id, status string) (Ticket, error)
 }
 
 // NewID returns a prefixed random identifier (no external uuid dependency).

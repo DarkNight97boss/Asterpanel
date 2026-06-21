@@ -25,11 +25,11 @@ const NAV = [
   { href: "/admin/products", label: "Prodotti", icon: Box },
   { href: "/admin/services", label: "Servizi", icon: Server },
   { href: "/admin/invoices", label: "Fatture", icon: FileText },
+  { href: "/admin/support", label: "Supporto", icon: LifeBuoy },
 ];
 
 const SOON = [
   { label: "Ordini", icon: ShoppingCart },
-  { label: "Supporto", icon: LifeBuoy },
   { label: "Automazione", icon: Bot },
   { label: "Hosting", icon: Plug },
 ];

@@ -43,6 +43,11 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("POST /api/invoices/{id}/pay", s.payInvoice)
 	mux.HandleFunc("POST /api/dunning", s.runDunning)
 	mux.HandleFunc("POST /api/billing/run", s.runBilling)
+	mux.HandleFunc("GET /api/tickets", s.listTickets)
+	mux.HandleFunc("POST /api/tickets", s.createTicket)
+	mux.HandleFunc("GET /api/tickets/{id}", s.getTicket)
+	mux.HandleFunc("POST /api/tickets/{id}/reply", s.replyTicket)
+	mux.HandleFunc("POST /api/tickets/{id}/status", s.ticketStatus)
 	return mux
 }
 
@@ -205,6 +210,79 @@ func (s *Server) runBilling(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"generated": generated, "skipped": skipped})
+}
+
+var ticketPriorities = map[string]bool{"low": true, "normal": true, "high": true}
+
+func (s *Server) listTickets(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"tickets": s.store.ListTickets()})
+}
+
+func (s *Server) createTicket(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID string `json:"client_id"`
+		Subject  string `json:"subject"`
+		Priority string `json:"priority"`
+		Body     string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		strings.TrimSpace(req.Subject) == "" || strings.TrimSpace(req.Body) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "subject and message are required")
+		return
+	}
+	priority := strings.ToLower(strings.TrimSpace(req.Priority))
+	if !ticketPriorities[priority] {
+		priority = "normal"
+	}
+	t, err := s.store.CreateTicket(strings.TrimSpace(req.ClientID), strings.TrimSpace(req.Subject), priority, strings.TrimSpace(req.Body))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal_error", "could not open ticket")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"ticket": t})
+}
+
+func (s *Server) getTicket(w http.ResponseWriter, r *http.Request) {
+	t, err := s.store.GetTicket(r.PathValue("id"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "ticket not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": t})
+}
+
+func (s *Server) replyTicket(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || strings.TrimSpace(req.Body) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "a message body is required")
+		return
+	}
+	// Admin replies are staff-side.
+	m, err := s.store.AddTicketMessage(r.PathValue("id"), strings.TrimSpace(req.Body), true)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "ticket not found")
+		return
+	}
+	writeJSON(w, http.StatusCreated, map[string]any{"message": m})
+}
+
+func (s *Server) ticketStatus(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Status string `json:"status"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		(req.Status != "open" && req.Status != "pending" && req.Status != "closed") {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "status must be open, pending or closed")
+		return
+	}
+	t, err := s.store.SetTicketStatus(r.PathValue("id"), req.Status)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not_found", "ticket not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ticket": t})
 }
 
 func (s *Server) payInvoice(w http.ResponseWriter, r *http.Request) {
