@@ -9,8 +9,10 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/api"
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/config"
 	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/hosting"
+	"github.com/DarkNight97boss/asterpanel/billing-plane/internal/store"
 )
 
 func main() {
@@ -21,7 +23,9 @@ func main() {
 	reg := hosting.NewRegistry()
 	reg.Register(hosting.NewAsterPanel(cfg.HostingBaseURL, cfg.HostingAPIToken))
 
-	mux := http.NewServeMux()
+	srv := api.NewServer(store.NewMemory(), reg, cfg.HostingBackend)
+
+	mux := srv.Routes()
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
