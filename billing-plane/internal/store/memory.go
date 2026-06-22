@@ -16,6 +16,7 @@ type Memory struct {
 	services map[string]Service
 	invoices map[string]Invoice
 	tickets  map[string]Ticket
+	orders   map[string]Order
 	invSeq   int
 	now      func() time.Time
 }
@@ -27,8 +28,35 @@ func NewMemory() *Memory {
 		services: map[string]Service{},
 		invoices: map[string]Invoice{},
 		tickets:  map[string]Ticket{},
+		orders:   map[string]Order{},
 		now:      time.Now,
 	}
+}
+
+func (m *Memory) CreateOrder(o Order) (Order, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if o.ID == "" {
+		o.ID = NewID("ord")
+	}
+	if o.CreatedAt.IsZero() {
+		o.CreatedAt = m.now().UTC()
+	}
+	if o.Status == "" {
+		o.Status = "active"
+	}
+	m.orders[o.ID] = o
+	return o, nil
+}
+
+func (m *Memory) ListOrders() []Order {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	out := make([]Order, 0, len(m.orders))
+	for _, o := range m.orders {
+		out = append(out, o)
+	}
+	return out
 }
 
 func (m *Memory) CreateProduct(name, planCode string, priceCents int, cycle string) (Product, error) {

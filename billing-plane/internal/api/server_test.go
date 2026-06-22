@@ -214,6 +214,34 @@ func TestListsScopeByClient(t *testing.T) {
 	}
 }
 
+func TestPlaceOrderProvisionsAndRecords(t *testing.T) {
+	fb := &fakeBackend{}
+	h := newTestServer(fb)
+	_, cres := do(t, h, "POST", "/api/clients", `{"name":"Acme","email":"a@acme.example"}`)
+	clientID := cres["client"].(map[string]any)["id"].(string)
+	_, pres := do(t, h, "POST", "/api/products", `{"name":"Pro","plan_code":"pro","price_cents":2900}`)
+	productID := pres["product"].(map[string]any)["id"].(string)
+
+	rec, out := do(t, h, "POST", "/api/orders", `{"client_id":"`+clientID+`","product_id":"`+productID+`"}`)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("place order status = %d, body %s", rec.Code, rec.Body)
+	}
+	// The order must have provisioned (backend driven) and linked a service + invoice.
+	if fb.created.PlanCode != "pro" {
+		t.Fatalf("order did not provision via the seam: %#v", fb.created)
+	}
+	order := out["order"].(map[string]any)
+	if order["product_name"] != "Pro" || order["total_cents"].(float64) != 2900 ||
+		order["service_id"] == "" || order["invoice_id"] == "" || order["status"] != "active" {
+		t.Fatalf("order not recorded with its service + invoice: %#v", order)
+	}
+	// And it shows up in the ledger.
+	_, list := do(t, h, "GET", "/api/orders", "")
+	if len(list["orders"].([]any)) != 1 {
+		t.Fatalf("order ledger should have 1 order: %#v", list["orders"])
+	}
+}
+
 func TestSupportTicketThread(t *testing.T) {
 	h := newTestServer(&fakeBackend{})
 	_, cres := do(t, h, "POST", "/api/tickets",

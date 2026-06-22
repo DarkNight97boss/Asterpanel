@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 const NAV = [
   { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
   { href: "/admin/clients", label: "Clienti", icon: Users },
+  { href: "/admin/orders", label: "Ordini", icon: ShoppingCart },
   { href: "/admin/products", label: "Prodotti", icon: Box },
   { href: "/admin/services", label: "Servizi", icon: Server },
   { href: "/admin/invoices", label: "Fatture", icon: FileText },
@@ -29,8 +30,6 @@ const NAV = [
   { href: "/admin/automation", label: "Automazione", icon: Bot },
   { href: "/admin/hosting", label: "Hosting", icon: Plug },
 ];
-
-const SOON = [{ label: "Ordini", icon: ShoppingCart }];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -58,21 +57,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               <Icon className="h-4 w-4" />
               {n.label}
             </Link>
-          );
-        })}
-        <div className="px-3 pb-1 pt-3 text-[11px] uppercase tracking-wide text-muted-foreground/60">
-          Presto
-        </div>
-        {SOON.map((s) => {
-          const Icon = s.icon;
-          return (
-            <div
-              key={s.label}
-              className="flex items-center gap-3 rounded-md px-3 py-2 text-sm text-muted-foreground/45"
-            >
-              <Icon className="h-4 w-4" />
-              {s.label}
-            </div>
           );
         })}
         <div className="mt-auto flex items-center gap-3 border-t border-border px-3 pt-3 text-sm text-muted-foreground">

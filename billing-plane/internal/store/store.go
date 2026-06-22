@@ -33,6 +33,20 @@ type Product struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+// Order is the canonical purchase record: a client buying a product, which
+// provisions a service and raises its first invoice.
+type Order struct {
+	ID          string    `json:"id"`
+	ClientID    string    `json:"client_id"`
+	ProductID   string    `json:"product_id"`
+	ProductName string    `json:"product_name"`
+	TotalCents  int       `json:"total_cents"`
+	Status      string    `json:"status"` // active, cancelled
+	ServiceID   string    `json:"service_id"`
+	InvoiceID   string    `json:"invoice_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
 // Service is a sold product instance bound to a provisioned hosting account.
 type Service struct {
 	ID               string    `json:"id"`
@@ -97,6 +111,9 @@ type Store interface {
 	ListProducts() []Product
 	GetProduct(id string) (Product, error)
 	DeleteProduct(id string) error
+
+	CreateOrder(o Order) (Order, error)
+	ListOrders() []Order
 
 	CreateService(s Service) (Service, error)
 	ListServices() []Service

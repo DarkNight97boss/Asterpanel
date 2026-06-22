@@ -39,6 +39,8 @@ func (s *Server) Routes() *http.ServeMux {
 	mux.HandleFunc("GET /api/products", s.listProducts)
 	mux.HandleFunc("POST /api/products", s.createProduct)
 	mux.HandleFunc("DELETE /api/products/{id}", s.deleteProduct)
+	mux.HandleFunc("GET /api/orders", s.listOrders)
+	mux.HandleFunc("POST /api/orders", s.createOrder)
 	mux.HandleFunc("GET /api/services", s.listServices)
 	mux.HandleFunc("POST /api/services", s.createService)
 	mux.HandleFunc("POST /api/services/{id}/suspend", s.suspendService)
@@ -134,8 +136,69 @@ func (s *Server) listServices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"services": out})
 }
 
-// createService provisions a hosting account for a client and records the bound
-// service. This is the integration spine: billing intent → hosting.Backend.
+// provisionResult is the outcome of provisioning a service for a client.
+type provisionResult struct {
+	Service      store.Service
+	Invoice      *store.Invoice
+	TempPassword string
+	ProductName  string
+	PriceCents   int
+}
+
+// provision is the integration spine, shared by the Servizi and Ordini flows:
+// resolve the product, drive hosting.Backend to create the account, record the
+// bound service, and raise the first invoice. Returns an errCode ("" on success)
+// so callers map it to HTTP.
+func (s *Server) provision(ctx context.Context, client store.Client, productID, productOverride, planOverride, backendOverride string) (*provisionResult, string, string) {
+	productName, planCode, priceCents := strings.TrimSpace(productOverride), planOverride, 0
+	if productID != "" {
+		prod, perr := s.store.GetProduct(productID)
+		if perr != nil {
+			return nil, "unknown_product", "product not found"
+		}
+		productName, planCode, priceCents = prod.Name, prod.PlanCode, prod.PriceCents
+	}
+	backendName := backendOverride
+	if backendName == "" {
+		backendName = s.defaultBackend
+	}
+	backend, ok := s.backends.Get(backendName)
+	if !ok {
+		return nil, "unknown_backend", "no hosting backend named " + backendName
+	}
+	acc, err := backend.CreateAccount(ctx, hosting.CreateAccountRequest{Name: client.Name, Email: client.Email, PlanCode: planCode})
+	if err != nil {
+		return nil, "provisioning_failed", "hosting backend: " + err.Error()
+	}
+	svc, err := s.store.CreateService(store.Service{
+		ClientID: client.ID, Product: productName, PlanCode: planCode,
+		Backend: backendName, HostingAccountID: acc.ID, Status: "active", PriceCents: priceCents,
+	})
+	if err != nil {
+		return nil, "internal_error", "provisioned but could not record service"
+	}
+	var invoice *store.Invoice
+	if priceCents > 0 {
+		if inv, ierr := s.store.CreateInvoice(client.ID, svc.ID,
+			[]store.InvoiceLine{{Description: productName, AmountCents: priceCents}}, 14); ierr == nil {
+			invoice = &inv
+		}
+	}
+	return &provisionResult{Service: svc, Invoice: invoice, TempPassword: acc.TempPassword, ProductName: productName, PriceCents: priceCents}, "", ""
+}
+
+func provisionStatus(code string) int {
+	switch code {
+	case "unknown_product", "unknown_backend":
+		return http.StatusBadRequest
+	case "provisioning_failed":
+		return http.StatusBadGateway
+	default:
+		return http.StatusInternalServerError
+	}
+}
+
+// createService provisions a service directly (the Servizi flow).
 func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ClientID  string `json:"client_id"`
@@ -153,50 +216,49 @@ func (s *Server) createService(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not_found", "client not found")
 		return
 	}
-	// When a catalog product is chosen, it drives the product name + plan_code
-	// (and the recurring price the first invoice is billed at).
-	productName, planCode, priceCents := strings.TrimSpace(req.Product), req.PlanCode, 0
-	if req.ProductID != "" {
-		prod, perr := s.store.GetProduct(req.ProductID)
-		if perr != nil {
-			writeErr(w, http.StatusBadRequest, "unknown_product", "product not found")
-			return
-		}
-		productName, planCode, priceCents = prod.Name, prod.PlanCode, prod.PriceCents
-	}
-	backendName := req.Backend
-	if backendName == "" {
-		backendName = s.defaultBackend
-	}
-	backend, ok := s.backends.Get(backendName)
-	if !ok {
-		writeErr(w, http.StatusBadRequest, "unknown_backend", "no hosting backend named "+backendName)
+	res, code, msg := s.provision(r.Context(), client, req.ProductID, req.Product, req.PlanCode, req.Backend)
+	if code != "" {
+		writeErr(w, provisionStatus(code), code, msg)
 		return
 	}
-	acc, err := backend.CreateAccount(r.Context(), hosting.CreateAccountRequest{
-		Name: client.Name, Email: client.Email, PlanCode: planCode,
-	})
+	writeJSON(w, http.StatusCreated, map[string]any{"service": res.Service, "temp_password": res.TempPassword, "invoice": res.Invoice})
+}
+
+func (s *Server) listOrders(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"orders": s.store.ListOrders()})
+}
+
+// createOrder is the WHMCS purchase flow: it provisions the product for the
+// client and records the order linking the new service + invoice.
+func (s *Server) createOrder(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ClientID  string `json:"client_id"`
+		ProductID string `json:"product_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		strings.TrimSpace(req.ClientID) == "" || strings.TrimSpace(req.ProductID) == "" {
+		writeErr(w, http.StatusBadRequest, "invalid_request", "client_id and product_id are required")
+		return
+	}
+	client, err := s.store.GetClient(req.ClientID)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, "provisioning_failed", "hosting backend: "+err.Error())
+		writeErr(w, http.StatusNotFound, "not_found", "client not found")
 		return
 	}
-	svc, err := s.store.CreateService(store.Service{
-		ClientID: client.ID, Product: productName, PlanCode: planCode,
-		Backend: backendName, HostingAccountID: acc.ID, Status: "active", PriceCents: priceCents,
-	})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal_error", "provisioned but could not record service")
+	res, code, msg := s.provision(r.Context(), client, req.ProductID, "", "", "")
+	if code != "" {
+		writeErr(w, provisionStatus(code), code, msg)
 		return
 	}
-	// First invoice for the new service, billed at the product's price.
-	var invoice *store.Invoice
-	if priceCents > 0 {
-		if inv, ierr := s.store.CreateInvoice(client.ID, svc.ID,
-			[]store.InvoiceLine{{Description: productName, AmountCents: priceCents}}, 14); ierr == nil {
-			invoice = &inv
-		}
+	order := store.Order{
+		ClientID: client.ID, ProductID: req.ProductID, ProductName: res.ProductName,
+		TotalCents: res.PriceCents, Status: "active", ServiceID: res.Service.ID,
 	}
-	writeJSON(w, http.StatusCreated, map[string]any{"service": svc, "temp_password": acc.TempPassword, "invoice": invoice})
+	if res.Invoice != nil {
+		order.InvoiceID = res.Invoice.ID
+	}
+	o, _ := s.store.CreateOrder(order)
+	writeJSON(w, http.StatusCreated, map[string]any{"order": o, "temp_password": res.TempPassword})
 }
 
 func (s *Server) listInvoices(w http.ResponseWriter, r *http.Request) {
