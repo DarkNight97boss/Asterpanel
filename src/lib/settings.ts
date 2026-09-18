@@ -1,0 +1,92 @@
+import "server-only";
+import { cache } from "react";
+import { z } from "zod";
+import { getDb, schema } from "@/db";
+import { decryptJson, encryptJson } from "./crypto";
+
+/**
+ * Settings are grouped documents in the `settings` table. Each group has a
+ * zod schema with defaults, so reading a group always yields a complete,
+ * valid object even on a fresh install or after an upgrade adds fields.
+ */
+
+const hex = z.string().regex(/^#[0-9a-fA-F]{6}$/);
+
+export const settingsSchemas = {
+  general: z.object({
+    installed: z.boolean().default(false),
+    siteName: z.string().default("AsterPanel"),
+    tagline: z.string().default("Hosting made simple"),
+    locale: z.enum(["en", "it"]).default("en"),
+    supportEmail: z.string().default(""),
+    companyName: z.string().default(""),
+    companyAddress: z.string().default(""),
+    companyVatId: z.string().default(""),
+    allowRegistration: z.boolean().default(true),
+  }),
+  theme: z.object({
+    logoUrl: z.string().default(""),
+    primary: hex.default("#4f46e5"),
+    accent: hex.default("#06b6d4"),
+    mode: z.enum(["light", "dark", "auto"]).default("auto"),
+    radius: z.enum(["none", "sm", "md", "lg", "full"]).default("md"),
+    font: z.enum(["geist", "system", "serif", "mono"]).default("geist"),
+    footerText: z.string().default(""),
+    customCss: z.string().max(20_000).default(""),
+  }),
+  billing: z.object({
+    currency: z.string().length(3).default("EUR"),
+    /** Basis points: 2200 = 22%. */
+    taxRate: z.number().int().min(0).max(10_000).default(0),
+    taxName: z.string().default("VAT"),
+    invoiceDaysBeforeDue: z.number().int().min(0).max(60).default(14),
+    suspendDaysAfterDue: z.number().int().min(0).max(90).default(5),
+    terminateDaysAfterDue: z.number().int().min(0).max(365).default(30),
+    invoicePrefix: z.string().max(10).default("INV-"),
+    bankTransferInstructions: z.string().default(""),
+  }),
+  /** Encrypted at rest: holds gateway API keys. */
+  gateways: z.object({
+    bankTransfer: z.object({ enabled: z.boolean().default(true) }).default({ enabled: true }),
+    stripe: z
+      .object({
+        enabled: z.boolean().default(false),
+        secretKey: z.string().default(""),
+        webhookSecret: z.string().default(""),
+      })
+      .default({ enabled: false, secretKey: "", webhookSecret: "" }),
+  }),
+} as const;
+
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways"]);
+
+export type SettingsGroup = keyof typeof settingsSchemas;
+export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;
+
+const loadAll = cache(async () => {
+  const db = await getDb();
+  const rows = await db.select().from(schema.settings);
+  return new Map(rows.map((r) => [r.key, r.value]));
+});
+
+export async function getSettings<G extends SettingsGroup>(group: G): Promise<Settings<G>> {
+  const raw = (await loadAll()).get(group);
+  const value = ENCRYPTED.has(group) && typeof raw === "string" ? decryptJson(raw, {}) : (raw ?? {});
+  const parsed = settingsSchemas[group].safeParse(value);
+  return (parsed.success ? parsed.data : settingsSchemas[group].parse({})) as Settings<G>;
+}
+
+export async function updateSettings<G extends SettingsGroup>(
+  group: G,
+  patch: Partial<Settings<G>>,
+): Promise<Settings<G>> {
+  const current = await getSettings(group);
+  const next = settingsSchemas[group].parse({ ...current, ...patch }) as Settings<G>;
+  const value = ENCRYPTED.has(group) ? encryptJson(next) : next;
+  const db = await getDb();
+  await db
+    .insert(schema.settings)
+    .values({ key: group, value })
+    .onConflictDoUpdate({ target: schema.settings.key, set: { value, updatedAt: new Date() } });
+  return next;
+}
