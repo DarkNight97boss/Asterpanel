@@ -1,7 +1,7 @@
-import { Alert, Button, ButtonLink, Card, Input, PageHeader, Table, Td } from "@/components/ui";
+import { Alert, Button, ButtonLink, Card, CardHeader, Input, PageHeader, Table, Td } from "@/components/ui";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
-import { DomainError, searchDomains, type SearchHit } from "@/lib/domains";
+import { DomainError, searchDomains, suggestDomains, type SearchHit } from "@/lib/domains";
 import { formatMoney } from "@/lib/format";
 import { rateLimit } from "@/lib/rate-limit";
 import { getSettings } from "@/lib/settings";
@@ -14,12 +14,15 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
   const [t, locale, billing] = await Promise.all([getT(), getLocale(), getSettings("billing")]);
   let hits: SearchHit[] = [];
   let error = "";
+  let suggestions: SearchHit[] = [];
   if (q) {
     // Every search costs API calls at the registrar.
     if (!rateLimit(`domain-search:${account.id}`, 40, 10 * 60_000)) error = "Too many attempts. Try again in a few minutes.";
     else
       try {
         hits = await searchDomains(q);
+        // Only when the name asked for is gone: otherwise suggestions are noise.
+        if (hits[0]?.available === false) suggestions = await suggestDomains(q);
       } catch (err) {
         if (!(err instanceof DomainError)) throw err;
         error = err.message;
@@ -38,6 +41,19 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
         </form>
       </Card>
       {error && <Alert tone="danger">{t(error)}</Alert>}
+      {suggestions.length > 0 && (
+        <Card className="mb-6">
+          <CardHeader title={t("Still free")} description={t("Close to what you searched for.")} />
+          <ul className="divide-y divide-border border-t border-border">
+            {suggestions.map((h) => (
+              <li key={h.domain} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
+                <span className="font-medium">{h.domain}</span>
+                <span className="flex items-center gap-4"><span className="text-body">{money(h.registerPrice)}</span><ButtonLink href={link(h, "register")} size="sm" variant="secondary">{t("Register")}</ButtonLink></span>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       {hits.length > 0 && (
         <Card>
           <Table head={[t("Domain"), t("Availability"), t("First year"), t("Renewal"), ""]}>

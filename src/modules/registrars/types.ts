@@ -58,6 +58,8 @@ export interface RegistrarModule {
   setNameservers(c: RegistrarCredentials, domain: string, nameservers: string[], http: Http): Promise<void>;
   setLock(c: RegistrarCredentials, domain: string, locked: boolean, http: Http): Promise<void>;
   authCode(c: RegistrarCredentials, domain: string, http: Http): Promise<string>;
+  /** Replaces the four contacts of a domain. Some registries treat a new owner as a paid "trade": the module says so by throwing. */
+  updateContact(c: RegistrarCredentials, domain: string, contact: DomainContact, http: Http): Promise<void>;
 }
 
 /** Italian registry: 1 = natural person, 2 = company, per NIC.it. */

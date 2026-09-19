@@ -127,6 +127,11 @@ export const centralnic: RegistrarModule = {
     await call(c, http, "ModifyDomain", { domain, ...list("nameserver", nameservers) });
   },
 
+  async updateContact(c, domain, contact, http) {
+    const handle = await contactHandle(c, http, contact);
+    await call(c, http, "ModifyDomain", { domain, ...roles(handle), ...itExtensions(domain, contact) });
+  },
+
   async setLock(c, domain, locked, http) {
     await call(c, http, "ModifyDomain", { domain, transferlock: locked ? "1" : "0" });
   },

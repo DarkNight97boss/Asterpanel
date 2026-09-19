@@ -8,7 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { requireAccount } from "@/lib/account";
 import { BillingError } from "@/lib/billing";
-import { domainAuthCode, DomainError, orderDomain, setDomainLock, setDomainNameservers, syncDomain } from "@/lib/domains";
+import { domainAuthCode, DomainError, orderDomain, setDomainLock, setDomainNameservers, syncDomain, updateDomainContact } from "@/lib/domains";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 
@@ -57,6 +57,17 @@ export async function saveNameservers(_: ActionState, form: FormData): Promise<A
     return fail(err);
   }
   return { ok: "Saved. It can take a few hours before the change is visible everywhere." };
+}
+
+export async function saveContact(_: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const { user, id } = await mine(form, "manage");
+    await updateDomainContact(id, Object.fromEntries(form), user.id);
+    revalidatePath(`/client/domains/${id}`);
+  } catch (err) {
+    return fail(err);
+  }
+  return { ok: "Saved. The registry may email the old and the new address to confirm the change." };
 }
 
 export async function toggleLock(_: ActionState, form: FormData): Promise<ActionState> {

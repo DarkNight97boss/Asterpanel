@@ -128,6 +128,37 @@ export async function searchDomains(query: string): Promise<SearchHit[]> {
   return ordered.map((t) => ({ domain: `${sld}.${t.tld}`, tld: t.tld, available: taken.has(`${sld}.${t.tld}`) ? false : (hits.get(`${sld}.${t.tld}`) ?? null), registerPrice: firstYearPrice(t), listPrice: firstYearPrice(t) < t.registerPrice ? t.registerPrice : undefined, renewPrice: t.renewPrice, transferPrice: t.transferPrice }));
 }
 
+/** Nearby names for when the wanted one is taken: common prefixes and suffixes, nothing clever. */
+export function suggestNames(sld: string): string[] {
+  const base = sld.replace(/-+/g, "-").slice(0, 40);
+  const out = [`get${base}`, `${base}app`, `${base}hq`, `my${base}`, `${base}online`, `${base}-web`, `the${base}`, `${base}studio`];
+  return [...new Set(out)].filter((n) => LABEL.test(n) && n !== sld);
+}
+
+/** Availability of the suggestions on the most prominent TLDs on sale. One registrar call per registrar. */
+export async function suggestDomains(query: string): Promise<SearchHit[]> {
+  const db = await getDb();
+  const tlds = (await db.select().from(schema.domainTlds).where(eq(schema.domainTlds.enabled, true)).orderBy(asc(schema.domainTlds.sort), asc(schema.domainTlds.tld))).slice(0, 2);
+  const sld = splitDomain(query, tlds.map((t) => t.tld))?.sld ?? query.trim().toLowerCase().split(".")[0];
+  if (!tlds.length || !LABEL.test(sld)) return [];
+  const hits: SearchHit[] = [];
+  await Promise.all(
+    [...Map.groupBy(tlds, (t) => t.registrar)].map(async ([registrarId, group]) => {
+      try {
+        const { mod, creds } = await account(registrarId);
+        const names = group.flatMap((t) => suggestNames(sld).slice(0, 6).map((n) => `${n}.${t.tld}`));
+        for (const r of await mod.check(creds, names, http)) {
+          const t = group.find((g) => r.domain.endsWith(`.${g.tld}`))!;
+          if (r.available) hits.push({ domain: r.domain, tld: t.tld, available: true, registerPrice: firstYearPrice(t), renewPrice: t.renewPrice, transferPrice: t.transferPrice });
+        }
+      } catch {
+        // Suggestions are a nicety: a registrar that does not answer simply offers none.
+      }
+    }),
+  );
+  return hits.slice(0, 8);
+}
+
 // ─── Ordering ────────────────────────────────────────────────────────────────
 
 /** The hidden catalogue entry every domain service hangs off. */
@@ -303,6 +334,15 @@ export async function setDomainLock(domainId: string, locked: boolean, actorId: 
   await wrap(() => mod.setLock(creds, d.name, locked, http));
   await (await getDb()).update(schema.domainNames).set({ locked }).where(eq(schema.domainNames.id, d.id));
   await audit(actorId, locked ? "domain.locked" : "domain.unlocked", "domain", d.id);
+}
+
+/** New registrant and contact details, sent to the registry and kept as the domain's snapshot. */
+export async function updateDomainContact(domainId: string, input: Record<string, unknown>, actorId: string | null = null) {
+  const { d, mod, creds } = await manageable(domainId);
+  const contact = cleanContact(input, d.name);
+  await wrap(() => mod.updateContact(creds, d.name, contact, http));
+  await (await getDb()).update(schema.domainNames).set({ contact: contact as unknown as Record<string, string> }).where(eq(schema.domainNames.id, d.id));
+  await audit(actorId, "domain.contact_changed", "domain", d.id);
 }
 
 /** The code that lets the owner move the domain elsewhere. Audited, never stored. */

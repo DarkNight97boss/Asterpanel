@@ -97,6 +97,10 @@ export const internetbs: RegistrarModule = {
     await call(c, http, "/Domain/Update", { Domain: domain, Ns_list: nameservers.join(",") });
   },
 
+  async updateContact(c, domain, contact, http) {
+    await call(c, http, "/Domain/Update", { Domain: domain, ...contactParams(contact, domain) });
+  },
+
   async setLock(c, domain, locked, http) {
     await call(c, http, `/Domain/RegistrarLock/${locked ? "Enable" : "Disable"}`, { Domain: domain });
   },

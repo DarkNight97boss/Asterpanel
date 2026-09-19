@@ -3,12 +3,12 @@ import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ShellSlot } from "@/components/portal";
-import { Alert, Card, CardHeader, DataField, Field, StatusBadge, Textarea } from "@/components/ui";
+import { Alert, Card, CardHeader, DataField, Field, StatusBadge, Textarea, Input } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { refresh, revealAuthCode, saveNameservers, toggleLock } from "../actions";
+import { refresh, revealAuthCode, saveContact, saveNameservers, toggleLock } from "../actions";
 
 export default async function DomainDetail({ params }: { params: Promise<{ id: string }> }) {
   const { account, can } = await requireAccount("hosting");
@@ -42,6 +42,23 @@ export default async function DomainDetail({ params }: { params: Promise<{ id: s
             <DataField label={t("Last checked")}>{d.syncedAt ? formatDateTime(d.syncedAt, locale) : "—"}</DataField>
           </div>
         </Card>
+
+        {active && can("manage") && (
+          <Card>
+            <CardHeader title={t("Registrant")} description={t("The legal owner as known to the registry. Keep it current: an unreachable owner can lose the domain.")} />
+            <div className="p-5">
+              <ActionForm action={saveContact}>
+                <input type="hidden" name="id" value={d.id} />
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                  {([["firstName", "First name"], ["lastName", "Last name"], ["organization", "Organization"], ["email", "Email"], ["phone", "Phone"], ["taxCode", "Tax code"], ["address", "Address"], ["city", "City"], ["zip", "ZIP / Postal code"], ["state", "State / Province"], ["country", "Country"]] as const).map(([name, label]) => (
+                    <Field key={name} label={t(label)}><Input name={name} defaultValue={d.contact[name] ?? ""} required={!["organization", "state", "taxCode"].includes(name)} maxLength={name === "country" ? 2 : 200} /></Field>
+                  ))}
+                </div>
+                <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+              </ActionForm>
+            </div>
+          </Card>
+        )}
 
         {active && (
           <div className="grid items-start gap-6 xl:grid-cols-2">

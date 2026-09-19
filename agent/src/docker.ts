@@ -759,6 +759,15 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         if (args.name && !/^[\w.-]{1,100}$/.test(args.name)) throw new Error("Invalid name");
         return { output: await this.wp(spec, [kind, "update", args.name || "--all"], log) };
       }
+      case "wp.error_log": {
+        // PHP writes to the container's stderr; WP_DEBUG_LOG (if someone enabled it) writes to wp-content/debug.log.
+        const { name } = this.check(spec);
+        const raw = await new Promise<string>((resolve) => execFile("docker", ["logs", "--tail", "2000", name], { maxBuffer: 16 * 1024 * 1024 }, (_e, out, err) => resolve(`${out}${err}`)));
+        const php = raw.split("\n").filter((l) => /PHP (Fatal|Parse|Warning|Notice|Deprecated)|\[php:(error|warn|notice)\]|Uncaught /i.test(l)).slice(-150);
+        const debugLog = await this.docker(["run", "--rm", "--network", "none", "-v", `${name}-files:/site:ro`, "alpine:3", "sh", "-c", "tail -n 100 /site/wp-content/debug.log 2>/dev/null || true"], undefined, { quiet: true }).catch(() => "");
+        const text = [php.length ? php.join("\n") : "", debugLog.trim() ? `── wp-content/debug.log ──\n${debugLog.trim()}` : ""].filter(Boolean).join("\n\n");
+        return { output: JSON.stringify({ errorLog: text.slice(-60_000) }) };
+      }
       case "wp.scan": {
         // Checksums against wordpress.org: a changed core or plugin file is the clearest sign of a compromise.
         const lines = (out: string) => out.split("\n").map((l) => l.trim()).filter(Boolean);
