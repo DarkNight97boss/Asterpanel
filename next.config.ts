@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  serverExternalPackages: ["@electric-sql/pglite", "postgres"],
+  serverExternalPackages: ["@electric-sql/pglite", "postgres", "nodemailer"],
   poweredByHeader: false,
   async headers() {
     return [

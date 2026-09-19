@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Alert, Card, Field, Input } from "@/components/ui";
+import { Alert, Field, Input } from "@/components/ui";
 import { getT } from "@/i18n";
 import { getUser, safeNext } from "@/lib/auth";
 import { ensureInstalled } from "@/lib/install";
@@ -17,8 +17,8 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
   const [t, general] = await Promise.all([getT(), getSettings("general")]);
 
   return (
-    <Card className="p-6">
-      <h1 className="mb-5 text-xl font-bold">{t("Create an account")}</h1>
+    <div className="rounded-xl bg-surface p-6">
+      <h1 className="mb-2 text-center text-[2rem] leading-10 font-normal text-balance">{t("Create an account")}</h1>
       {general.allowRegistration ? (
         <ActionForm action={register}>
           <input type="hidden" name="next" value={next ?? ""} />
@@ -46,10 +46,10 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
       )}
       <p className="mt-5 text-center text-sm text-muted">
         {t("Already have an account?")}{" "}
-        <Link href={`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-medium text-primary">
+        <Link href={`/login${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="text-link hover:underline">
           {t("Sign in")}
         </Link>
       </p>
-    </Card>
+    </div>
   );
 }

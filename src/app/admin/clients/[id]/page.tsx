@@ -63,7 +63,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
               {services.map((s) => (
                 <tr key={s.id}>
                   <Td>
-                    <Link href={`/admin/services/${s.id}`} className="font-medium hover:text-primary">{s.product.name}</Link>
+                    <Link href={`/admin/services/${s.id}`} className="font-medium hover:text-link">{s.product.name}</Link>
                     {s.domain && <span className="block text-xs text-muted">{s.domain}</span>}
                   </Td>
                   <Td>{formatDate(s.nextDueDate, locale)}</Td>
@@ -83,7 +83,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
               {invoices.map((inv) => (
                 <tr key={inv.id}>
                   <Td>
-                    <Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-primary">{billing.invoicePrefix}{inv.number}</Link>
+                    <Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-link">{billing.invoicePrefix}{inv.number}</Link>
                   </Td>
                   <Td>{formatDate(inv.dueDate, locale)}</Td>
                   <Td>{formatMoney(inv.total, inv.currency, locale)}</Td>

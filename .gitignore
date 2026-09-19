@@ -46,3 +46,6 @@ next-env.d.ts
 
 # editor / agent tooling
 /.claude/
+
+# agent bundle (built by `pnpm agent:build`)
+/public/agent/

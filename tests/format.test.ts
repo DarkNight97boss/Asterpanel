@@ -30,7 +30,7 @@ test("editor input is sanitised", () => {
     "garbage",
   ]);
   assert.equal(blocks.length, 1);
-  assert.equal(blocks[0].props.align, "center");
+  assert.equal(blocks[0].props.align, "left", "invalid select values fall back to the first option");
   assert.ok(!("evil" in blocks[0].props));
   assert.equal(safeHref("javascript:alert(1)"), "#");
   assert.equal(safeHref("/ok"), "/ok");

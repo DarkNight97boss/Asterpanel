@@ -17,6 +17,15 @@ export default async function AdminLayout({ children }: { children: React.ReactN
       nav={[
         { items: [{ href: "/admin", label: t("Dashboard"), icon: "◧", exact: true }] },
         {
+          title: t("Platform"),
+          items: [
+            { href: "/admin/workloads", label: t("Workloads"), icon: "▣" },
+            ...(admin ? [{ href: "/admin/nodes", label: t("Nodes"), icon: "▥" }] : []),
+            { href: "/admin/jobs", label: t("Jobs"), icon: "⟳" },
+            ...(admin ? [{ href: "/admin/dns", label: "DNS", icon: "⇄" }] : []),
+          ],
+        },
+        {
           title: t("Business"),
           items: [
             { href: "/admin/clients", label: t("Clients"), icon: "☺" },
@@ -30,7 +39,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           title: t("Catalog"),
           items: [
             { href: "/admin/products", label: t("Products"), icon: "❖" },
-            ...(admin ? [{ href: "/admin/servers", label: t("Servers"), icon: "▥" }] : []),
+            ...(admin ? [{ href: "/admin/servers", label: t("External servers"), icon: "▤" }] : []),
           ],
         },
         {
@@ -50,6 +59,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   { href: "/admin/settings", label: t("Settings"), icon: "⚙", exact: true },
                   { href: "/admin/settings/billing", label: t("Billing"), icon: "¤" },
                   { href: "/admin/settings/gateways", label: t("Payment gateways"), icon: "▭" },
+                  { href: "/admin/settings/mail", label: t("Email"), icon: "@" },
                 ]
               : []),
           ],

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, Checkbox, Field, Input, Select } from "@/components/ui";
+import { Checkbox, Field, Input, Select } from "@/components/ui";
 import { LOCALES } from "@/i18n/shared";
 import { getSettings } from "@/lib/settings";
 import { install } from "../actions";
@@ -11,8 +11,8 @@ export default async function InstallPage() {
   if ((await getSettings("general")).installed) redirect("/");
 
   return (
-    <Card className="p-6">
-      <h1 className="text-xl font-bold">Welcome to AsterPanel</h1>
+    <div className="rounded-xl bg-surface p-6">
+      <h1 className="mb-2 text-center text-[2rem] leading-10 font-normal text-balance">Welcome to AsterPanel</h1>
       <p className="mt-1 mb-5 text-sm text-muted">Set up your site and create the administrator account.</p>
       <ActionForm action={install}>
         {process.env.INSTALL_TOKEN && (
@@ -55,6 +55,6 @@ export default async function InstallPage() {
         <Checkbox name="starterContent" defaultChecked label="Create starter content (home page, sample plans, menus)" />
         <SubmitButton className="w-full">Install</SubmitButton>
       </ActionForm>
-    </Card>
+    </div>
   );
 }

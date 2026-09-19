@@ -42,10 +42,10 @@ export default async function Services({ searchParams }: { searchParams: Promise
             {services.map((s) => (
               <tr key={s.id}>
                 <Td>
-                  <Link href={`/admin/services/${s.id}`} className="font-medium hover:text-primary">{s.product.name}</Link>
+                  <Link href={`/admin/services/${s.id}`} className="font-medium hover:text-link">{s.product.name}</Link>
                   {s.domain && <span className="block text-xs text-muted">{s.domain}</span>}
                 </Td>
-                <Td><Link href={`/admin/clients/${s.clientId}`} className="hover:text-primary">{displayName(s.client)}</Link></Td>
+                <Td><Link href={`/admin/clients/${s.clientId}`} className="hover:text-link">{displayName(s.client)}</Link></Td>
                 <Td>{formatMoney(s.amount, billing.currency, locale)}</Td>
                 <Td>{formatDate(s.nextDueDate, locale)}</Td>
                 <Td><StatusBadge status={s.status} label={t(STATUS_LABEL[s.status])} /></Td>

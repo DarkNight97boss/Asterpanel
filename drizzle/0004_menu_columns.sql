@@ -1,0 +1,1 @@
+ALTER TABLE "menu_items" ADD COLUMN "column_title" text DEFAULT '' NOT NULL;

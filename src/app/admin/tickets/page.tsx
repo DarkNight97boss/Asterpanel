@@ -24,7 +24,7 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
     <>
       <PageHeader
         title={t("Tickets")}
-        action={<Link href={all ? "/admin/tickets" : "/admin/tickets?all=1"} className="text-sm text-primary">{all ? t("Hide closed") : t("Show closed")}</Link>}
+        action={<Link href={all ? "/admin/tickets" : "/admin/tickets?all=1"} className="text-sm text-link">{all ? t("Hide closed") : t("Show closed")}</Link>}
       />
       <Card>
         {tickets.length ? (
@@ -33,7 +33,7 @@ export default async function Tickets({ searchParams }: { searchParams: Promise<
               <tr key={tk.id}>
                 <Td className="text-muted">{tk.number}</Td>
                 <Td>
-                  <Link href={`/admin/tickets/${tk.id}`} className="font-medium hover:text-primary">{tk.subject}</Link>{" "}
+                  <Link href={`/admin/tickets/${tk.id}`} className="font-medium hover:text-link">{tk.subject}</Link>{" "}
                   {tk.priority === "high" && <Badge tone="danger">{t("High")}</Badge>}
                 </Td>
                 <Td>{displayName(tk.client)}</Td>

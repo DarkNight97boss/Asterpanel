@@ -86,11 +86,18 @@ export default async function ProductEditor({ params }: { params: Promise<{ id: 
             {provisioningModules.flatMap((m) =>
               m.productFields.map((f) => (
                 <Field key={`${m.id}.${f.name}`} label={`${m.name}: ${f.label}`} hint={f.help}>
-                  <Input
-                    name={`mc_${m.id}_${f.name}`}
-                    placeholder={f.placeholder}
-                    defaultValue={product?.module === m.id ? product.moduleConfig[f.name] : ""}
-                  />
+                  {f.type === "select" ? (
+                    <Select name={`mc_${m.id}_${f.name}`} defaultValue={product?.module === m.id ? product.moduleConfig[f.name] : f.options?.[0]?.value}>
+                      {f.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                    </Select>
+                  ) : (
+                    <Input
+                      name={`mc_${m.id}_${f.name}`}
+                      type={f.type === "number" ? "number" : "text"}
+                      placeholder={f.placeholder}
+                      defaultValue={product?.module === m.id ? product.moduleConfig[f.name] : ""}
+                    />
+                  )}
                 </Field>
               )),
             )}

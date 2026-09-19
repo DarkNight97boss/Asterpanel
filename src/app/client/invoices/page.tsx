@@ -3,12 +3,12 @@ import { desc, eq } from "drizzle-orm";
 import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, STATUS_LABEL } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { requireUser } from "@/lib/auth";
+import { requireAccount } from "@/lib/account";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 
 export default async function ClientInvoices() {
-  const user = await requireUser();
+  const { account: user } = await requireAccount("billing");
   const db = await getDb();
   const [t, locale, billing, invoices] = await Promise.all([
     getT(),
@@ -26,7 +26,7 @@ export default async function ClientInvoices() {
             {invoices.map((inv) => (
               <tr key={inv.id}>
                 <Td>
-                  <Link href={`/client/invoices/${inv.id}`} className="font-medium hover:text-primary">
+                  <Link href={`/client/invoices/${inv.id}`} className="font-medium hover:text-link">
                     {billing.invoicePrefix}{inv.number}
                   </Link>
                 </Td>

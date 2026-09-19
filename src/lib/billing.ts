@@ -1,11 +1,14 @@
 import "server-only";
-import { and, eq, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
+import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
+import { makeT } from "@/i18n/shared";
 import type { BillingCycle } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
 import { decryptJson } from "./crypto";
 import { addCycle, CYCLE_LABEL } from "./format";
+import { mailConfigured } from "./mail/transport";
+import { notify } from "./notify";
 import { getSettings } from "./settings";
 
 const DAY = 86_400_000;
@@ -22,9 +25,12 @@ export async function placeOrder(input: {
   cycle: BillingCycle;
   domain: string;
   ip?: string;
-}): Promise<{ orderId: string; invoiceId: string }> {
+  /** Module-specific order options, stored as `service.moduleData.request`. */
+  request?: Record<string, unknown>;
+}): Promise<{ orderId: string; invoiceId: string; serviceId: string }> {
   const db = await getDb();
   const billing = await getSettings("billing");
+  const t = makeT((await getSettings("general")).locale);
 
   const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
   if (!product || product.hidden) throw new BillingError("Product not available");
@@ -52,6 +58,7 @@ export async function placeOrder(input: {
         domain: input.domain.toLowerCase(),
         billingCycle: input.cycle,
         amount: price,
+        moduleData: input.request ? { request: input.request } : {},
       })
       .returning();
     const [invoice] = await tx
@@ -67,19 +74,21 @@ export async function placeOrder(input: {
       })
       .returning();
 
-    const label = `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${CYCLE_LABEL[input.cycle]})`;
+    // Invoice lines are a legal record: written once, in the site language.
+    const label = `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
     await tx.insert(schema.invoiceItems).values([
       { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: label, amount: price },
       ...(setup > 0
-        ? [{ invoiceId: invoice.id, serviceId: service.id, kind: "setup" as const, description: `${product.name} — setup fee`, amount: setup }]
+        ? [{ invoiceId: invoice.id, serviceId: service.id, kind: "setup" as const, description: `${product.name} — ${t("Setup fee")}`, amount: setup }]
         : []),
     ]);
     await tx.update(schema.orders).set({ invoiceId: invoice.id }).where(eq(schema.orders.id, order.id));
-    return { orderId: order.id, invoiceId: invoice.id };
+    return { orderId: order.id, invoiceId: invoice.id, serviceId: service.id };
   });
 
   await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total });
   if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
+  else notify.invoiceCreated(result.invoiceId);
   return result;
 }
 
@@ -135,6 +144,7 @@ export async function recordPayment(input: {
 
   if (outcome.becamePaid) {
     await audit(input.actorId ?? null, "invoice.paid", "invoice", input.invoiceId, { gateway: input.gateway });
+    if (input.gateway !== "free") notify.invoicePaid(input.invoiceId);
     await fulfilInvoice(input.invoiceId);
   }
   return { paid: outcome.paid, duplicate: outcome.duplicate };
@@ -236,6 +246,10 @@ async function lifecycle(
       await db.update(schema.services).set({ status: "terminated", nextDueDate: null }).where(eq(schema.services.id, serviceId));
     }
     await audit(actorId, `service.${action}`, "service", serviceId, { module: mod.id });
+    if (action === "create") notify.serviceActivated(serviceId, message);
+    else if (action === "suspend") notify.serviceSuspended(serviceId, reason);
+    else if (action === "unsuspend") notify.serviceUnsuspended(serviceId);
+    else notify.serviceTerminated(serviceId);
     return message;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -252,7 +266,7 @@ export const terminateService = (id: string, actorId: string | null = null) => l
 
 // ─── Automation (cron) ───────────────────────────────────────────────────────
 
-export type AutomationReport = { invoiced: number; suspended: number; terminated: number; errors: string[] };
+export type AutomationReport = { invoiced: number; reminded: number; suspended: number; terminated: number; errors: string[] };
 
 /**
  * Daily billing run. Idempotent: running it twice in a row is a no-op the
@@ -261,7 +275,7 @@ export type AutomationReport = { invoiced: number; suspended: number; terminated
 export async function runAutomation(now = new Date()): Promise<AutomationReport> {
   const db = await getDb();
   const billing = await getSettings("billing");
-  const report: AutomationReport = { invoiced: 0, suspended: 0, terminated: 0, errors: [] };
+  const report: AutomationReport = { invoiced: 0, reminded: 0, suspended: 0, terminated: 0, errors: [] };
 
   // 1. Renewal invoices — one per client, grouping everything coming due.
   const horizon = new Date(now.getTime() + billing.invoiceDaysBeforeDue * DAY);
@@ -277,7 +291,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
   const byClient = Map.groupBy(due, (s) => s.clientId);
   for (const [clientId, list] of byClient) {
     try {
-      await db.transaction(async (tx) => {
+      const invoiceId = await db.transaction(async (tx) => {
         const subtotal = list.reduce((sum, s) => sum + s.amount, 0);
         const tax = taxOn(subtotal, billing.taxRate);
         const dueDate = new Date(Math.min(...list.map((s) => s.nextDueDate!.getTime())));
@@ -297,14 +311,44 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
         for (const s of list) {
           await tx.update(schema.services).set({ renewalInvoicedFor: s.nextDueDate }).where(eq(schema.services.id, s.id));
         }
+        return invoice.id;
       });
+      notify.invoiceCreated(invoiceId);
       report.invoiced++;
     } catch (err) {
       report.errors.push(`invoice client ${clientId}: ${err instanceof Error ? err.message : err}`);
     }
   }
 
-  // 2. Suspend services whose due date passed the grace period.
+  // 2. Overdue reminders. `remindersSent` counts the thresholds already
+  //    handled, so each one fires once and a missed day is caught up with a
+  //    single email rather than a burst.
+  const thresholds = [...billing.overdueReminderDays].sort((a, b) => a - b);
+  // Without a working mailer nothing is consumed: reminders start (with one
+  // catch-up email per invoice) as soon as email is configured.
+  if (thresholds.length && mailConfigured(await getSettings("mail"))) {
+    const overdue = await db
+      .select({ id: schema.invoices.id, dueDate: schema.invoices.dueDate, remindersSent: schema.invoices.remindersSent })
+      .from(schema.invoices)
+      .where(
+        and(
+          eq(schema.invoices.status, "unpaid"),
+          gt(schema.invoices.total, 0),
+          lt(schema.invoices.dueDate, new Date(now.getTime() - thresholds[0] * DAY)),
+          lt(schema.invoices.remindersSent, thresholds.length),
+        ),
+      );
+    for (const invoice of overdue) {
+      const daysLate = Math.floor((now.getTime() - invoice.dueDate.getTime()) / DAY);
+      const reached = thresholds.filter((d) => d <= daysLate).length;
+      if (reached <= invoice.remindersSent) continue;
+      await db.update(schema.invoices).set({ remindersSent: reached }).where(eq(schema.invoices.id, invoice.id));
+      notify.invoiceReminder(invoice.id);
+      report.reminded++;
+    }
+  }
+
+  // 3. Suspend services whose due date passed the grace period.
   const suspendBefore = new Date(now.getTime() - billing.suspendDaysAfterDue * DAY);
   const toSuspend = await db
     .select({ id: schema.services.id })
@@ -319,7 +363,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
     }
   }
 
-  // 3. Terminate long-overdue suspended services (0 disables).
+  // 4. Terminate long-overdue suspended services (0 disables).
   if (billing.terminateDaysAfterDue > 0) {
     const terminateBefore = new Date(now.getTime() - billing.terminateDaysAfterDue * DAY);
     const toTerminate = await db

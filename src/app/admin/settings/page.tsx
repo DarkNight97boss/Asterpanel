@@ -22,6 +22,9 @@ export default async function GeneralSettings() {
               </Select>
             </Field>
             <Field label={t("Tagline")} className="sm:col-span-2"><Input name="tagline" defaultValue={s.tagline} /></Field>
+            <Field label={t("Site URL")} hint={t("Used for links in emails.")} className="sm:col-span-2">
+              <Input name="siteUrl" type="url" defaultValue={s.siteUrl} placeholder="https://example.com" />
+            </Field>
             <Field label={t("Support email")}><Input name="supportEmail" type="email" defaultValue={s.supportEmail} /></Field>
             <Field label={t("Company name")}><Input name="companyName" defaultValue={s.companyName} /></Field>
             <Field label={t("Company VAT ID")}><Input name="companyVatId" defaultValue={s.companyVatId} /></Field>

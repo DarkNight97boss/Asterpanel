@@ -8,7 +8,7 @@ import { deleteMenuItem, saveMenuItem } from "../actions";
 export default async function Menus() {
   const db = await getDb();
   const [t, all] = await Promise.all([getT(), db.select().from(schema.menuItems).orderBy(asc(schema.menuItems.position))]);
-  const row = "grid items-center gap-2 space-y-0 sm:grid-cols-[1fr_1.4fr_5rem_auto]";
+  const rowFor = (location: string) => `grid items-center gap-2 space-y-0 ${location === "footer" ? "sm:grid-cols-[1fr_1.4fr_1fr_5rem_auto]" : "sm:grid-cols-[1fr_1.4fr_5rem_auto]"}`;
 
   return (
     <>
@@ -20,11 +20,12 @@ export default async function Menus() {
             <div className="space-y-3 p-5">
               {all.filter((m) => m.location === location).map((m) => (
                 <div key={m.id} className="flex items-start gap-2">
-                  <ActionForm action={saveMenuItem} className={`${row} flex-1`}>
+                  <ActionForm action={saveMenuItem} className={`${rowFor(location)} flex-1`}>
                     <input type="hidden" name="id" value={m.id} />
                     <input type="hidden" name="location" value={location} />
                     <Input name="label" defaultValue={m.label} required aria-label={t("Label")} />
                     <Input name="href" defaultValue={m.href} required aria-label={t("Link")} />
+                    {location === "footer" && <Input name="columnTitle" defaultValue={m.columnTitle} placeholder={t("Column (empty = bottom row)")} aria-label={t("Column")} />}
                     <Input name="position" type="number" defaultValue={m.position} aria-label={t("Sort order")} />
                     <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
                   </ActionForm>
@@ -34,10 +35,11 @@ export default async function Menus() {
                   </form>
                 </div>
               ))}
-              <ActionForm action={saveMenuItem} className={`${row} border-t border-border pt-3`}>
+              <ActionForm action={saveMenuItem} className={`${rowFor(location)} border-t border-border pt-3`}>
                 <input type="hidden" name="location" value={location} />
                 <Input name="label" placeholder={t("Label")} required />
                 <Input name="href" placeholder="/about-us" required />
+                {location === "footer" && <Input name="columnTitle" placeholder={t("Column (empty = bottom row)")} aria-label={t("Column")} />}
                 <Input name="position" type="number" defaultValue={all.length} aria-label={t("Sort order")} />
                 <SubmitButton>{t("Add")}</SubmitButton>
               </ActionForm>

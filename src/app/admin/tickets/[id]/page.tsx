@@ -31,7 +31,7 @@ export default async function AdminTicket({ params }: { params: Promise<{ id: st
         description={
           <>
             <StatusBadge status={ticket.status} label={t(STATUS_LABEL[ticket.status])} />{" "}
-            <Link href={`/admin/clients/${ticket.clientId}`} className="hover:text-primary">{displayName(ticket.client)}</Link>
+            <Link href={`/admin/clients/${ticket.clientId}`} className="hover:text-link">{displayName(ticket.client)}</Link>
             {" · "}<span className="capitalize">{ticket.department}</span> · {t({ low: "Low", medium: "Medium", high: "High" }[ticket.priority])}
           </>
         }

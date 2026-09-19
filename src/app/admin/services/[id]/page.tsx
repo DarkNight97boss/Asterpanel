@@ -40,7 +40,7 @@ export default async function ServiceDetail({ params }: { params: Promise<{ id: 
         description={
           <>
             <StatusBadge status={service.status} label={t(STATUS_LABEL[service.status])} />{" "}
-            <Link href={`/admin/clients/${service.clientId}`} className="hover:text-primary">{displayName(service.client)}</Link>
+            <Link href={`/admin/clients/${service.clientId}`} className="hover:text-link">{displayName(service.client)}</Link>
             {service.suspendReason && <> · {service.suspendReason}</>}
           </>
         }

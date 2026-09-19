@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, Field, Input } from "@/components/ui";
+import { Alert, Field, Input } from "@/components/ui";
 import { getT } from "@/i18n";
 import { getUser, isStaff, safeNext } from "@/lib/auth";
 import { ensureInstalled } from "@/lib/install";
@@ -10,35 +10,50 @@ import { login } from "../actions";
 
 export const metadata = { title: "Sign in" };
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reset?: string }> }) {
   await ensureInstalled();
-  const { next } = await searchParams;
+  const { next, reset } = await searchParams;
   const user = await getUser();
   if (user) redirect(safeNext(next, isStaff(user) ? "/admin" : "/client"));
   const [t, general] = await Promise.all([getT(), getSettings("general")]);
 
   return (
-    <Card className="p-6">
-      <h1 className="text-xl font-bold">{t("Sign in")}</h1>
-      <p className="mt-1 mb-5 text-sm text-muted">{t("Access your services, invoices and support.")}</p>
+    <div className="rounded-xl bg-surface p-6">
+      <h1 className="text-center text-[2rem] leading-10 font-normal text-balance">{t("Welcome to {site}!", { site: general.siteName })}</h1>
+      <p className="mt-4 mb-7 text-center text-body">{t("Good to see you again.")}</p>
+      {reset && (
+        <div className="mb-4">
+          <Alert tone="success">{t("Password updated. You can now sign in.")}</Alert>
+        </div>
+      )}
       <ActionForm action={login}>
         <input type="hidden" name="next" value={next ?? ""} />
         <Field label={t("Email")}>
-          <Input name="email" type="email" autoComplete="email" required autoFocus />
+          <Input name="email" type="email" autoComplete="email" placeholder={t("Enter your email")} required autoFocus />
         </Field>
         <Field label={t("Password")}>
-          <Input name="password" type="password" autoComplete="current-password" required />
+          <Input name="password" type="password" autoComplete="current-password" placeholder={t("Enter your password")} required />
         </Field>
+        <p className="-mt-1 text-xs">
+          <Link href="/forgot-password" className="text-link hover:underline">{t("Forgot your password?")}</Link>
+        </p>
         <SubmitButton className="w-full">{t("Sign in")}</SubmitButton>
       </ActionForm>
-      {general.allowRegistration && (
-        <p className="mt-5 text-center text-sm text-muted">
-          {t("New here?")}{" "}
-          <Link href={`/register${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="font-medium text-primary">
-            {t("Create an account")}
-          </Link>
-        </p>
-      )}
-    </Card>
+
+      <div aria-hidden className="my-7 h-px bg-gradient-to-r from-transparent via-border-strong to-transparent" />
+
+      <div className="space-y-4 text-center text-sm">
+        {general.allowRegistration && (
+          <p>
+            <Link href={`/register${next ? `?next=${encodeURIComponent(next)}` : ""}`} className="text-link hover:underline">{t("Create an account")}</Link>
+          </p>
+        )}
+        {general.supportEmail && (
+          <p className="text-xs text-muted">
+            {t("Need help?")} <a href={`mailto:${general.supportEmail}`} className="text-link hover:underline">{general.supportEmail}</a>
+          </p>
+        )}
+      </div>
+    </div>
   );
 }

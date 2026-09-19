@@ -30,11 +30,11 @@ export default async function Orders() {
               <tr key={o.id}>
                 <Td className="text-muted">{o.number}</Td>
                 <Td>
-                  <Link href={`/admin/clients/${o.clientId}`} className="font-medium hover:text-primary">{displayName(o.client)}</Link>
+                  <Link href={`/admin/clients/${o.clientId}`} className="font-medium hover:text-link">{displayName(o.client)}</Link>
                 </Td>
                 <Td>
                   {o.services.map((s) => (
-                    <Link key={s.id} href={`/admin/services/${s.id}`} className="block hover:text-primary">
+                    <Link key={s.id} href={`/admin/services/${s.id}`} className="block hover:text-link">
                       {s.product.name} {s.domain && <span className="text-xs text-muted">{s.domain}</span>}
                     </Link>
                   ))}
@@ -42,7 +42,7 @@ export default async function Orders() {
                 <Td>{formatDateTime(o.createdAt, locale)}</Td>
                 <Td>{formatMoney(o.total, billing.currency, locale)}</Td>
                 <Td><StatusBadge status={o.status} label={t(STATUS_LABEL[o.status])} /></Td>
-                <Td>{o.invoiceId && <Link href={`/admin/invoices/${o.invoiceId}`} className="text-primary">{t("Invoice")}</Link>}</Td>
+                <Td>{o.invoiceId && <Link href={`/admin/invoices/${o.invoiceId}`} className="text-link">{t("Invoice")}</Link>}</Td>
               </tr>
             ))}
           </Table>

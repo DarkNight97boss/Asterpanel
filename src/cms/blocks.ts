@@ -29,8 +29,8 @@ const align: FieldDef = {
   label: "Alignment",
   type: "select",
   options: [
-    { value: "center", label: "Center" },
     { value: "left", label: "Left" },
+    { value: "center", label: "Center" },
   ],
 };
 
@@ -47,6 +47,7 @@ export const BLOCKS: BlockDef[] = [
       { name: "primaryHref", label: "Primary button link", type: "url" },
       { name: "secondaryLabel", label: "Secondary button label", type: "text" },
       { name: "secondaryHref", label: "Secondary button link", type: "url" },
+      { name: "imageUrl", label: "Image URL (optional)", type: "url" },
       align,
     ],
     defaults: {
@@ -57,7 +58,8 @@ export const BLOCKS: BlockDef[] = [
       primaryHref: "#pricing",
       secondaryLabel: "",
       secondaryHref: "",
-      align: "center",
+      imageUrl: "",
+      align: "left",
     },
   },
   {
@@ -66,10 +68,127 @@ export const BLOCKS: BlockDef[] = [
     description: "Live plans and prices from a product group.",
     fields: [
       { name: "title", label: "Title", type: "text" },
+      { name: "titleMuted", label: "Title, second line (muted)", type: "text" },
       { name: "subtitle", label: "Subtitle", type: "textarea" },
       { name: "groupId", label: "Product group", type: "productGroup" },
     ],
     defaults: { title: "Choose your plan", subtitle: "", groupId: "" },
+  },
+  {
+    type: "proof",
+    label: "Social proof panel",
+    description: "Dark rounded panel with a rating, a headline and customer quotes.",
+    fields: [
+      { name: "rating", label: "Rating", type: "text", placeholder: "4.8/5" },
+      { name: "title", label: "Title", type: "text" },
+      { name: "note", label: "Small note", type: "text" },
+      { name: "label", label: "Button label", type: "text" },
+      { name: "href", label: "Button link", type: "url" },
+      {
+        name: "items",
+        label: "Quotes",
+        type: "list",
+        itemLabel: "Quote",
+        fields: [
+          { name: "headline", label: "Headline", type: "text" },
+          { name: "quote", label: "Quote", type: "textarea" },
+          { name: "author", label: "Author", type: "text" },
+          { name: "role", label: "Role / company", type: "text" },
+        ],
+      },
+    ],
+    defaults: {
+      rating: "4.9/5",
+      title: "Loved by the teams who host with us",
+      note: "Replace these quotes with your customers' words.",
+      label: "Make the switch today",
+      href: "/register",
+      items: [
+        { headline: "A perfect experience", quote: "Staging, backups and deploys in one place. We moved every client site in a weekend.", author: "Giulia R.", role: "Web agency" },
+        { headline: "Fast and predictable", quote: "Isolated containers mean a busy neighbour never slows our shop down.", author: "Marco T.", role: "E-commerce" },
+        { headline: "Support that answers", quote: "Real engineers reply in minutes, and they actually fix things.", author: "Sara L.", role: "SaaS founder" },
+      ],
+    },
+  },
+  {
+    type: "services",
+    label: "Services",
+    description: "Large cards, one per product line, each with its own link.",
+    fields: [
+      { name: "eyebrow", label: "Eyebrow", type: "text" },
+      { name: "title", label: "Title", type: "text" },
+      { name: "titleMuted", label: "Title, second line (muted)", type: "text" },
+      { name: "subtitle", label: "Subtitle", type: "textarea" },
+      {
+        name: "items",
+        label: "Services",
+        type: "list",
+        itemLabel: "Service",
+        fields: [
+          { name: "icon", label: "Icon (emoji)", type: "text" },
+          { name: "title", label: "Title", type: "text" },
+          { name: "text", label: "Text", type: "textarea" },
+          { name: "linkLabel", label: "Link label", type: "text" },
+          { name: "href", label: "Link", type: "url" },
+        ],
+      },
+    ],
+    defaults: {
+      eyebrow: "One platform",
+      title: "Everything you host, in one dashboard",
+      subtitle: "",
+      items: [
+        { icon: "Ⓦ", title: "Managed WordPress", text: "Isolated containers, one-click staging, backups and free SSL.", linkLabel: "Create a site", href: "/client/new/sites" },
+        { icon: "▲", title: "Application Hosting", text: "Deploy any Dockerfile from Git. Push to deploy, env vars, logs.", linkLabel: "Deploy an app", href: "/client/new/apps" },
+        { icon: "◉", title: "Managed Databases", text: "MySQL, PostgreSQL and Redis on your private network.", linkLabel: "Create a database", href: "/client/new/databases" },
+        { icon: "◇", title: "Static Sites", text: "Build from Git and serve with automatic HTTPS. Free.", linkLabel: "Publish a site", href: "/client/new/static-sites" },
+      ],
+    },
+  },
+  {
+    type: "split",
+    label: "Split (text + panel)",
+    description: "Text and bullet points beside a terminal-style panel.",
+    fields: [
+      { name: "eyebrow", label: "Eyebrow", type: "text" },
+      { name: "title", label: "Title", type: "text" },
+      { name: "text", label: "Text", type: "textarea" },
+      { name: "bullets", label: "Bullets", type: "list", itemLabel: "Bullet", fields: [{ name: "text", label: "Text", type: "text" }] },
+      { name: "label", label: "Button label", type: "text" },
+      { name: "href", label: "Button link", type: "url" },
+      { name: "panelTitle", label: "Panel title", type: "text" },
+      { name: "panel", label: "Panel content (one line per row)", type: "textarea" },
+      {
+        name: "side",
+        label: "Panel position",
+        type: "select",
+        options: [
+          { value: "right", label: "Right" },
+          { value: "left", label: "Left" },
+        ],
+      },
+    ],
+    defaults: {
+      eyebrow: "",
+      title: "Push to deploy",
+      text: "Connect a repository and every push goes live. A failed build never takes your site down.",
+      bullets: [{ text: "Build logs in real time" }, { text: "Encrypted environment variables" }, { text: "Automatic HTTPS on every domain" }],
+      label: "",
+      href: "",
+      panelTitle: "deploy",
+      panel: "$ git push origin main\n→ cloning repository\n→ building image\n→ starting container\n✓ live at https://app.example.com",
+      side: "right",
+    },
+  },
+  {
+    type: "logos",
+    label: "Logo strip",
+    description: "A row of names: technologies, customers or partners.",
+    fields: [
+      { name: "title", label: "Title", type: "text" },
+      { name: "items", label: "Names", type: "list", itemLabel: "Name", fields: [{ name: "name", label: "Name", type: "text" }] },
+    ],
+    defaults: { title: "Built on technology you already trust", items: [{ name: "Docker" }, { name: "WordPress" }, { name: "PostgreSQL" }, { name: "MariaDB" }, { name: "Redis" }, { name: "Let's Encrypt" }] },
   },
   {
     type: "features",
@@ -77,6 +196,7 @@ export const BLOCKS: BlockDef[] = [
     description: "Grid of icon + title + text cards.",
     fields: [
       { name: "title", label: "Title", type: "text" },
+      { name: "titleMuted", label: "Title, second line (muted)", type: "text" },
       { name: "subtitle", label: "Subtitle", type: "textarea" },
       {
         name: "items",
@@ -85,6 +205,7 @@ export const BLOCKS: BlockDef[] = [
         itemLabel: "Feature",
         fields: [
           { name: "icon", label: "Icon (emoji)", type: "text" },
+          { name: "imageUrl", label: "Image URL (optional)", type: "url" },
           { name: "title", label: "Title", type: "text" },
           { name: "text", label: "Text", type: "textarea" },
         ],
@@ -179,8 +300,19 @@ export const BLOCKS: BlockDef[] = [
       { name: "text", label: "Text", type: "textarea" },
       { name: "label", label: "Button label", type: "text" },
       { name: "href", label: "Button link", type: "url" },
+      { name: "secondaryLabel", label: "Secondary button label", type: "text" },
+      { name: "secondaryHref", label: "Secondary button link", type: "url" },
+      {
+        name: "style",
+        label: "Style",
+        type: "select",
+        options: [
+          { value: "dark", label: "Dark panel" },
+          { value: "strip", label: "Light strip" },
+        ],
+      },
     ],
-    defaults: { title: "Ready to get started?", text: "", label: "Get started", href: "/register" },
+    defaults: { title: "Ready to get started?", text: "", label: "Get started", href: "/register", secondaryLabel: "", secondaryHref: "", style: "dark" },
   },
 ];
 

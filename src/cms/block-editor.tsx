@@ -44,7 +44,7 @@ export function BlockEditor({ initial, groups }: { initial: Block[]; groups: Gro
         const expanded = open === block.id;
         const summary = str(block.props.title) || str(block.props.content).slice(0, 60);
         return (
-          <div key={block.id} className={cn("rounded-theme border bg-surface", expanded ? "border-primary" : "border-border")}>
+          <div key={block.id} className={cn("rounded-theme border bg-surface", expanded ? "border-accent" : "border-border")}>
             <div className="flex items-center gap-2 px-4 py-3">
               <button type="button" onClick={() => setOpen(expanded ? null : block.id)} className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 text-left">
                 <span className="rounded bg-subtle px-2 py-0.5 text-xs font-semibold">{t(def.label)}</span>
