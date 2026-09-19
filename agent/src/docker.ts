@@ -168,6 +168,16 @@ export class DockerDriver implements Driver {
         `traefik.http.routers.${r}.service=${r}`,
       );
     }
+    if (spec.edge?.hsts) {
+      // One year, this host only: subdomains and preload lists are the site owner's decision, not ours.
+      labels.push(`traefik.http.middlewares.${r}-hsts.headers.stsSeconds=31536000`);
+      middlewares.push(`${r}-hsts`);
+    }
+    const auth = spec.edge?.basicAuth;
+    if (auth && /^[\w.@-]{1,40}$/.test(auth.user) && /^\{SHA\}[A-Za-z0-9+/=]{28}$/.test(auth.hash)) {
+      labels.push(`traefik.http.middlewares.${r}-auth.basicauth.users=${auth.user}:${auth.hash}`, `traefik.http.middlewares.${r}-auth.basicauth.removeheader=true`);
+      middlewares.unshift(`${r}-auth`); // first: nothing else runs for someone who is not let in
+    }
     const deny = (spec.denyIps ?? []).filter((ip) => /^[0-9a-f.:/]{2,49}$/i.test(ip));
     if (deny.length) {
       // Traefik only ships an allow-list; denying needs the denyip plugin (see ensureProxy).
@@ -255,6 +265,8 @@ export class DockerDriver implements Driver {
     if (direct) await this.docker(["network", "connect", PROXY_NET, name]);
     await this.syncCache(spec, log);
     await this.syncObjectCache(spec, log);
+    await this.saveCrons(spec);
+    if (await this.wp(spec, ["core", "is-installed"]).then(() => true, () => false)) await this.wp(spec, ["config", "set", "DISABLE_WP_CRON", spec.wordpress?.systemCron ? "true" : "false", "--raw"]).catch(() => {});
   }
 
   /** php.ini overrides as a read-only file mounted into the container. Numbers only: nothing a customer typed reaches the file. */
@@ -559,14 +571,14 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     this.check(spec);
     if (!spec.crons?.length) return void (await rm(this.cronFile(spec), { force: true }));
     await mkdir(path.dirname(this.cronFile(spec)), { recursive: true });
-    await writeFile(this.cronFile(spec), JSON.stringify({ slug: spec.slug, crons: spec.crons }), { mode: 0o600 });
+    await writeFile(this.cronFile(spec), JSON.stringify({ slug: spec.slug, user: spec.kind === "wordpress" ? "33:33" : "", crons: spec.crons }), { mode: 0o600 });
   }
 
   async runDueCrons(now: Date) {
     const dir = path.join(this.opts.dataDir, "crons");
     const started: string[] = [];
     for (const file of await readdir(dir).catch(() => [] as string[])) {
-      const { slug, crons } = JSON.parse(await readFile(path.join(dir, file), "utf8").catch(() => "{}")) as { slug?: string; crons?: { schedule: string; command: string }[] };
+      const { slug, crons, user } = JSON.parse(await readFile(path.join(dir, file), "utf8").catch(() => "{}")) as { slug?: string; user?: string; crons?: { schedule: string; command: string }[] };
       if (!slug || !SLUG.test(slug)) continue;
       for (const [i, job] of (crons ?? []).entries()) {
         const schedule = parseCron(job.schedule);
@@ -579,7 +591,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         void (async () => {
           const stamp = () => new Date().toISOString();
           // The command is data for `sh -c` inside the customer's own container, never part of our command line.
-          const out = await this.docker(["exec", "-e", "ASTER_CRON", `aster-${slug}`, "sh", "-c", "$ASTER_CRON"], undefined, { env: { ASTER_CRON: job.command }, quiet: true, timeoutMs: 15 * 60_000 }).then((o) => `ok\n${o}`, (err: Error) => `failed: ${err.message}`);
+          const out = await this.docker(["exec", ...(user === "33:33" ? ["-u", user] : []), "-e", "ASTER_CRON", `aster-${slug}`, "sh", "-c", "$ASTER_CRON"], undefined, { env: { ASTER_CRON: job.command }, quiet: true, timeoutMs: 15 * 60_000 }).then((o) => `ok\n${o}`, (err: Error) => `failed: ${err.message}`);
           await mkdir(path.dirname(logFile), { recursive: true });
           const previous = await readFile(logFile, "utf8").catch(() => "");
           await writeFile(logFile, `${previous}${stamp()} $ ${job.command}\n${out.trim().slice(-4000)}\n`.slice(-200_000), { mode: 0o600 });

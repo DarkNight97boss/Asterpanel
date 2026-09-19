@@ -77,6 +77,7 @@ export class SimulatedDriver implements Driver {
     await this.step(log, `[sim] routing ${spec.domains.join(", ")}`);
     if (spec.wordpress?.php) await this.step(log, `[sim] php.ini: memory ${spec.wordpress.php.memoryLimitMb}M, uploads ${spec.wordpress.php.uploadMaxMb}M, ${spec.wordpress.php.maxExecutionTime}s, ${spec.wordpress.php.maxInputVars} input vars`);
     if (spec.kind === "wordpress") await this.step(log, spec.wordpress?.objectCache ? "[sim] Redis object cache on" : "[sim] Redis object cache off");
+    if (spec.edge) await this.step(log, `[sim] edge: HSTS ${spec.edge.hsts ? "on" : "off"}, site password ${spec.edge.basicAuth ? `for ${spec.edge.basicAuth.user}` : "off"}`);
     if (spec.crons?.length) await this.step(log, `[sim] ${spec.crons.length} scheduled job(s)`);
     this.write((s) => {
       s.workloads[spec.slug].domains = spec.domains;

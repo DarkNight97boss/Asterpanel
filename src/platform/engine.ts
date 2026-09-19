@@ -1,5 +1,5 @@
 import "server-only";
-import { generateKeyPairSync, createPrivateKey, randomBytes, sign } from "node:crypto";
+import { generateKeyPairSync, createPrivateKey, randomBytes, sign, createHash } from "node:crypto";
 import { and, asc, count, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import type { WorkloadConfig, WorkloadType } from "@/db/schema";
@@ -45,7 +45,7 @@ export const NODE_TIMEOUT_MS = 45_000;
 const JOB_TTL_MS = 30 * MINUTE;
 
 type Workload = typeof schema.workloads.$inferSelect;
-type Secrets = { adminPassword?: string; dbPassword?: string; sftpPassword?: string; accessToken?: string; env?: Record<string, string> };
+type Secrets = { sitePassword?: string; adminPassword?: string; dbPassword?: string; sftpPassword?: string; accessToken?: string; env?: Record<string, string> };
 
 export const readSecrets = (w: Pick<Workload, "secrets">) => decryptJson<Secrets>(w.secrets, {});
 const password = () => randomBytes(18).toString("base64url");
@@ -154,13 +154,18 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
             locale: (await getSettings("general")).locale === "it" ? "it_IT" : "en_US",
             php: c.php,
             objectCache: c.objectCache || undefined,
+            systemCron: c.systemCron || undefined,
           }
         : undefined,
     database:
       w.type === "database"
         ? { engine: c.engine ?? "mysql", version: c.version ?? "", name: dbSafe, user: dbSafe, password: secrets.dbPassword ?? "" }
         : undefined,
-    crons: w.type === "app" && w.environment === "live" ? c.crons : undefined,
+    crons: w.type === "app" && w.environment === "live" ? c.crons : w.type === "wordpress" && c.systemCron ? [{ schedule: "*/5 * * * *", command: "cd /var/www/html && php wp-cron.php" }] : undefined,
+    edge:
+      w.type !== "database" && (c.hsts || (c.sitePasswordUser && secrets.sitePassword))
+        ? { hsts: c.hsts || undefined, basicAuth: c.sitePasswordUser && secrets.sitePassword ? { user: c.sitePasswordUser, hash: `{SHA}${createHash("sha1").update(secrets.sitePassword).digest("base64")}` } : undefined }
+        : undefined,
     source:
       w.type === "app" || w.type === "static"
         ? { repoUrl: c.repoUrl ?? "", branch: c.branch ?? "main", accessToken: secrets.accessToken, buildCommand: c.buildCommand, outputDir: c.outputDir, port: c.port }
@@ -862,6 +867,28 @@ export async function saveBots(workloadId: string, input: { blockBad: boolean; b
   const rate = Math.round(input.ratePerMinute) || 0;
   if (rate !== 0 && (rate < 30 || rate > 100_000)) throw new PlatformError("The rate limit must be between 30 and 100000 requests per minute, or 0 to disable it");
   await updateWorkloadConfig(w.id, { botsBlockBad: input.blockBad, botsBlockAi: input.blockAi, botsRatePerMinute: rate, botsProtectLogin: input.protectLogin }, actorId);
+}
+
+/**
+ * HSTS, a password in front of the whole site (handy for staging and sites under
+ * construction), and server-side WP-Cron. An empty user removes the password;
+ * an empty password keeps the current one.
+ */
+export async function saveEdgeSecurity(workloadId: string, input: { hsts: boolean; user: string; password: string; systemCron: boolean }, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type === "database") throw new PlatformError("These settings apply to web services");
+  const user = input.user.trim();
+  if (user && !/^[\w.@-]{1,40}$/.test(user)) throw new PlatformError("The user name may contain letters, numbers, dots, dashes and @");
+  const secrets = readSecrets(w);
+  if (user) {
+    if (input.password && (input.password.length < 8 || input.password.length > 100)) throw new PlatformError("The password must be between 8 and 100 characters");
+    if (input.password) secrets.sitePassword = input.password;
+    if (!secrets.sitePassword) throw new PlatformError("Enter a password");
+  } else delete secrets.sitePassword;
+  const db = await getDb();
+  await db.update(schema.workloads).set({ config: { ...w.config, hsts: input.hsts, sitePasswordUser: user || undefined, systemCron: w.type === "wordpress" ? input.systemCron : undefined }, secrets: encryptJson(secrets) }).where(eq(schema.workloads.id, w.id));
+  await applyWorkload(w.id, actorId);
+  await audit(actorId, "edge.security", "workload", w.id, { hsts: input.hsts, password: !!user, systemCron: input.systemCron });
 }
 
 export const CDN_MAX_AGES = [1, 7, 30, 365] as const;

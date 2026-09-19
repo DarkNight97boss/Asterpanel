@@ -203,6 +203,17 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function saveProtection(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    await engine.saveEdgeSecurity(workload.id, { hsts: form.has("hsts"), user: String(form.get("user") ?? ""), password: String(form.get("password") ?? ""), systemCron: form.has("systemCron") }, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved" };
+}
+
 export async function savePhp(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   const n = (k: string) => Number(form.get(k));
