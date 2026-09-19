@@ -17,7 +17,7 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
     getT(),
     getLocale(),
     db.query.workloads.findMany({
-      where: and(eq(schema.workloads.clientId, user.id), eq(schema.workloads.type, type), ne(schema.workloads.status, "deleted")),
+      where: and(eq(schema.workloads.companyId, user.id), eq(schema.workloads.type, type), ne(schema.workloads.status, "deleted")),
       with: { domains: true, node: { columns: { region: true } } },
       orderBy: desc(schema.workloads.createdAt),
     }),

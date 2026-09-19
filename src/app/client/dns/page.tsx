@@ -18,7 +18,7 @@ export default async function DnsZones() {
     getT(),
     getLocale(),
     getSettings("dns"),
-    db.select({ zone: schema.dnsZones, records: count(schema.dnsRecords.id) }).from(schema.dnsZones).leftJoin(schema.dnsRecords, eq(schema.dnsRecords.zoneId, schema.dnsZones.id)).where(eq(schema.dnsZones.clientId, account.id)).groupBy(schema.dnsZones.id).orderBy(asc(schema.dnsZones.name)),
+    db.select({ zone: schema.dnsZones, records: count(schema.dnsRecords.id) }).from(schema.dnsZones).leftJoin(schema.dnsRecords, eq(schema.dnsRecords.zoneId, schema.dnsZones.id)).where(eq(schema.dnsZones.companyId, account.id)).groupBy(schema.dnsZones.id).orderBy(asc(schema.dnsZones.name)),
   ]);
 
   return (

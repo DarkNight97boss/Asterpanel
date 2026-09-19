@@ -41,6 +41,8 @@ async function nextInvoiceNumber(tx: Tx, issuedAt = new Date()): Promise<{ numbe
 
 export async function placeOrder(input: {
   clientId: string;
+  /** The company that owns the order; `clientId` stays the person it is addressed to. */
+  companyId?: string | null;
   productId: string;
   cycle: BillingCycle;
   domain: string;
@@ -66,12 +68,13 @@ export async function placeOrder(input: {
   const result = await db.transaction(async (tx) => {
     const [order] = await tx
       .insert(schema.orders)
-      .values({ clientId: input.clientId, total, ip: input.ip ?? "" })
+      .values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" })
       .returning();
     const [service] = await tx
       .insert(schema.services)
       .values({
         clientId: input.clientId,
+        companyId: input.companyId ?? null,
         productId: product.id,
         orderId: order.id,
         serverId: product.serverId,
@@ -86,6 +89,7 @@ export async function placeOrder(input: {
       .values({
         ...(await nextInvoiceNumber(tx)),
         clientId: input.clientId,
+        companyId: input.companyId ?? null,
         currency: billing.currency,
         subtotal,
         taxRate: billing.taxRate,
@@ -309,8 +313,10 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
     with: { product: true },
   });
 
-  const byClient = Map.groupBy(due, (s) => s.clientId);
-  for (const [clientId, list] of byClient) {
+  // One renewal invoice per company (legacy services without one fall back to the person).
+  const byClient = Map.groupBy(due, (s) => s.companyId ?? s.clientId);
+  for (const [, list] of byClient) {
+    const clientId = list[0].clientId;
     try {
       const invoiceId = await db.transaction(async (tx) => {
         const subtotal = list.reduce((sum, s) => sum + s.amount, 0);
@@ -318,7 +324,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
         const dueDate = new Date(Math.min(...list.map((s) => s.nextDueDate!.getTime())));
         const [invoice] = await tx
           .insert(schema.invoices)
-          .values({ ...(await nextInvoiceNumber(tx, now)), clientId, currency: billing.currency, subtotal, taxRate: billing.taxRate, tax, total: subtotal + tax, dueDate })
+          .values({ ...(await nextInvoiceNumber(tx, now)), clientId, companyId: list[0].companyId, currency: billing.currency, subtotal, taxRate: billing.taxRate, tax, total: subtotal + tax, dueDate })
           .returning();
         await tx.insert(schema.invoiceItems).values(
           list.map((s) => ({

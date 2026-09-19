@@ -23,7 +23,7 @@ export async function payInvoice(_: ActionState, form: FormData): Promise<Action
   const { user: me, account: user } = await requireAccount("billing");
   const db = await getDb();
   const invoice = await db.query.invoices.findFirst({
-    where: and(eq(schema.invoices.id, String(form.get("invoiceId"))), eq(schema.invoices.clientId, user.id)),
+    where: and(eq(schema.invoices.id, String(form.get("invoiceId"))), eq(schema.invoices.companyId, user.id)),
   });
   if (!invoice || invoice.status !== "unpaid") return { error: "This invoice cannot be paid" };
 
@@ -62,7 +62,7 @@ export async function openTicket(_: ActionState, form: FormData): Promise<Action
   const db = await getDb();
   const { body, ...ticket } = parsed.data;
   const id = await db.transaction(async (tx) => {
-    const [row] = await tx.insert(schema.tickets).values({ ...ticket, clientId: account.id }).returning();
+    const [row] = await tx.insert(schema.tickets).values({ ...ticket, clientId: account.ownerUserId, companyId: account.id }).returning();
     await tx.insert(schema.ticketMessages).values({ ticketId: row.id, authorId: user.id, body });
     return row.id;
   });
@@ -77,7 +77,7 @@ export async function replyTicket(_: ActionState, form: FormData): Promise<Actio
 
   const db = await getDb();
   const ticket = await db.query.tickets.findFirst({
-    where: and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.clientId, account.id)),
+    where: and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.companyId, account.id)),
   });
   if (!ticket) return { error: "Ticket not found" };
 
@@ -93,7 +93,7 @@ export async function closeTicket(form: FormData) {
   await db
     .update(schema.tickets)
     .set({ status: "closed" })
-    .where(and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.clientId, user.id)));
+    .where(and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.companyId, user.id)));
   revalidatePath("/client/tickets");
 }
 

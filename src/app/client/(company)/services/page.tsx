@@ -14,7 +14,7 @@ export default async function ClientServices() {
     getT(),
     getLocale(),
     getSettings("billing"),
-    db.query.services.findMany({ where: eq(schema.services.clientId, user.id), with: { product: true }, orderBy: desc(schema.services.createdAt) }),
+    db.query.services.findMany({ where: eq(schema.services.companyId, user.id), with: { product: true }, orderBy: desc(schema.services.createdAt) }),
   ]);
 
   return (

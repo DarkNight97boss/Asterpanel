@@ -5,7 +5,6 @@ import { Alert, buttonClass } from "@/components/ui";
 import { getT } from "@/i18n";
 import { ACCOUNT_COOKIE, ROLE_LABEL } from "@/lib/account";
 import { getUser } from "@/lib/auth";
-import { displayName } from "@/lib/format";
 import { ensureInstalled } from "@/lib/install";
 import { acceptInvite, findInvite, TeamError } from "@/lib/team";
 
@@ -21,14 +20,14 @@ export default async function InvitePage({ searchParams }: { searchParams: Promi
     "use server";
     const me = await getUser();
     if (!me) redirect(`/login?next=${encodeURIComponent(here)}`);
-    let ownerId: string;
+    let companyId: string;
     try {
-      ownerId = await acceptInvite(token, me);
+      companyId = await acceptInvite(token, me);
     } catch (err) {
       if (err instanceof TeamError) redirect(here);
       throw err;
     }
-    (await cookies()).set(ACCOUNT_COOKIE, ownerId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
+    (await cookies()).set(ACCOUNT_COOKIE, companyId, { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 60 * 60 * 24 * 365 });
     redirect("/client");
   }
 
@@ -40,7 +39,7 @@ export default async function InvitePage({ searchParams }: { searchParams: Promi
       ) : (
         <>
           <p className="mb-6 text-body">
-            {t("You have been invited to help manage {account} as {role}.", { account: found.owner.company || displayName(found.owner), role: t(ROLE_LABEL[found.invite.role]) })}
+            {t("You have been invited to help manage {account} as {role}.", { account: found.company.name, role: t(ROLE_LABEL[found.invite.role]) })}
           </p>
           {!user ? (
             <div className="space-y-3">

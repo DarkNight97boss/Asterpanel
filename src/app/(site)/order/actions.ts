@@ -23,7 +23,7 @@ export async function submitOrder(_: ActionState, form: FormData): Promise<Actio
 
   let invoiceId: string;
   try {
-    ({ invoiceId } = await placeOrder({ clientId: user.id, ...parsed.data, ip: (await requestMeta()).ip }));
+    ({ invoiceId } = await placeOrder({ clientId: user.ownerUserId, companyId: user.id, ...parsed.data, ip: (await requestMeta()).ip }));
   } catch (err) {
     if (err instanceof BillingError) return { error: err.message };
     throw err;

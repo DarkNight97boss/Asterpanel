@@ -49,6 +49,7 @@ export async function InvoiceView({ invoice }: { invoice: LoadedInvoice }) {
           {c.company && <p className="text-muted">{displayName(c)}</p>}
           <p className="text-muted">{[c.address, [c.zip, c.city].filter(Boolean).join(" "), c.state, c.country].filter(Boolean).join(", ")}</p>
           {c.vatId && <p className="text-muted">{billing.taxName}: {c.vatId}</p>}
+          {c.taxCode && <p className="text-muted">{t("Tax code")}: {c.taxCode}</p>}
         </div>
       </div>
 

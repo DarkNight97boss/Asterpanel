@@ -453,19 +453,23 @@ test("SFTP keys: only real OpenSSH public keys, no duplicates, delivered to the 
 test("alerts: only actionable items, filtered by role, gone once handled", async () => {
   const { accountAlerts } = await import("../src/lib/alerts");
   const db = await dbm.getDb();
-  const [broken] = await db.insert(dbm.schema.workloads).values({ clientId, nodeId, type: "app", name: "Broken app", slug: "broken-app-000000", status: "error" }).returning();
-  const [invoice] = await db.insert(dbm.schema.invoices).values({ clientId, currency: "EUR", total: 1000, subtotal: 1000, dueDate: new Date(Date.now() - 86_400_000) }).returning();
+  // Alerts belong to the company, not to the person: another company of the same user stays quiet.
+  const [{ id: companyId }] = await db.insert(dbm.schema.companies).values({ name: "Alerts Ltd" }).returning();
+  const [{ id: otherCompany }] = await db.insert(dbm.schema.companies).values({ name: "Quiet Ltd" }).returning();
+  const [broken] = await db.insert(dbm.schema.workloads).values({ clientId, companyId, nodeId, type: "app", name: "Broken app", slug: "broken-app-000000", status: "error" }).returning();
+  const [invoice] = await db.insert(dbm.schema.invoices).values({ clientId, companyId, currency: "EUR", total: 1000, subtotal: 1000, dueDate: new Date(Date.now() - 86_400_000) }).returning();
+  assert.deepEqual(await accountAlerts(otherCompany, "owner"), []);
 
   const kinds = (list: { kind: string }[]) => [...new Set(list.map((a) => a.kind))].sort();
-  const owner = await accountAlerts(clientId, "owner");
+  const owner = await accountAlerts(companyId, "owner");
   assert.ok(owner.some((a) => a.text === "{name} needs attention" && a.vars?.name === "Broken app"));
   assert.ok(owner.some((a) => a.text === "Invoice #{n} is overdue"));
-  assert.ok(!kinds(await accountAlerts(clientId, "developer")).includes("invoice"), "developers do not see billing");
-  assert.deepEqual(kinds(await accountAlerts(clientId, "billing")), ["invoice"], "billing sees only billing");
+  assert.ok(!kinds(await accountAlerts(companyId, "developer")).includes("invoice"), "developers do not see billing");
+  assert.deepEqual(kinds(await accountAlerts(companyId, "billing")), ["invoice"], "billing sees only billing");
 
   await db.update(dbm.schema.invoices).set({ status: "paid" }).where(eq(dbm.schema.invoices.id, invoice.id));
   await db.update(dbm.schema.workloads).set({ status: "deleted" }).where(eq(dbm.schema.workloads.id, broken.id));
-  const after = await accountAlerts(clientId, "owner");
+  const after = await accountAlerts(companyId, "owner");
   assert.ok(!after.some((a) => a.kind === "invoice" || a.vars?.name === "Broken app"));
 });
 

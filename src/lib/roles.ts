@@ -1,13 +1,13 @@
 import "server-only";
 import { cache } from "react";
-import { and, eq, isNotNull } from "drizzle-orm";
+import { and, asc, eq, isNotNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import type { TeamRole } from "@/db/schema";
+import type { CompanyRole } from "@/db/schema";
 import type { SessionUser } from "./auth";
 
-/** Roles, permissions and account membership — no request state in here. */
+/** Companies, roles and permissions — no request state in here. */
 
-export type AccountRole = "owner" | TeamRole;
+export type AccountRole = CompanyRole;
 export type Permission = "hosting" | "billing" | "manage" | "support";
 
 const GRANTS: Record<AccountRole, Permission[]> = {
@@ -17,29 +17,55 @@ const GRANTS: Record<AccountRole, Permission[]> = {
   billing: ["billing", "support"],
 };
 
-export const ROLE_LABEL: Record<AccountRole, string> = { owner: "Owner", admin: "Administrator", developer: "Developer", billing: "Billing" };
+export const ROLE_LABEL: Record<AccountRole, string> = { owner: "Company owner", admin: "Company administrator", developer: "Company developer", billing: "Company billing" };
 export const roleCan = (role: AccountRole, permission: Permission) => GRANTS[role].includes(permission);
 
-/** `only` lists the services a restricted member may touch; null = all of them. */
-export type Account = { id: string; name: string; role: AccountRole; only: string[] | null };
+/**
+ * The active company as seen by one member. `id` is the company id; `ownerUserId`
+ * is the person invoices and notifications are addressed to. `only` lists the
+ * services a restricted developer may touch (null = all).
+ */
+export type Account = { id: string; name: string; role: AccountRole; only: string[] | null; ownerUserId: string };
 
-/** True when the account context may act on this service (staging follows its live site). */
+/** True when the member may act on this service (staging follows its live site). */
 export const mayAccess = (account: Pick<Account, "only">, w: { id: string; parentId?: string | null }) =>
   !account.only || account.only.includes(w.id) || (!!w.parentId && account.only.includes(w.parentId));
 
-const accountName = (u: Pick<SessionUser, "company" | "firstName" | "lastName" | "email">) => u.company || `${u.firstName} ${u.lastName}`.trim() || u.email;
+const personName = (u: Pick<SessionUser, "company" | "firstName" | "lastName" | "email">) => u.company || `${u.firstName} ${u.lastName}`.trim() || u.email;
 
-/** Every account the user can act in: their own first, then memberships. */
+/** Creates a company owned by `user`. */
+export async function createCompany(user: Pick<SessionUser, "id" | "email">, name: string, details: Partial<typeof schema.companies.$inferInsert> = {}): Promise<string> {
+  const db = await getDb();
+  return db.transaction(async (tx) => {
+    const [company] = await tx.insert(schema.companies).values({ ...details, name: name.trim().slice(0, 120) || user.email }).returning({ id: schema.companies.id });
+    await tx.insert(schema.companyMembers).values({ companyId: company.id, userId: user.id, email: user.email, role: "owner", acceptedAt: new Date() });
+    return company.id;
+  });
+}
+
+/** Every company the user belongs to, oldest membership first. A user without one gets their first company here. */
 export const listAccounts = cache(async (user: SessionUser): Promise<Account[]> => {
   const db = await getDb();
-  const rows = await db
-    .select({ role: schema.teamMembers.role, only: schema.teamMembers.workloadIds, owner: schema.users })
-    .from(schema.teamMembers)
-    .innerJoin(schema.users, eq(schema.users.id, schema.teamMembers.ownerId))
-    .where(and(eq(schema.teamMembers.memberId, user.id), isNotNull(schema.teamMembers.acceptedAt), eq(schema.users.status, "active")));
-  return [
-    { id: user.id, name: accountName(user), role: "owner", only: null },
+  const load = () =>
+    db
+      .select({ m: schema.companyMembers, c: schema.companies })
+      .from(schema.companyMembers)
+      .innerJoin(schema.companies, eq(schema.companies.id, schema.companyMembers.companyId))
+      .where(and(eq(schema.companyMembers.userId, user.id), isNotNull(schema.companyMembers.acceptedAt)))
+      .orderBy(asc(schema.companyMembers.invitedAt));
+  let rows = await load();
+  if (!rows.length) {
+    await createCompany(user, personName(user), { orgType: user.company ? "company" : "individual", billingName: user.company, vatId: user.vatId, address1: user.address, city: user.city, zip: user.zip, state: user.state, country: user.country });
+    rows = await load();
+  }
+  const owners = await db.select({ companyId: schema.companyMembers.companyId, userId: schema.companyMembers.userId }).from(schema.companyMembers).where(eq(schema.companyMembers.role, "owner"));
+  const ownerOf = new Map(owners.map((o) => [o.companyId, o.userId]));
+  return rows.map(({ m, c }) => ({
+    id: c.id,
+    name: c.name,
+    role: m.role,
     // A restriction only makes sense for people who manage services.
-    ...rows.map((r) => ({ id: r.owner.id, name: accountName(r.owner), role: r.role, only: r.role === "developer" && r.only?.length ? r.only : null })),
-  ];
+    only: m.role === "developer" && m.workloadIds?.length ? m.workloadIds : null,
+    ownerUserId: ownerOf.get(c.id) ?? user.id,
+  }));
 });

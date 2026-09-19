@@ -299,15 +299,15 @@ export async function sendTestMail(to: string) {
 }
 
 /** Awaited: the inviter should know whether the invitation actually left. */
-export async function sendTeamInvite(args: { to: string; token: string; role: string; inviter: { firstName: string; lastName: string; email: string }; ownerId: string }): Promise<SendResult> {
+export async function sendTeamInvite(args: { to: string; token: string; role: string; inviter: { firstName: string; lastName: string; email: string }; companyId: string }): Promise<SendResult> {
   const ctx = await context();
-  const owner = ctx && (await loadUser(args.ownerId));
-  if (!ctx || !owner) return { ok: false, error: "Email is not configured" };
-  const roleLabel = { admin: "Administrator", developer: "Developer", billing: "Billing" }[args.role] ?? args.role;
+  const [company] = ctx ? await (await getDb()).select().from(schema.companies).where(eq(schema.companies.id, args.companyId)) : [];
+  if (!ctx || !company) return { ok: false, error: "Email is not configured" };
+  const roleLabel = { admin: "Company administrator", developer: "Company developer", billing: "Company billing" }[args.role] ?? args.role;
   return ctx.send({
     id: "team.invite",
     to: args.to,
-    vars: { inviter: displayName(args.inviter), account: owner.company || displayName(owner), role: ctx.t(roleLabel) },
+    vars: { inviter: displayName(args.inviter), account: company.name, role: ctx.t(roleLabel) },
     structure: { cta: { label: ctx.t("Accept invitation"), url: `${ctx.origin}/invite?token=${encodeURIComponent(args.token)}` } },
   });
 }

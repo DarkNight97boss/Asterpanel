@@ -28,24 +28,24 @@ const JOB_TEXT: Record<string, string> = {
 export default async function ClientDashboard() {
   const { user: me, account: user } = await requireAccount("support");
   const db = await getDb();
-  const mine = and(eq(schema.workloads.clientId, user.id), ne(schema.workloads.status, "deleted"), eq(schema.workloads.environment, "live"));
+  const mine = and(eq(schema.workloads.companyId, user.id), ne(schema.workloads.status, "deleted"), eq(schema.workloads.environment, "live"));
   const [t, locale, billing, counts, recent, [unpaid], [tickets]] = await Promise.all([
     getT(),
     getLocale(),
     getSettings("billing"),
     db.select({ type: schema.workloads.type, n: count() }).from(schema.workloads).where(mine).groupBy(schema.workloads.type),
     db.query.workloads.findMany({ where: mine, with: { domains: true }, orderBy: desc(schema.workloads.updatedAt), limit: 50 }),
-    db.select({ n: count(), total: sum(schema.invoices.total) }).from(schema.invoices).where(and(eq(schema.invoices.clientId, user.id), eq(schema.invoices.status, "unpaid"))),
-    db.select({ n: count() }).from(schema.tickets).where(and(eq(schema.tickets.clientId, user.id), inArray(schema.tickets.status, ["open", "answered", "customer_reply"]))),
+    db.select({ n: count(), total: sum(schema.invoices.total) }).from(schema.invoices).where(and(eq(schema.invoices.companyId, user.id), eq(schema.invoices.status, "unpaid"))),
+    db.select({ n: count() }).from(schema.tickets).where(and(eq(schema.tickets.companyId, user.id), inArray(schema.tickets.status, ["open", "answered", "customer_reply"]))),
   ]);
-  const myIds = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, parentId: schema.workloads.parentId }).from(schema.workloads).where(eq(schema.workloads.clientId, user.id))).filter((w) => mayAccess(user, w));
+  const myIds = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, parentId: schema.workloads.parentId }).from(schema.workloads).where(eq(schema.workloads.companyId, user.id))).filter((w) => mayAccess(user, w));
   const names = new Map(myIds.map((w) => [w.id, w.name]));
   const [activity, invoices, answered] = await Promise.all([
     myIds.length
       ? db.select().from(schema.jobs).where(and(inArray(schema.jobs.workloadId, myIds.map((w) => w.id)), ne(schema.jobs.type, "workload.logs"))).orderBy(desc(schema.jobs.createdAt)).limit(6)
       : [],
-    db.select().from(schema.invoices).where(eq(schema.invoices.clientId, user.id)).orderBy(desc(schema.invoices.createdAt)).limit(4),
-    db.select().from(schema.tickets).where(and(eq(schema.tickets.clientId, user.id), eq(schema.tickets.status, "answered"))).orderBy(desc(schema.tickets.lastReplyAt)).limit(3),
+    db.select().from(schema.invoices).where(eq(schema.invoices.companyId, user.id)).orderBy(desc(schema.invoices.createdAt)).limit(4),
+    db.select().from(schema.tickets).where(and(eq(schema.tickets.companyId, user.id), eq(schema.tickets.status, "answered"))).orderBy(desc(schema.tickets.lastReplyAt)).limit(3),
   ]);
   const notifications = [
     ...answered.map((tk) => ({ at: tk.lastReplyAt, href: `/client/tickets/${tk.id}`, text: t("Support replied: {subject}", { subject: tk.subject }) })),

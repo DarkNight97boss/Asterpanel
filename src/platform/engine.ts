@@ -104,7 +104,7 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
     id: w.id,
     slug: w.slug,
     kind: w.type,
-    tenant: w.clientId.replace(/-/g, "").slice(0, 12),
+    tenant: (w.companyId ?? w.clientId).replace(/-/g, "").slice(0, 12),
     environment: w.environment,
     domains: w.domains.map((d) => d.hostname),
     resources: { memoryMb: c.memoryMb ?? 512, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? 10 },
@@ -169,6 +169,7 @@ const setStatus = async (id: string, status: Workload["status"], statusMessage =
 
 export type NewWorkload = {
   clientId: string;
+  companyId?: string | null;
   type: WorkloadType;
   name: string;
   config?: WorkloadConfig;
@@ -198,6 +199,7 @@ export async function createWorkload(input: NewWorkload): Promise<string> {
       .insert(schema.workloads)
       .values({
         clientId: input.clientId,
+        companyId: input.companyId ?? null,
         nodeId: node.id,
         serviceId: input.serviceId ?? null,
         type: input.type,
@@ -378,6 +380,7 @@ export async function createStaging(liveId: string, actorId: string | null = nul
       .insert(schema.workloads)
       .values({
         clientId: live.clientId,
+        companyId: live.companyId,
         nodeId: live.nodeId, // same node: cloning is a local copy
         serviceId: live.serviceId,
         parentId: live.id,
@@ -587,11 +590,11 @@ export function cleanDnsRecord(input: { name: string; type: string; value: strin
   return { name, type, value, ttl, priority };
 }
 
-export async function createZone(clientId: string, domain: string, actorId: string | null = null): Promise<string> {
+export async function createZone(clientId: string, domain: string, actorId: string | null = null, companyId: string | null = null): Promise<string> {
   const name = domain.trim().toLowerCase().replace(/\.$/, "");
   if (!DOMAIN_RE.test(name)) throw new PlatformError("Enter a valid domain, e.g. example.com");
   const db = await getDb();
-  const [zone] = await db.insert(schema.dnsZones).values({ clientId, name }).onConflictDoNothing().returning();
+  const [zone] = await db.insert(schema.dnsZones).values({ clientId, companyId, name }).onConflictDoNothing().returning();
   if (!zone) throw new PlatformError("This domain is already managed here");
   await audit(actorId, "dns.zone_created", "dns_zone", zone.id, { name });
   await syncDns();

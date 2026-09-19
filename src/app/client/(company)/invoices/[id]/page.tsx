@@ -6,7 +6,7 @@ import { getT } from "@/i18n";
 import { loadInvoice } from "@/lib/invoices";
 import { requireAccount } from "@/lib/account";
 import { enabledGateways } from "@/modules/gateways";
-import { payInvoice } from "../../actions";
+import { payInvoice } from "@/app/client/actions";
 
 export default async function ClientInvoice({
   params,
@@ -17,7 +17,7 @@ export default async function ClientInvoice({
 }) {
   const { account: user } = await requireAccount("billing");
   const invoice = await loadInvoice((await params).id);
-  if (!invoice || invoice.clientId !== user.id) notFound();
+  if (!invoice || invoice.companyId !== user.id) notFound();
   const [t, gateways, { paid }] = await Promise.all([getT(), enabledGateways(), searchParams]);
 
   return (

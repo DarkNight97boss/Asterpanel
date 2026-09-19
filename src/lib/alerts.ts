@@ -17,18 +17,18 @@ export async function accountAlerts(accountId: string, role: AccountRole, now = 
   const db = await getDb();
   const alerts: AccountAlert[] = [];
 
-  const tickets = await db.select().from(schema.tickets).where(and(eq(schema.tickets.clientId, accountId), eq(schema.tickets.status, "answered")));
+  const tickets = await db.select().from(schema.tickets).where(and(eq(schema.tickets.companyId, accountId), eq(schema.tickets.status, "answered")));
   for (const tk of tickets) alerts.push({ kind: "ticket", text: "Support replied: {subject}", vars: { subject: tk.subject }, href: `/client/tickets/${tk.id}`, at: tk.lastReplyAt });
 
   if (roleCan(role, "billing")) {
-    const unpaid = await db.select().from(schema.invoices).where(and(eq(schema.invoices.clientId, accountId), eq(schema.invoices.status, "unpaid")));
+    const unpaid = await db.select().from(schema.invoices).where(and(eq(schema.invoices.companyId, accountId), eq(schema.invoices.status, "unpaid")));
     for (const inv of unpaid) {
       alerts.push({ kind: "invoice", text: inv.dueDate < now ? "Invoice #{n} is overdue" : "Invoice #{n} is waiting for payment", vars: { n: String(inv.number) }, href: `/client/invoices/${inv.id}`, at: inv.createdAt });
     }
   }
 
   if (roleCan(role, "hosting")) {
-    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt }).from(schema.workloads).where(eq(schema.workloads.clientId, accountId))).filter((w) => !only || only.includes(w.id));
+    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt }).from(schema.workloads).where(eq(schema.workloads.companyId, accountId))).filter((w) => !only || only.includes(w.id));
     for (const w of mine) {
       if (w.status === "error") alerts.push({ kind: "workload", text: "{name} needs attention", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
       if (w.status === "suspended") alerts.push({ kind: "workload", text: "{name} is suspended", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
