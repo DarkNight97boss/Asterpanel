@@ -18,9 +18,14 @@ export type NewServer = {
   size: string;
   /** Shell script run as root on first boot; installs Docker and the agent. */
   bootScript: string;
+  /** Use this reserved public address instead of whatever the provider would assign. */
+  ip?: ReservedIp;
 };
 
 export type CloudServer = { id: string; status: "starting" | "running" | "stopped" | "gone"; ip: string };
+
+/** An address reserved at the provider: `ref` is how the provider names it. */
+export type ReservedIp = { ref: string; address: string };
 
 export class CloudError extends Error {}
 
@@ -37,6 +42,14 @@ export interface CloudProvider {
   create(c: CloudCredentials, server: NewServer, http: Http): Promise<CloudServer>;
   get(c: CloudCredentials, id: string, region: string, http: Http): Promise<CloudServer>;
   destroy(c: CloudCredentials, id: string, region: string, http: Http): Promise<void>;
+  /**
+   * Reserves a public IPv4 that survives the server. With `address`, that exact
+   * one (only possible where the provider hosts a block the company owns).
+   * Providers without this cannot be used for address pools.
+   */
+  reserveIp?(c: CloudCredentials, input: { name: string; region: string; address?: string }, http: Http): Promise<ReservedIp>;
+  /** Gives a reservation back to the provider (it stops being billed). */
+  releaseIp?(c: CloudCredentials, ref: string, region: string, http: Http): Promise<void>;
 }
 
 export const SERVER_NAME = /^[a-z]([a-z0-9-]{0,48}[a-z0-9])?$/;

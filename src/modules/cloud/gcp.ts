@@ -69,12 +69,32 @@ export const gcp: CloudProvider = {
       labels: { "managed-by": "asterpanel" },
       tags: { items: ["http-server", "https-server"] },
       disks: [{ boot: true, autoDelete: true, initializeParams: { sourceImage: "projects/ubuntu-os-cloud/global/images/family/ubuntu-2404-lts-amd64", diskSizeGb: "60", diskType: `zones/${s.region}/diskTypes/pd-balanced` } }],
-      networkInterfaces: [{ network: "global/networks/default", accessConfigs: [{ type: "ONE_TO_ONE_NAT", name: "External NAT" }] }],
+      networkInterfaces: [{ network: "global/networks/default", accessConfigs: [{ type: "ONE_TO_ONE_NAT", name: "External NAT", ...(s.ip ? { natIP: s.ip.address } : {}) }] }],
       metadata: { items: [{ key: "startup-script", value: s.bootScript }] },
       shieldedInstanceConfig: { enableSecureBoot: true, enableVtpm: true, enableIntegrityMonitoring: true },
     });
     // The insert is asynchronous: the instance is addressed by its name from now on.
     return { id: s.name, status: "starting", ip: "" };
+  },
+  async reserveIp(c, input, http) {
+    const region = input.region.replace(/-[a-z]$/, ""); // addresses are regional, servers zonal
+    if (!/^[a-z]+-[a-z]+\d$/.test(region) || !SLUG.test(input.name)) throw new CloudError("Invalid region or name");
+    // With `address`, Google takes it from a block the project brought in (BYOIP); otherwise from its own space.
+    await call(c, http, "POST", () => `/regions/${region}/addresses`, { name: input.name, addressType: "EXTERNAL", networkTier: "PREMIUM", ...(input.address ? { address: input.address } : {}) });
+    // The insert is asynchronous: the address shows up a moment later.
+    for (let i = 0; i < 10; i++) {
+      const a = await call<{ address?: string; status?: string }>(c, http, "GET", () => `/regions/${region}/addresses/${input.name}`).catch(() => ({}) as { address?: string; status?: string });
+      if (a.address) return { ref: input.name, address: a.address };
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    throw new CloudError("Google did not confirm the address in time");
+  },
+  async releaseIp(c, ref, zoneOrRegion, http) {
+    const region = zoneOrRegion.replace(/-[a-z]$/, "");
+    if (!/^[a-z]+-[a-z]+\d$/.test(region) || !SLUG.test(ref)) throw new CloudError("Invalid address reference");
+    await call(c, http, "DELETE", () => `/regions/${region}/addresses/${ref}`).catch((err) => {
+      if (!(err instanceof CloudError && err.message === "not_found")) throw err;
+    });
   },
   async get(c, id, region, http) {
     if (!zoneOk(region) || !SLUG.test(id)) throw new CloudError("Invalid instance");

@@ -15,10 +15,15 @@ const serviceAccountJson = JSON.stringify({ client_email: "aster@proj.iam.gservi
 
 const calls: { method: string; url: string; body: string; headers: Record<string, string> }[] = [];
 let gone = false;
+let reservedCount = 0;
+const gcpAddresses = new Map<string, string>();
 const fake = (async (url: string, init: RequestInit = {}) => {
   calls.push({ method: init.method ?? "GET", url, body: String(init.body ?? ""), headers: (init.headers ?? {}) as Record<string, string> });
   const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status });
   if (url.startsWith("https://api.hetzner.cloud")) {
+    if (url.endsWith("/datacenters")) return json({ datacenters: [{ name: "nbg1-dc3", location: { name: "nbg1" } }, { name: "fsn1-dc14", location: { name: "fsn1" } }] });
+    if (url.endsWith("/primary_ips") && init.method === "POST") return json({ primary_ip: { id: 9000 + ++reservedCount, ip: `198.51.100.${10 + reservedCount}` } });
+    if (/\/primary_ips\/\d+$/.test(url)) return init.method === "DELETE" ? json({}) : json({ primary_ip: { datacenter: { name: "fsn1-dc14" } } });
     if (gone) return json({ error: { code: "not_found", message: "server not found" } }, 404);
     if (init.method === "POST") return JSON.parse(String(init.body)).server_type === "nope" ? json({ error: { message: "server type nope not found" } }, 422) : json({ server: { id: 4711, status: "initializing", public_net: { ipv4: { ip: "" } } } });
     if (init.method === "DELETE") return json({});
@@ -31,6 +36,16 @@ const fake = (async (url: string, init: RequestInit = {}) => {
     return new Response("<ok/>");
   }
   if (url === "https://oauth2.googleapis.com/token") return json({ access_token: "ya29.test" });
+  if (/compute\.googleapis\.com.*\/regions\/[a-z0-9-]+\/addresses/.test(url)) {
+    if (init.method === "POST") {
+      const b = JSON.parse(String(init.body));
+      gcpAddresses.set(b.name, b.address ?? "34.0.0.99");
+      return json({});
+    }
+    const name = url.split("/").at(-1)!;
+    if (init.method === "DELETE") return gcpAddresses.delete(name) ? json({}) : json({ error: { message: "not found" } }, 404);
+    return gcpAddresses.has(name) ? json({ address: gcpAddresses.get(name), status: "RESERVED" }) : json({ error: { message: "not found" } }, 404);
+  }
   if (url.startsWith("https://compute.googleapis.com")) return init.method === "GET" && url.includes("/instances/") ? json({ name: "gcp-node-01", status: "RUNNING", networkInterfaces: [{ accessConfigs: [{ natIP: "192.0.2.44" }] }] }) : json({});
   return json({}, 404);
 }) as unknown as typeof fetch;
@@ -184,4 +199,69 @@ test("automatic mode keeps the reserve asked for and retires servers that stayed
   assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 1, removed: 0 }, "short of the reserve: one more server");
   await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, enabled: false } });
   assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 0, removed: 0 });
+});
+
+test("IPv4 blocks: boundaries, capacity, public space only", async () => {
+  const ipam = await import("../src/lib/ipam");
+  assert.deepEqual([ipam.nextFreeAddress("203.0.113.0/30", []), ipam.nextFreeAddress("203.0.113.0/30", ["203.0.113.1"]), ipam.nextFreeAddress("203.0.113.0/30", ["203.0.113.1", "203.0.113.2"])], ["203.0.113.1", "203.0.113.2", null], "network and broadcast are never leased");
+  assert.deepEqual([ipam.blockCapacity("203.0.113.0/28"), ipam.blockCapacity("203.0.113.8/31"), ipam.blockCapacity("203.0.113.9/32")], [14, 2, 1]);
+  assert.equal(ipam.nextFreeAddress("198.51.100.255/32", []), "198.51.100.255");
+  for (const bad of ["203.0.113.5/28", "203.0.113.0/8", "203.0.113.0/33", "300.0.0.0/24", "203.0.113.0", "::1/64"]) assert.equal(ipam.parseCidr(bad), null, bad);
+  for (const priv of ["10.0.0.0/24", "192.168.1.0/24", "172.16.0.0/16", "100.64.0.0/24", "127.0.0.0/24", "169.254.0.0/24", "224.0.0.0/24"]) assert.equal(ipam.isPublicCidr(priv), false, priv);
+  assert.equal(ipam.isPublicCidr("203.0.113.0/28"), true);
+  assert.deepEqual([ipam.cidrContains("203.0.113.0/28", "203.0.113.15"), ipam.cidrContains("203.0.113.0/28", "203.0.113.16")], [true, false]);
+});
+
+test("address pools: new servers lease by themselves, freed addresses are reused first, own blocks are handed out in order", async () => {
+  const db = await dbm.getDb();
+  const pools = await import("../src/lib/ip-pools");
+  const s = await settings.getSettings("cloud");
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, enabled: false }, accounts: { ...s.accounts, hetzner: { enabled: "1", token: "hz-token" }, gcp: { enabled: "1", serviceAccountJson } } });
+
+  await assert.rejects(pools.createIpPool({ name: "x", provider: "aws", region: "eu-south-1", mode: "reserved", cidr: "", autoLease: true }), /cannot reserve/);
+  await assert.rejects(pools.createIpPool({ name: "x", provider: "hetzner", region: "fsn1", mode: "block", cidr: "203.0.113.0/28", autoLease: true }), /cannot host your own block/);
+  await assert.rejects(pools.createIpPool({ name: "x", provider: "gcp", region: "europe-west8", mode: "block", cidr: "10.0.0.0/24", autoLease: true }), /public IPv4 block/);
+  const hz = await pools.createIpPool({ name: "Falkenstein", provider: "hetzner", region: "fsn1", mode: "reserved", cidr: "", autoLease: true });
+  await pools.createIpPool({ name: "Milan BYOIP", provider: "gcp", region: "europe-west8", mode: "block", cidr: "203.0.113.0/29", autoLease: true });
+  await assert.rejects(pools.createIpPool({ name: "Overlap", provider: "gcp", region: "europe-west8", mode: "block", cidr: "203.0.113.4/30", autoLease: true }), /overlaps the pool/);
+
+  // Hetzner: a primary IP is reserved, and the server is created in its datacenter with it.
+  calls.length = 0;
+  const n1 = await cloud.createCloudNode({ provider: "hetzner", name: "pool-hz-1", region: "fsn1", size: "cx22", baseDomain: "", maxWorkloads: 0, origin: ORIGIN });
+  const create = JSON.parse(calls.find((c) => c.method === "POST" && c.url.endsWith("/servers"))!.body);
+  assert.deepEqual([create.datacenter, create.location, typeof create.public_net.ipv4], ["fsn1-dc14", undefined, "number"]);
+  const first = (await nodeBy("pool-hz-1")).publicIp;
+  assert.match(first, /^198\.51\.100\.\d+$/, "known right away: no waiting for the provider");
+
+  // The server goes away: the address stays reserved and is the next one used.
+  await cloud.destroyCloudServer(n1);
+  await db.delete(dbm.schema.nodes).where(eq(dbm.schema.nodes.id, n1));
+  const before = reservedCount;
+  await cloud.createCloudNode({ provider: "hetzner", name: "pool-hz-2", region: "fsn1", size: "cx22", baseDomain: "", maxWorkloads: 0, origin: ORIGIN });
+  assert.deepEqual([(await nodeBy("pool-hz-2")).publicIp, reservedCount], [first, before], "reused, nothing new reserved");
+  await cloud.createCloudNode({ provider: "hetzner", name: "pool-hz-nbg", region: "nbg1", size: "cx22", baseDomain: "", maxWorkloads: 0, origin: ORIGIN });
+  assert.equal(reservedCount, before, "another region is not covered by the pool");
+
+  // Google: addresses come out of the company's block, in order, and go into the instance.
+  calls.length = 0;
+  await cloud.createCloudNode({ provider: "gcp", name: "pool-gcp-1", region: "europe-west8-a", size: "e2-small", baseDomain: "", maxWorkloads: 0, origin: ORIGIN });
+  await cloud.createCloudNode({ provider: "gcp", name: "pool-gcp-2", region: "europe-west8-b", size: "e2-small", baseDomain: "", maxWorkloads: 0, origin: ORIGIN });
+  assert.deepEqual([(await nodeBy("pool-gcp-1")).publicIp, (await nodeBy("pool-gcp-2")).publicIp], ["203.0.113.1", "203.0.113.2"]);
+  const reserve = JSON.parse(calls.find((c) => c.method === "POST" && c.url.includes("/regions/europe-west8/addresses"))!.body);
+  assert.deepEqual([reserve.address, reserve.addressType], ["203.0.113.1", "EXTERNAL"]);
+  const insert = JSON.parse(calls.find((c) => c.method === "POST" && c.url.endsWith("/zones/europe-west8-a/instances"))!.body);
+  assert.equal(insert.networkInterfaces[0].accessConfigs[0].natIP, "203.0.113.1");
+
+  // A creation that fails gives its address back to the pool.
+  await assert.rejects(cloud.createCloudNode({ provider: "hetzner", name: "pool-hz-fail", region: "fsn1", size: "nope", baseDomain: "", maxWorkloads: 0, origin: ORIGIN }), /not found/);
+  const usage = await pools.poolUsage();
+  const hzUsage = usage.find((u) => u.pool.id === hz)!;
+  assert.deepEqual([hzUsage.inUse, hzUsage.leases.length], [1, 2], "one leased, one free and still reserved");
+
+  const freeLease = hzUsage.leases.find((l) => !l.lease.nodeId)!;
+  const busyLease = hzUsage.leases.find((l) => l.lease.nodeId)!;
+  await assert.rejects(pools.releaseAddress(busyLease.lease.id), /in use by a server/);
+  await assert.rejects(pools.deleteIpPool(hz), /Release the pool/);
+  await pools.releaseAddress(freeLease.lease.id);
+  assert.ok(calls.some((c) => c.method === "DELETE" && /\/primary_ips\/\d+$/.test(c.url)));
 });
