@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import type { JobPayloads, JobResult, OffsiteTarget, WorkloadSpec } from "../../src/platform/protocol";
+import type { JobPayloads, JobResult, MigrationSource, OffsiteTarget, WorkloadSpec } from "../../src/platform/protocol";
 import type { Driver, Log } from "./driver";
 
 type State = { offsite?: Record<string, number>; workloads: Record<string, { kind: string; running: boolean; domains: string[]; updated?: string[]; net?: number; files?: Record<string, string> }>; backups: Record<string, number> };
@@ -243,6 +243,18 @@ export class SimulatedDriver implements Driver {
     if (/\bsyntax_error\b/i.test(sql)) throw new Error("You have an error in your SQL syntax near 'syntax_error'");
     if (!/^\s*(select|show|with|explain|describe|desc)\b/i.test(sql)) return { output: JSON.stringify({ columns: [], rows: [], truncated: false, message: "Query OK, 1 row affected" }) };
     return { output: JSON.stringify({ columns: ["ID", "post_title", "post_status", "post_date"], rows: [["1", "Hello world!", "publish", "2026-09-19 10:51:02"], ["2", "Sample Page", "publish", "2026-09-19 10:51:02"], ["3", "Privacy Policy", "draft", null]], truncated: false }) };
+  }
+
+  async migrate(spec: WorkloadSpec, source: MigrationSource, newUrl: string, log: Log) {
+    this.must(spec);
+    const from = source.type === "archive" ? new URL(source.url).hostname : `${source.user}@${source.host}:${source.path}`;
+    await this.step(log, source.type === "archive" ? `[sim] downloading archive from ${from}` : `[sim] copying files from ${from}`);
+    // Hosts starting with "fail" stand in for wrong passwords and broken archives.
+    if (from.startsWith("fail") || from.includes("@fail")) throw new Error(source.type === "ssh" ? "Permission denied (password)" : "The archive contains no WordPress installation");
+    await this.step(log, "[sim] importing database (wpx_ tables)");
+    await this.step(log, `[sim] replacing https://old-site.example with ${newUrl}`);
+    this.write((s) => (s.workloads[spec.slug].files = { ...s.workloads[spec.slug].files, "wp-content/migrated.txt": from }));
+    return { runtime: { version: "6.7" }, output: JSON.stringify({ oldUrl: "https://old-site.example", tablePrefix: "wpx_", wpVersion: "6.7" }) };
   }
 
   async backupCreate(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
