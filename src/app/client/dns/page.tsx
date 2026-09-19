@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { asc, count, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Alert, Card, CardHeader, EmptyState, Input, PageHeader, Table, Td } from "@/components/ui";
@@ -11,6 +12,7 @@ import { addZone } from "./actions";
 
 export default async function DnsZones() {
   const { account } = await requireAccount("hosting");
+  if (account.only) redirect("/client?denied=1");
   const db = await getDb();
   const [t, locale, dns, zones] = await Promise.all([
     getT(),

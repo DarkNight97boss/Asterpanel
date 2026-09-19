@@ -187,8 +187,9 @@ export class SimulatedDriver implements Driver {
   }
 
   /** A tiny in-memory WordPress tree; edits persist in the state file. */
-  async files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], path: string, content: string | undefined, log: Log) {
+  async files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], path: string, content: string | undefined, log: Log, encoding: "utf8" | "base64" = "utf8") {
     this.must(spec);
+    if (encoding === "base64") content = `[uploaded file, ${Buffer.from(content ?? "", "base64").length} bytes]`;
     const seed: Record<string, string> = {
       "index.php": "<?php\n// Front to the WordPress application.\ndefine( 'WP_USE_THEMES', true );\nrequire __DIR__ . '/wp-blog-header.php';\n",
       "wp-config.php": "<?php\ndefine( 'DB_NAME', 'wordpress' );\ndefine( 'WP_DEBUG', false );\n",

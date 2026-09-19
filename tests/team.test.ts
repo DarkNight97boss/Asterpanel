@@ -63,3 +63,20 @@ test("roles map to permissions; members see the owner's account", async () => {
   assert.deepEqual([can("developer", "hosting"), can("developer", "billing"), can("developer", "manage")], [true, false, false]);
   assert.deepEqual([can("admin", "manage"), can("owner", "manage")], [true, true]);
 });
+
+test("a developer can be limited to specific services; staging follows its live site", async () => {
+  const roles = await import("../src/lib/roles");
+  const db = await dbm.getDb();
+  await db.update(dbm.schema.teamMembers).set({ role: "developer", workloadIds: ["site-a"] }).where(eq(dbm.schema.teamMembers.memberId, dev.id));
+  const [, asMember] = await roles.listAccounts({ ...dev, id: dev.id } as User);
+  assert.deepEqual(asMember.only, ["site-a"]);
+  assert.equal(roles.mayAccess(asMember, { id: "site-a" }), true);
+  assert.equal(roles.mayAccess(asMember, { id: "stg", parentId: "site-a" }), true);
+  assert.equal(roles.mayAccess(asMember, { id: "site-b" }), false);
+  assert.equal(roles.mayAccess({ only: null }, { id: "anything" }), true);
+
+  await db.update(dbm.schema.teamMembers).set({ role: "billing" }).where(eq(dbm.schema.teamMembers.memberId, dev.id));
+  // listAccounts is request-cached by user object: a fresh object reads fresh data.
+  const [, asBilling] = await roles.listAccounts({ ...dev } as User);
+  assert.equal(asBilling.only, null, "the restriction only applies to developers");
+});

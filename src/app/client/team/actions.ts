@@ -69,3 +69,17 @@ export async function switchAccount(form: FormData) {
   }
   redirect("/client");
 }
+
+/** Limits a developer to the ticked services; none ticked = every service. */
+export async function setMemberSites(form: FormData) {
+  const { user, account } = await requireAccount("manage");
+  const id = z.string().uuid().parse(form.get("id"));
+  const wanted = form.getAll("workloadId").map(String).filter((v) => /^[0-9a-f-]{36}$/i.test(v));
+  const db = await getDb();
+  // Only services of this very account can be granted.
+  const mine = new Set((await db.select({ id: schema.workloads.id }).from(schema.workloads).where(eq(schema.workloads.clientId, account.id))).map((w) => w.id));
+  const workloadIds = wanted.filter((w) => mine.has(w));
+  await db.update(schema.teamMembers).set({ workloadIds: workloadIds.length ? workloadIds : null }).where(and(eq(schema.teamMembers.id, id), eq(schema.teamMembers.ownerId, account.id)));
+  await audit(user.id, "team.sites_changed", "user", account.id, { id, count: workloadIds.length });
+  revalidatePath("/client/team");
+}

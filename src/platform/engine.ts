@@ -542,14 +542,17 @@ export function cleanPath(input: string): string {
   return parts.join("/");
 }
 
-export async function runFilesJob(workloadId: string, action: JobPayloads["workload.files"]["action"], path: string, content?: string, actorId: string | null = null) {
+export const UPLOAD_LIMIT = 5 * 1024 * 1024;
+
+export async function runFilesJob(workloadId: string, action: JobPayloads["workload.files"]["action"], path: string, content?: string, actorId: string | null = null, encoding: "utf8" | "base64" = "utf8") {
   const w = await load(workloadId);
   if (w.type !== "wordpress") throw new PlatformError("The file manager is available for WordPress sites");
   const clean = cleanPath(path);
   if (action !== "list" && !clean) throw new PlatformError("Invalid path");
-  if (action === "write" && (content ?? "").length > 1_000_000) throw new PlatformError("This file is too large to edit here. Use SFTP.");
+  if (action === "write" && encoding === "utf8" && (content ?? "").length > 1_000_000) throw new PlatformError("This file is too large to edit here. Use SFTP.");
+  if (action === "write" && encoding === "base64" && (content ?? "").length > Math.ceil((UPLOAD_LIMIT * 4) / 3) + 4) throw new PlatformError("Files up to 5 MB can be uploaded here. Use SFTP for larger ones.");
   if (action !== "list" && action !== "read") await audit(actorId, `files.${action}`, "workload", w.id, { path: clean });
-  return enqueue(w, "workload.files", { spec: await buildSpec(w.id), action, path: clean, content: action === "write" ? (content ?? "") : undefined }, { actorId });
+  return enqueue(w, "workload.files", { spec: await buildSpec(w.id), action, path: clean, content: action === "write" ? (content ?? "") : undefined, encoding: action === "write" ? encoding : undefined }, { actorId });
 }
 
 // ─── DNS ─────────────────────────────────────────────────────────────────────
@@ -780,7 +783,9 @@ export async function reportJob(nodeId: string, jobId: string, report: JobReport
   const ok = report.status === "succeeded";
   const result: JobResult = ok ? (report.result ?? {}) : {};
   const error = ok ? "" : String(report.error ?? "Failed").slice(0, 2000);
-  await db.update(schema.jobs).set({ status: report.status, log, result, error, finishedAt: new Date() }).where(eq(schema.jobs.id, job.id));
+  // File contents and SQL have done their job: do not keep them in the queue.
+  const scrubbed = job.type === "workload.files" ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), content: undefined, spec: undefined }) : job.payload;
+  await db.update(schema.jobs).set({ status: report.status, log, result, error, finishedAt: new Date(), payload: scrubbed }).where(eq(schema.jobs.id, job.id));
   await applyOutcome(job, ok, result, error);
   return true;
 }

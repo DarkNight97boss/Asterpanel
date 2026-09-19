@@ -161,7 +161,7 @@ export class Agent {
       case "workload.apm":
         return d.apm(p.spec, (envelope.payload as JobPayloads["workload.apm"]).minutes);
       case "workload.files":
-        return d.files(p.spec, p.fileAction, p.path ?? "", p.content, log);
+        return d.files(p.spec, p.fileAction, p.path ?? "", p.content, log, (envelope.payload as JobPayloads["workload.files"]).encoding);
       case "dns.sync":
         return d.dnsSync(envelope.payload as JobPayloads["dns.sync"], log);
       case "workload.db":

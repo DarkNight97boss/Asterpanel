@@ -18,6 +18,7 @@ const fail = (err: unknown): ActionState => {
 /** The zone, only if it belongs to the active account. */
 async function ownZone(zoneId: unknown) {
   const { user, account } = await requireAccount("hosting");
+  if (account.only) throw new PlatformError("Your access is limited to specific services");
   const db = await getDb();
   const [zone] = await db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.id, z.string().uuid().parse(zoneId)), eq(schema.dnsZones.clientId, account.id)));
   if (!zone) throw new PlatformError("Domain not found");
@@ -26,6 +27,7 @@ async function ownZone(zoneId: unknown) {
 
 export async function addZone(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, account } = await requireAccount("hosting");
+  if (account.only) return { error: "Your access is limited to specific services" };
   let id: string;
   try {
     id = await createZone(account.id, String(form.get("domain") ?? ""), user.id);

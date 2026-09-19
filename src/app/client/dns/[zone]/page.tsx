@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 import { notFound } from "next/navigation";
 import { and, asc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
@@ -14,6 +15,7 @@ const ttlLabel = (s: number) => (s % 86400 === 0 ? `${s / 86400} d` : s % 3600 =
 
 export default async function DnsZone({ params }: { params: Promise<{ zone: string }> }) {
   const { account } = await requireAccount("hosting");
+  if (account.only) redirect("/client?denied=1");
   const { zone: zoneId } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(zoneId)) notFound();
   const db = await getDb();

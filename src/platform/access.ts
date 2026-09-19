@@ -2,7 +2,7 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { getAccount, roleCan } from "@/lib/account";
+import { getAccount, mayAccess, roleCan } from "@/lib/account";
 import { isStaff } from "@/lib/auth";
 
 /**
@@ -20,6 +20,6 @@ export async function requireWorkload(id: string) {
       domains: { orderBy: [desc(schema.domains.isPrimary), asc(schema.domains.createdAt)] },
     },
   });
-  if (!workload || workload.status === "deleted" || (!isStaff(user) && (workload.clientId !== account.id || !roleCan(account.role, "hosting")))) notFound();
+  if (!workload || workload.status === "deleted" || (!isStaff(user) && (workload.clientId !== account.id || !roleCan(account.role, "hosting") || !mayAccess(account, workload)))) notFound();
   return { user, account, workload, canManage: isStaff(user) || roleCan(account.role, "manage") };
 }

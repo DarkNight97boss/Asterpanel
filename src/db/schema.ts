@@ -101,6 +101,8 @@ export const teamMembers = pgTable(
     memberId: uuid("member_id").references(() => users.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
     role: text("role").$type<TeamRole>().notNull(),
+    /** Restricts a member to these services (and their staging). Null = every service. */
+    workloadIds: jsonb("workload_ids").$type<string[] | null>(),
     /** SHA-256 of the emailed invite token; cleared once accepted. */
     inviteTokenHash: text("invite_token_hash").notNull().default(""),
     invitedAt: createdAt(),

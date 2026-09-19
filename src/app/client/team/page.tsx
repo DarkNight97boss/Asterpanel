@@ -1,11 +1,11 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, ne } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Button, Card, CardHeader, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount, ROLE_LABEL } from "@/lib/account";
 import { displayName, formatDate } from "@/lib/format";
-import { changeRole, invite, leaveTeam, removeMember } from "./actions";
+import { changeRole, invite, leaveTeam, removeMember, setMemberSites } from "./actions";
 
 const ROLE_HELP: Record<string, string> = {
   admin: "Everything: services, billing and the team.",
@@ -16,7 +16,7 @@ const ROLE_HELP: Record<string, string> = {
 export default async function Team() {
   const { user, account, can } = await requireAccount("support");
   const db = await getDb();
-  const [t, locale, [owner], members] = await Promise.all([
+  const [t, locale, [owner], members, sites] = await Promise.all([
     getT(),
     getLocale(),
     db.select().from(schema.users).where(eq(schema.users.id, account.id)),
@@ -26,6 +26,7 @@ export default async function Team() {
       .leftJoin(schema.users, eq(schema.users.id, schema.teamMembers.memberId))
       .where(eq(schema.teamMembers.ownerId, account.id))
       .orderBy(asc(schema.teamMembers.invitedAt)),
+    db.select({ id: schema.workloads.id, name: schema.workloads.name }).from(schema.workloads).where(and(eq(schema.workloads.clientId, account.id), eq(schema.workloads.environment, "live"), ne(schema.workloads.status, "deleted"))).orderBy(asc(schema.workloads.name)),
   ]);
   const manage = can("manage");
 
@@ -34,11 +35,12 @@ export default async function Team() {
       <PageHeader title={t("Team")} description={t("People who can work on {account}.", { account: account.name })} />
       <div className="space-y-6">
         <Card>
-          <Table head={[t("Name"), t("Email"), t("Role"), t("Status"), ""]}>
+          <Table head={[t("Name"), t("Email"), t("Role"), t("Access"), t("Status"), ""]}>
             <tr>
               <Td className="font-medium">{displayName(owner)}</Td>
               <Td className="text-body">{owner.email}</Td>
               <Td>{t(ROLE_LABEL.owner)}</Td>
+              <Td className="text-muted">{t("All services")}</Td>
               <Td><Badge tone="success">{t("Active")}</Badge></Td>
               <Td />
             </tr>
@@ -58,6 +60,23 @@ export default async function Team() {
                   ) : (
                     t(ROLE_LABEL[m.role])
                   )}
+                </Td>
+                <Td>
+                  {m.role !== "developer" ? (
+                    <span className="text-muted">{t("All services")}</span>
+                  ) : manage ? (
+                    <details>
+                      <summary className="cursor-pointer text-link">{m.workloadIds?.length ? t("{n} services", { n: m.workloadIds.length }) : t("All services")}</summary>
+                      <form action={setMemberSites} className="mt-2 space-y-1.5 rounded-theme border border-border p-3">
+                        <input type="hidden" name="id" value={m.id} />
+                        {sites.map((s) => (
+                          <label key={s.id} className="flex items-center gap-2 text-sm"><input type="checkbox" name="workloadId" value={s.id} defaultChecked={m.workloadIds?.includes(s.id)} className="accent-(--accent)" />{s.name}</label>
+                        ))}
+                        <p className="text-xs text-muted">{t("Nothing ticked = every service.")}</p>
+                        <Button size="sm" variant="secondary">{t("Save")}</Button>
+                      </form>
+                    </details>
+                  ) : m.workloadIds?.length ? t("{n} services", { n: m.workloadIds.length }) : t("All services")}
                 </Td>
                 <Td>{m.acceptedAt ? <Badge tone="success">{t("Active")}</Badge> : <Badge tone="warning">{t("Invited {date}", { date: formatDate(m.invitedAt, locale) })}</Badge>}</Td>
                 <Td className="text-right">

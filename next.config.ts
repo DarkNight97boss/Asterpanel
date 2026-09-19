@@ -4,6 +4,8 @@ const nextConfig: NextConfig = {
   output: "standalone",
   serverExternalPackages: ["@electric-sql/pglite", "postgres", "nodemailer"],
   poweredByHeader: false,
+  // File-manager uploads travel through a Server Action (5 MB files + form overhead).
+  experimental: { serverActions: { bodySizeLimit: "8mb" } },
   async headers() {
     return [
       {

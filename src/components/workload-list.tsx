@@ -5,7 +5,7 @@ import { Button, ButtonLink, Card, EmptyState, Input, PageHeader, Select, Status
 import { getDb, schema } from "@/db";
 import type { WorkloadType } from "@/db/schema";
 import { getLocale, getT } from "@/i18n";
-import { requireAccount } from "@/lib/account";
+import { mayAccess, requireAccount } from "@/lib/account";
 import { formatDate } from "@/lib/format";
 import { WORKLOAD_LABEL } from "@/platform/ui";
 
@@ -23,7 +23,7 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
     }),
   ]);
   const q = (filters.q ?? "").trim().toLowerCase().slice(0, 80);
-  const all = rows.filter((w) => w.environment === "live");
+  const all = rows.filter((w) => w.environment === "live" && mayAccess(user, w));
   const live = all.filter(
     (w) => (!filters.status || w.status === filters.status) && (!q || w.name.toLowerCase().includes(q) || w.domains.some((d) => d.hostname.includes(q))),
   );
@@ -32,7 +32,7 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
   return (
     <>
       <AutoRefresh active={rows.some((w) => w.status === "creating" || w.status === "deleting")} />
-      <PageHeader title={t(label.many)} description={t(label.blurb)} action={can("manage") && <ButtonLink href={newHref}>+ {t(label.one)}</ButtonLink>} />
+      <PageHeader title={t(label.many)} description={t(label.blurb)} action={can("manage") && !user.only && <ButtonLink href={newHref}>+ {t(label.one)}</ButtonLink>} />
       <Card>
         {all.length > 0 && (
           <form className="flex flex-wrap items-center gap-3 px-6 pt-6">
@@ -65,7 +65,7 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
             })}
           </Table>
         ) : (
-          <EmptyState title={all.length ? t("No results") : t("Nothing here yet")} description={all.length ? undefined : t(label.blurb)} action={can("manage") && <ButtonLink href={newHref}>+ {t(label.one)}</ButtonLink>} />
+          <EmptyState title={all.length ? t("No results") : t("Nothing here yet")} description={all.length ? undefined : t(label.blurb)} action={can("manage") && !user.only && <ButtonLink href={newHref}>+ {t(label.one)}</ButtonLink>} />
         )}
       </Card>
     </>

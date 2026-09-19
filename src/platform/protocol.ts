@@ -63,7 +63,7 @@ export type JobPayloads = {
   /** Request-level performance report from the proxy's access log. */
   "workload.apm": { spec: WorkloadSpec; minutes: number };
   /** File manager on the site's files. `path` is relative to the site root. */
-  "workload.files": { spec: WorkloadSpec; action: "list" | "read" | "write" | "mkdir" | "delete"; path: string; content?: string };
+  "workload.files": { spec: WorkloadSpec; action: "list" | "read" | "write" | "mkdir" | "delete"; path: string; content?: string; encoding?: "utf8" | "base64" };
   /** Node-level: replace everything this node serves as an authoritative name server. */
   "dns.sync": { nameservers: string[]; hostmaster: string; zones: DnsZoneData[] };
   /** Database console: `tables` lists them with sizes, `query` runs one statement. */

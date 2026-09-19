@@ -20,7 +20,7 @@ export interface Driver {
   tool(spec: WorkloadSpec, tool: ToolName, args: Record<string, string>, log: Log): Promise<JobResult>;
   db(spec: WorkloadSpec, action: "tables" | "query", sql: string, log: Log): Promise<JobResult>;
   apm(spec: WorkloadSpec, minutes: number): Promise<JobResult>;
-  files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], path: string, content: string | undefined, log: Log): Promise<JobResult>;
+  files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], path: string, content: string | undefined, log: Log, encoding?: "utf8" | "base64"): Promise<JobResult>;
   dnsSync(data: JobPayloads["dns.sync"], log: Log): Promise<JobResult>;
   backupCreate(spec: WorkloadSpec, backupId: string, log: Log): Promise<JobResult>;
   backupRestore(spec: WorkloadSpec, backupId: string, log: Log): Promise<JobResult>;
