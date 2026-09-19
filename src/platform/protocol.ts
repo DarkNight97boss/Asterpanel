@@ -30,7 +30,19 @@ export type WorkloadSpec = {
   /** Hostnames routed to this workload; the first one is primary. */
   domains: string[];
   resources: { memoryMb: number; cpus: number; diskGb: number };
-  wordpress?: { phpVersion: string; title: string; adminUser: string; adminEmail: string; adminPassword: string; dbPassword: string; locale: string };
+  wordpress?: {
+    phpVersion: string;
+    title: string;
+    adminUser: string;
+    adminEmail: string;
+    adminPassword: string;
+    dbPassword: string;
+    locale: string;
+    /** php.ini overrides, already clamped by the control plane. */
+    php?: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number };
+    /** Redis sidecar used as WordPress object cache. */
+    objectCache?: boolean;
+  };
   database?: { engine: "mysql" | "postgres" | "redis"; version: string; name: string; user: string; password: string };
   source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number };
   env?: Record<string, string>;

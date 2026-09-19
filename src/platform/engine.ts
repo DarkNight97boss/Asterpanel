@@ -76,6 +76,19 @@ async function signEnvelope(envelope: JobEnvelope): Promise<SignedJob> {
 export const nodeIsOnline = (n: { status: string; lastSeenAt: Date | null }) =>
   n.status !== "disabled" && !!n.lastSeenAt && Date.now() - n.lastSeenAt.getTime() < NODE_TIMEOUT_MS;
 
+/** The given node, if it is online and has room for one more workload. */
+async function nodeWithRoom(nodeId: string) {
+  const db = await getDb();
+  const [row] = await db
+    .select({ node: schema.nodes, used: count(schema.workloads.id) })
+    .from(schema.nodes)
+    .leftJoin(schema.workloads, and(eq(schema.workloads.nodeId, schema.nodes.id), ne(schema.workloads.status, "deleted")))
+    .where(eq(schema.nodes.id, nodeId))
+    .groupBy(schema.nodes.id);
+  if (!row || !nodeIsOnline(row.node) || (row.node.maxWorkloads > 0 && row.used >= row.node.maxWorkloads)) throw new PlatformError("The server of the original site has no room for a copy right now");
+  return row.node;
+}
+
 /** Least-loaded online node (optionally in a region) that still has room. */
 async function pickNode(region?: string) {
   const db = await getDb();
@@ -138,6 +151,8 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
             adminPassword: secrets.adminPassword ?? "",
             dbPassword: secrets.dbPassword ?? "",
             locale: (await getSettings("general")).locale === "it" ? "it_IT" : "en_US",
+            php: c.php,
+            objectCache: c.objectCache || undefined,
           }
         : undefined,
     database:
@@ -194,6 +209,8 @@ const setStatus = async (id: string, status: Workload["status"], statusMessage =
 
 export type NewWorkload = {
   clientId: string;
+  /** WordPress only: start as a copy of this site (same company, same server). */
+  cloneFrom?: string;
   companyId?: string | null;
   type: WorkloadType;
   name: string;
@@ -213,10 +230,15 @@ export async function createWorkload(input: NewWorkload): Promise<string> {
     throw new PlatformError("Enter the HTTPS URL of a Git repository");
   }
 
-  const node = await pickNode(input.region);
+  // A copy is made locally on the node, so the new site has to live where the original does.
+  const source = input.cloneFrom ? await load(input.cloneFrom) : null;
+  if (source && (source.type !== "wordpress" || input.type !== "wordpress" || source.status !== "running" || (source.companyId ?? null) !== (input.companyId ?? null))) throw new PlatformError("This site cannot be copied");
+  const node = source ? await nodeWithRoom(source.nodeId) : await pickNode(input.region);
   const slug = `${slugify(name).slice(0, 24).replace(/-+$/, "") || input.type}-${randomBytes(3).toString("hex")}`;
   const secrets: Secrets = { dbPassword: password(), env: input.env ?? {}, accessToken: input.accessToken || undefined };
-  if (input.type === "wordpress") secrets.adminPassword = password();
+  // A copy keeps the users of the original, so the admin login shown in the panel is the original's.
+  if (input.type === "wordpress") secrets.adminPassword = source ? (readSecrets(source).adminPassword ?? password()) : password();
+  if (source) Object.assign(config, { adminUser: source.config.adminUser, adminEmail: source.config.adminEmail, phpVersion: source.config.phpVersion, php: source.config.php });
 
   const db = await getDb();
   const workloadId = await db.transaction(async (tx) => {
@@ -244,7 +266,8 @@ export async function createWorkload(input: NewWorkload): Promise<string> {
 
   const deploymentId = input.type === "app" || input.type === "static" ? await newDeployment(workloadId, "create") : undefined;
   await enqueue({ id: workloadId, nodeId: node.id }, "workload.create", { spec: await buildSpec(workloadId) }, { deploymentId, actorId: input.actorId });
-  await audit(input.actorId ?? input.clientId, "workload.create", "workload", workloadId, { type: input.type, node: node.name });
+  if (source) await enqueue({ id: workloadId, nodeId: node.id }, "workload.clone", { spec: await buildSpec(workloadId), from: await buildSpec(source.id) }, { actorId: input.actorId });
+  await audit(input.actorId ?? input.clientId, "workload.create", "workload", workloadId, { type: input.type, node: node.name, copyOf: source?.id });
   return workloadId;
 }
 
@@ -632,6 +655,19 @@ export async function listMigrations(workloadId: string): Promise<MigrationRun[]
     } catch {}
     return { id: j.id, status: j.status, label: String(decryptJson<{ label?: string }>(j.payload, {}).label ?? ""), createdAt: j.createdAt, finishedAt: j.finishedAt, error: j.error, log: j.log, summary };
   });
+}
+
+export const PHP_LIMITS = { memoryLimitMb: [64, 1024], uploadMaxMb: [2, 1024], maxExecutionTime: [30, 600], maxInputVars: [1000, 20000] } as const;
+
+/** PHP limits and the Redis object cache of a WordPress site. Values outside the allowed ranges are pulled back in. */
+export async function savePhpSettings(workloadId: string, input: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number; objectCache: boolean }, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "wordpress") throw new PlatformError("PHP settings are available for WordPress sites");
+  const clamp = (key: keyof typeof PHP_LIMITS) => Math.min(PHP_LIMITS[key][1], Math.max(PHP_LIMITS[key][0], Math.round(Number(input[key]) || PHP_LIMITS[key][0])));
+  const php = { memoryLimitMb: clamp("memoryLimitMb"), uploadMaxMb: clamp("uploadMaxMb"), maxExecutionTime: clamp("maxExecutionTime"), maxInputVars: clamp("maxInputVars") };
+  // PHP cannot be promised more memory than the container has.
+  php.memoryLimitMb = Math.min(php.memoryLimitMb, Math.max(64, Math.floor((w.config.memoryMb ?? 512) / 2)));
+  await updateWorkloadConfig(w.id, { php, objectCache: input.objectCache }, actorId);
 }
 
 /** Replaces the scheduled jobs of an app. `text` is one job per line, see `parseCronLines`. */

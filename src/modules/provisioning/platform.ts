@@ -12,7 +12,7 @@ import { ModuleError, type ProvisionContext, type ProvisioningModule } from "./t
  */
 
 /** `sealed` is an encrypted `{ env, accessToken }`: secrets never sit in plain text on the order. */
-export type PlatformRequest = { name?: string; region?: string; config?: WorkloadConfig; sealed?: string };
+export type PlatformRequest = { name?: string; region?: string; config?: WorkloadConfig; sealed?: string; /** WordPress: start as a copy of this site of the same company. */ cloneFrom?: string };
 type Sealed = { env?: Record<string, string>; accessToken?: string };
 
 export const sealRequestSecrets = (secrets: Sealed) => encryptJson(secrets);
@@ -50,6 +50,7 @@ export const platform: ProvisioningModule = {
         type: planType(ctx.product.moduleConfig),
         name: request.name || ctx.product.name,
         region: request.region || undefined,
+        cloneFrom: request.cloneFrom || undefined,
         env: sealed.env,
         accessToken: sealed.accessToken,
         config: { ...request.config, memoryMb: limit("memoryMb", 512), cpus: limit("cpus", 1), diskGb: limit("diskGb", 10) },

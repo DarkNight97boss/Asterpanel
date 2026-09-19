@@ -16,8 +16,9 @@ import { createFromPlan, seedPlans } from "../../platform-actions";
 export default async function NewWorkload({ params, searchParams }: { params: Promise<{ kind: string }>; searchParams: Promise<{ plan?: string }> }) {
   const type = TYPE_BY_PATH[(await params).kind];
   if (!type) notFound();
-  const { user } = await requireAccount("manage");
+  const { user, account } = await requireAccount("manage");
   const db = await getDb();
+  const copyable = type === "wordpress" ? await (await getDb()).select({ id: schema.workloads.id, name: schema.workloads.name }).from(schema.workloads).where(and(eq(schema.workloads.companyId, account.id), eq(schema.workloads.type, "wordpress"), eq(schema.workloads.environment, "live"), eq(schema.workloads.status, "running"))) : [];
   const [t, locale, billing, products, nodes, { plan }] = await Promise.all([
     getT(),
     getLocale(),
@@ -92,6 +93,14 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
                   <Field label={t("PHP version")}>
                     <Select name="phpVersion" defaultValue="8.3">{["8.4", "8.3", "8.2", "8.1"].map((v) => <option key={v}>{v}</option>)}</Select>
                   </Field>
+                  {copyable.length > 0 && (
+                    <Field label={t("Start from")} hint={t("A copy has the files, database, users and passwords of the original, on the same server, at its own address.")}>
+                      <Select name="cloneFrom" defaultValue="">
+                        <option value="">{t("A fresh WordPress")}</option>
+                        {copyable.map((s) => <option key={s.id} value={s.id}>{t("A copy of {site}", { site: s.name })}</option>)}
+                      </Select>
+                    </Field>
+                  )}
                 </>
               )}
               {type === "database" && (

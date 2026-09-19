@@ -737,3 +737,44 @@ test("scheduled jobs: saved on the app, carried to the node, run only when due a
   const wp = await engine.createWorkload({ clientId, type: "wordpress", name: "NoCron" });
   await assert.rejects(engine.saveCrons(wp, "@daily true"), /available for applications/);
 });
+
+test("PHP limits are clamped and reach the node; the object cache is a switch", async () => {
+  const id = await engine.createWorkload({ clientId, type: "wordpress", name: "Tuned", config: { memoryMb: 1024 } });
+  await drain();
+  await engine.savePhpSettings(id, { memoryLimitMb: 99_999, uploadMaxMb: 0, maxExecutionTime: 120, maxInputVars: Number("not a number"), objectCache: true });
+  const spec = await engine.buildSpec(id);
+  assert.deepEqual(spec.wordpress?.php, { memoryLimitMb: 512, uploadMaxMb: 2, maxExecutionTime: 120, maxInputVars: 1000 }, "half the container's RAM at most, floors applied");
+  assert.equal(spec.wordpress?.objectCache, true);
+  await drain();
+  const db = await dbm.getDb();
+  const job = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id))).filter((j) => j.type === "workload.update").at(-1)!;
+  assert.match(job.log, /php\.ini: memory 512M, uploads 2M, 120s, 1000 input vars/);
+  assert.match(job.log, /Redis object cache on/);
+  const dbw = await engine.createWorkload({ clientId, type: "database", name: "NoPhp", config: { engine: "redis" } });
+  await assert.rejects(engine.savePhpSettings(dbw, { memoryLimitMb: 256, uploadMaxMb: 64, maxExecutionTime: 60, maxInputVars: 3000, objectCache: false }), /WordPress sites/);
+});
+
+test("a new site can start as a copy of another one: same company, same server, after the install", async () => {
+  const db = await dbm.getDb();
+  const [{ id: companyId }] = await db.insert(dbm.schema.companies).values({ name: "Copy Co" }).returning();
+  const [{ id: strangers }] = await db.insert(dbm.schema.companies).values({ name: "Strangers" }).returning();
+  const original = await engine.createWorkload({ clientId, companyId, type: "wordpress", name: "Original", config: { adminUser: "boss", adminEmail: "boss@example.test", phpVersion: "8.2" } });
+  await drain();
+
+  await assert.rejects(engine.createWorkload({ clientId, companyId: strangers, type: "wordpress", name: "Theft", cloneFrom: original }), /cannot be copied/, "another company's site");
+  await assert.rejects(engine.createWorkload({ clientId, companyId, type: "app", name: "Wrong kind", cloneFrom: original, config: { repoUrl: "https://github.com/a/b.git" } }), /cannot be copied/);
+
+  const copy = await engine.createWorkload({ clientId, companyId, type: "wordpress", name: "Copy", cloneFrom: original });
+  const jobs = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, copy))).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  assert.deepEqual(jobs.map((j) => j.type), ["workload.create", "workload.clone"]);
+  await drain();
+  const [o, c] = [await workload(original), await workload(copy)];
+  assert.deepEqual([c.status, c.nodeId, c.parentId, c.environment, c.config.adminUser, c.config.phpVersion], ["running", o.nodeId, null, "live", "boss", "8.2"], "an independent live site, next to the original");
+  assert.equal(engine.readSecrets(c).adminPassword, engine.readSecrets(o).adminPassword, "the panel shows the login that really works on the copy");
+  assert.notEqual(engine.readSecrets(c).dbPassword, engine.readSecrets(o).dbPassword);
+  assert.notEqual(c.domains[0].hostname, o.domains[0].hostname);
+
+  await db.update(dbm.schema.nodes).set({ maxWorkloads: 1 }).where(eq(dbm.schema.nodes.id, o.nodeId));
+  await assert.rejects(engine.createWorkload({ clientId, companyId, type: "wordpress", name: "No room", cloneFrom: original }), /no room for a copy/);
+  await db.update(dbm.schema.nodes).set({ maxWorkloads: 0 }).where(eq(dbm.schema.nodes.id, o.nodeId));
+});

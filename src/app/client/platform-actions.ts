@@ -74,7 +74,15 @@ export async function createFromPlan(_: ActionState, form: FormData): Promise<Ac
       if (!src.success) return { error: src.error.issues[0].message };
       config = type === "static" ? { repoUrl: src.data.repoUrl, branch: src.data.branch, buildCommand: src.data.buildCommand, outputDir: src.data.outputDir } : { repoUrl: src.data.repoUrl, branch: src.data.branch, port: src.data.port };
     }
+    let cloneFrom: string | undefined;
+    if (type === "wordpress" && f.cloneFrom) {
+      const db = await getDb();
+      const [src] = await db.select({ id: schema.workloads.id }).from(schema.workloads).where(and(eq(schema.workloads.id, String(f.cloneFrom)), eq(schema.workloads.companyId, account.id), eq(schema.workloads.type, "wordpress"), eq(schema.workloads.environment, "live")));
+      if (!src) return { error: "The site to copy was not found" };
+      cloneFrom = src.id;
+    }
     const request: PlatformRequest = {
+      cloneFrom,
       name: base.data.name,
       region: base.data.region,
       config,
@@ -193,6 +201,18 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   }
   refresh(workload.id);
   return { ok: "Migration started. A safety backup is taken first." };
+}
+
+export async function savePhp(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  const n = (k: string) => Number(form.get(k));
+  try {
+    await engine.savePhpSettings(workload.id, { memoryLimitMb: n("memoryLimitMb"), uploadMaxMb: n("uploadMaxMb"), maxExecutionTime: n("maxExecutionTime"), maxInputVars: n("maxInputVars"), objectCache: form.has("objectCache") }, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved. The site restarts with the new settings." };
 }
 
 export async function saveCronJobs(_: ActionState, form: FormData): Promise<ActionState> {

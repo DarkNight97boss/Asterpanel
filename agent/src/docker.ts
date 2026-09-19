@@ -250,9 +250,49 @@ export class DockerDriver implements Driver {
     log(`starting wordpress (php ${php})`);
     const env = { ...this.wpEnv(spec), ...spec.env };
     const direct = !spec.cache?.enabled && !spec.cdn?.enabled; // otherwise Traefik talks to the edge sidecar instead
-    await this.docker(["run", "-d", "--name", name, "--network", net, ...this.limits(spec), "-v", `${name}-files:/var/www/html`, ...this.envArgs(env), ...(direct ? this.route(spec, 80) : []), `wordpress:php${php}-apache`], log, { env });
+    const ini = await this.phpIni(spec);
+    await this.docker(["run", "-d", "--name", name, "--network", net, ...this.limits(spec), "-v", `${name}-files:/var/www/html`, ...(ini ? ["-v", `${ini}:/usr/local/etc/php/conf.d/zz-aster.ini:ro`] : []), ...this.envArgs(env), ...(direct ? this.route(spec, 80) : []), `wordpress:php${php}-apache`], log, { env });
     if (direct) await this.docker(["network", "connect", PROXY_NET, name]);
     await this.syncCache(spec, log);
+    await this.syncObjectCache(spec, log);
+  }
+
+  /** php.ini overrides as a read-only file mounted into the container. Numbers only: nothing a customer typed reaches the file. */
+  private async phpIni(spec: WorkloadSpec): Promise<string | null> {
+    const p = spec.wordpress?.php;
+    const file = path.join(this.opts.dataDir, "php", `${spec.slug}.ini`);
+    if (!p) {
+      await rm(file, { force: true });
+      return null;
+    }
+    const n = (v: number, min: number, max: number) => Math.min(max, Math.max(min, Math.round(Number(v)) || min));
+    await mkdir(path.dirname(file), { recursive: true });
+    const upload = n(p.uploadMaxMb, 2, 1024);
+    await writeFile(file, [`memory_limit = ${n(p.memoryLimitMb, 64, 1024)}M`, `upload_max_filesize = ${upload}M`, `post_max_size = ${upload + 8}M`, `max_execution_time = ${n(p.maxExecutionTime, 30, 600)}`, `max_input_vars = ${n(p.maxInputVars, 1000, 20000)}`, ""].join("\n"));
+    return file;
+  }
+
+  /** Redis next to the site as WordPress object cache: small, memory-only, evicting the least recently used keys. */
+  private async syncObjectCache(spec: WorkloadSpec, log: Log) {
+    const { name, net } = this.check(spec);
+    const redis = `${name}-redis`;
+    const installed = await this.wp(spec, ["plugin", "is-installed", "redis-cache"]).then(() => true, () => false);
+    if (!spec.wordpress?.objectCache) {
+      if (installed) await this.wp(spec, ["redis", "disable"]).catch(() => {});
+      await this.rmContainer(redis);
+      return;
+    }
+    if (!(await this.exists("container", redis))) {
+      log("starting object cache (redis:7-alpine)");
+      await this.docker(["run", "-d", "--name", redis, "--network", net, "--restart", "unless-stopped", "--memory", "96m", "redis:7-alpine", "redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"], log);
+    }
+    // WordPress may still be installing on a brand-new site: the next update applies it.
+    if (!(await this.wp(spec, ["core", "is-installed"]).then(() => true, () => false))) return;
+    if (!installed) await this.wp(spec, ["plugin", "install", "redis-cache", "--activate"], log);
+    await this.wp(spec, ["config", "set", "WP_REDIS_HOST", redis]);
+    await this.wp(spec, ["config", "set", "WP_REDIS_PREFIX", spec.slug]);
+    await this.wp(spec, ["plugin", "activate", "redis-cache"]).catch(() => {});
+    await this.wp(spec, ["redis", "enable"], log).catch((err: Error) => log(`object cache not enabled: ${err.message}`));
   }
 
   /**
@@ -444,14 +484,14 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
   async stop(spec: WorkloadSpec, log: Log) {
     const { name } = this.check(spec);
     await rm(this.cronFile(spec), { force: true });
-    for (const c of [`${name}-sftp`, `${name}-cache`, name, `${name}-db`]) if (await this.exists("container", c)) await this.docker(["stop", c], log);
+    for (const c of [`${name}-sftp`, `${name}-cache`, `${name}-redis`, name, `${name}-db`]) if (await this.exists("container", c)) await this.docker(["stop", c], log);
     return {};
   }
 
   async remove(spec: WorkloadSpec, log: Log) {
     const { name, net } = this.check(spec);
     log("removing containers, volumes, images and backups");
-    for (const c of [`${name}-sftp`, `${name}-cache`, name, `${name}-db`]) await this.rmContainer(c);
+    for (const c of [`${name}-sftp`, `${name}-cache`, `${name}-redis`, name, `${name}-db`]) await this.rmContainer(c);
     for (const v of [`${name}-files`, `${name}-db`, `${name}-data`, `${name}-site`, `${name}-cache`]) if (await this.exists("volume", v)) await this.docker(["volume", "rm", "-f", v]);
     if (await this.exists("network", net)) await this.docker(["network", "rm", net]).catch(() => {});
     await this.docker(["image", "rm", "-f", `${name}:current`], undefined, { quiet: true }).catch(() => {});
@@ -459,6 +499,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     await rm(path.join(this.opts.dataDir, "builds", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "cache", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "sftp", spec.slug), { recursive: true, force: true });
+    await rm(path.join(this.opts.dataDir, "php", `${spec.slug}.ini`), { force: true });
     await rm(this.cronFile(spec), { force: true });
     await rm(path.join(this.opts.dataDir, "cron-logs", `${spec.slug}.log`), { force: true });
     return {};
@@ -1125,7 +1166,7 @@ mv "$ROOT" /work/root
     const bySlug = new Map<string, { slug: string; cpuPercent: number; memMb: number; rxMb: number; txMb: number }>();
     for (const line of out.split("\n")) {
       const [name, cpu, mem, net] = line.split("|");
-      const slug = /^aster-(.+?)(-db|-cache|-sftp)?$/.exec(name ?? "")?.[1];
+      const slug = /^aster-(.+?)(-db|-cache|-sftp|-redis)?$/.exec(name ?? "")?.[1];
       if (!slug || slug === "traefik" || slug === "dns" || !net) continue;
       const row = bySlug.get(slug) ?? { slug, cpuPercent: 0, memMb: 0, rxMb: 0, txMb: 0 };
       row.cpuPercent += parseFloat(cpu) || 0; // site + its database container
@@ -1138,6 +1179,6 @@ mv "$ROOT" /work/root
 
   async workloadCount() {
     const out = await this.docker(["ps", "-a", "--filter", "name=^aster-", "--format", "{{.Names}}"], undefined, { quiet: true });
-    return out.split("\n").filter((n) => n && n !== "aster-traefik" && n !== "aster-dns" && !/-(db|cache|sftp)$/.test(n)).length;
+    return out.split("\n").filter((n) => n && n !== "aster-traefik" && n !== "aster-dns" && !/-(db|cache|sftp|redis)$/.test(n)).length;
   }
 }

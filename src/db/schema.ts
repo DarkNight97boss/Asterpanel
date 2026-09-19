@@ -465,6 +465,9 @@ export type WorkloadConfig = {
   buildCommand?: string;
   outputDir?: string;
   port?: number;
+  // wordpress: PHP limits and Redis object cache
+  php?: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number };
+  objectCache?: boolean;
   // wordpress: automatic updates
   autoUpdate?: "off" | "minor" | "all";
   autoUpdateLastAt?: string;

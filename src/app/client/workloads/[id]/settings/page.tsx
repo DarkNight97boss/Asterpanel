@@ -1,14 +1,15 @@
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, CardHeader, Field, Input, Select, Textarea } from "@/components/ui";
+import { Card, CardHeader, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
-import { readSecrets } from "@/platform/engine";
-import { destroy, saveCronJobs, saveSettings } from "../../../platform-actions";
+import { PHP_LIMITS, readSecrets } from "@/platform/engine";
+import { destroy, saveCronJobs, savePhp, saveSettings } from "../../../platform-actions";
 
 export default async function Settings({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
   const t = await getT();
   const c = w.config;
+  const php = c.php ?? { memoryLimitMb: 256, uploadMaxMb: 64, maxExecutionTime: 60, maxInputVars: 3000 };
   const env = Object.entries(readSecrets(w).env ?? {}).map(([k, v]) => `${k}=${v}`).join("\n");
   const git = w.type === "app" || w.type === "static";
 
@@ -49,6 +50,25 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
           </ActionForm>
         </div>
       </Card>
+
+      {w.type === "wordpress" && (
+        <Card>
+          <CardHeader title={t("PHP and performance")} description={t("Limits of PHP for this site, and an in-memory object cache that spares the database. Saving restarts the site for a few seconds.")} />
+          <div className="p-5">
+            <ActionForm action={savePhp}>
+              <input type="hidden" name="id" value={w.id} />
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <Field label={t("Memory limit (MB)")} hint={t("At most half of the site's RAM.")}><Input name="memoryLimitMb" type="number" min={PHP_LIMITS.memoryLimitMb[0]} max={PHP_LIMITS.memoryLimitMb[1]} defaultValue={php.memoryLimitMb} /></Field>
+                <Field label={t("Largest upload (MB)")}><Input name="uploadMaxMb" type="number" min={PHP_LIMITS.uploadMaxMb[0]} max={PHP_LIMITS.uploadMaxMb[1]} defaultValue={php.uploadMaxMb} /></Field>
+                <Field label={t("Longest request (seconds)")}><Input name="maxExecutionTime" type="number" min={PHP_LIMITS.maxExecutionTime[0]} max={PHP_LIMITS.maxExecutionTime[1]} defaultValue={php.maxExecutionTime} /></Field>
+                <Field label="max_input_vars"><Input name="maxInputVars" type="number" min={PHP_LIMITS.maxInputVars[0]} max={PHP_LIMITS.maxInputVars[1]} defaultValue={php.maxInputVars} /></Field>
+              </div>
+              <Checkbox name="objectCache" defaultChecked={!!c.objectCache} label={t("Redis object cache (installs and configures the Redis Object Cache plugin)")} />
+              <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+      )}
 
       {w.type === "app" && w.environment === "live" && (
         <Card>
