@@ -8,6 +8,8 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { requireAccount } from "@/lib/account";
 import { audit } from "@/lib/audit";
+import { rateLimit } from "@/lib/rate-limit";
+import { checkMailDns } from "@/lib/mail-check";
 import { DNS_TEMPLATES, parseZoneFile } from "@/platform/dns-tools";
 import { addDnsRecords, cleanDnsRecord, createZone, PlatformError, restoreZoneSnapshot, snapshotZone, syncDns, touchZone } from "@/platform/engine";
 
@@ -116,6 +118,20 @@ export async function restoreSnapshot(_: ActionState, form: FormData): Promise<A
     await restoreZoneSnapshot(zone.id, z.string().uuid().parse(form.get("snapshotId")), user.id);
     revalidatePath(`/client/dns/${zone.id}`);
     return { ok: "Restored" };
+  } catch (err) {
+    return fail(err);
+  }
+}
+
+/** Looks at the public DNS of the zone's domain, exactly as a receiving mail server would. */
+export async function checkEmailSetup(_: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const { zone } = await ownZone(form.get("zoneId"));
+    if (!rateLimit(`mailcheck:${zone.id}`, 10, 10 * 60_000)) return { error: "Too many attempts. Try again in a few minutes." };
+    const findings = await checkMailDns(zone.name);
+    const icon = { ok: "✓", warning: "!", problem: "✗" };
+    const text = findings.map((f) => `${icon[f.level]} ${f.text}`).join("\n");
+    return findings.some((f) => f.level === "problem") ? { error: text } : { ok: text };
   } catch (err) {
     return fail(err);
   }

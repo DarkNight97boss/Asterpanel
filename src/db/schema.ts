@@ -766,6 +766,9 @@ export const domainTlds = pgTable("domain_tlds", {
   registerPrice: integer("register_price").notNull(),
   renewPrice: integer("renew_price").notNull(),
   transferPrice: integer("transfer_price").notNull(),
+  /** First-year price of new registrations while the promotion lasts (null = none). */
+  promoPrice: integer("promo_price"),
+  promoUntil: timestamp("promo_until", { withTimezone: true }),
   enabled: boolean("enabled").notNull().default(true),
   sort: integer("sort").notNull().default(0),
 });

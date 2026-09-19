@@ -6,6 +6,7 @@ import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireArea } from "@/lib/auth";
 import { centsToInput, displayName, formatDate, formatMoney } from "@/lib/format";
+import { firstYearPrice } from "@/lib/domains";
 import { getSettings } from "@/lib/settings";
 import { registrarModules } from "@/modules/registrars";
 import { deleteTld, saveTld, syncDomainNow } from "./actions";
@@ -38,7 +39,7 @@ export default async function AdminDomains() {
                 <tr key={x.id}>
                   <Td className="font-medium">.{x.tld}</Td>
                   <Td className="text-body">{regName(x.registrar)}</Td>
-                  <Td>{money(x.registerPrice)}</Td>
+                  <Td>{money(x.registerPrice)}{firstYearPrice(x) < x.registerPrice && <span className="ml-2 text-xs text-success">{t("promo")} {money(x.promoPrice!)}{x.promoUntil && ` → ${formatDate(x.promoUntil, locale)}`}</span>}</Td>
                   <Td>{money(x.renewPrice)}</Td>
                   <Td>{money(x.transferPrice)}</Td>
                   <Td><StatusBadge status={x.enabled ? "active" : "stopped"} label={x.enabled ? t("On sale") : t("Hidden")} /></Td>
@@ -58,12 +59,14 @@ export default async function AdminDomains() {
             <div className="border-t border-border p-5">
               <ActionForm action={saveTld}>
                 <p className="text-sm text-muted">{t("Add an extension, or type an existing one to change it.")}</p>
-                <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-6">
+                <div className="grid gap-4 sm:grid-cols-3 xl:grid-cols-4">
                   <Field label={t("Extension")}><Input name="tld" required placeholder="com" /></Field>
                   <Field label={t("Registrar")}><Select name="registrar">{registrarModules.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
                   <Field label={t("Register")}><Input name="registerPrice" required inputMode="decimal" placeholder={centsToInput(1290)} /></Field>
                   <Field label={t("Renew")}><Input name="renewPrice" required inputMode="decimal" placeholder={centsToInput(1490)} /></Field>
                   <Field label={t("Transfer")}><Input name="transferPrice" required inputMode="decimal" placeholder={centsToInput(1190)} /></Field>
+                  <Field label={t("Promo first year")} hint={t("Empty = none")}><Input name="promoPrice" inputMode="decimal" /></Field>
+                  <Field label={t("Promo until")}><Input name="promoUntil" type="date" /></Field>
                   <Field label={t("Position")}><Input name="sort" type="number" min={0} defaultValue={tlds.length + 1} /></Field>
                 </div>
                 <Checkbox name="enabled" defaultChecked label={t("On sale")} />

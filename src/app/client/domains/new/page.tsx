@@ -45,7 +45,7 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
               <tr key={h.domain}>
                 <Td className="font-medium">{h.domain}</Td>
                 <Td>{h.available === null ? <span className="text-muted">{t("Could not check")}</span> : h.available ? <span className="text-success">● {t("Available")}</span> : <span className="text-muted">{t("Already registered")}</span>}</Td>
-                <Td>{money(h.available === false ? h.transferPrice : h.registerPrice)}</Td>
+                <Td>{money(h.available === false ? h.transferPrice : h.registerPrice)}{h.available !== false && h.listPrice && <span className="ml-2 text-xs text-muted line-through">{money(h.listPrice)}</span>}</Td>
                 <Td className="text-body">{money(h.renewPrice)} / {t("year")}</Td>
                 <Td className="text-right">
                   {h.available ? <ButtonLink href={link(h, "register")} size="sm">{t("Register")}</ButtonLink> : h.available === false ? <ButtonLink href={link(h, "transfer")} size="sm" variant="secondary">{t("Transfer")}</ButtonLink> : null}

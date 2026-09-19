@@ -174,3 +174,40 @@ test("CentralNic answers are parsed whatever the spacing and casing", async () =
   const r = parseCnr("[RESPONSE]\r\nCode=200\r\nDescription = OK = fine\r\nproperty[Registration Expiration Date][0]= 2027-01-01 00:00:00\r\nPROPERTY[nameserver][1] = b\r\nproperty[nameserver][0] = a\r\nEOF");
   assert.deepEqual(r, { code: 200, description: "OK = fine", props: { registrationexpirationdate: ["2027-01-01 00:00:00"], nameserver: ["a", "b"] } });
 });
+
+test("multi-year registrations and promotions: the promo covers the first year only, the registrar gets the years, renewal follows the expiry", async () => {
+  const db = await dbm.getDb();
+  await db.update(dbm.schema.domainTlds).set({ promoPrice: 490, promoUntil: new Date(Date.now() + 86_400_000) }).where(eq(dbm.schema.domainTlds.tld, "com"));
+  const [hit] = await domains.searchDomains("promo-years.com");
+  assert.deepEqual([hit.registerPrice, hit.listPrice, hit.renewPrice], [490, 1290, 1490]);
+
+  calls.length = 0;
+  const { invoiceId, domainId } = await domains.orderDomain({ clientId, companyId: null, domain: "promo-years.com", action: "register", contact, years: 3 });
+  const [invoice] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  assert.equal(invoice.subtotal, 490 + 2 * 1490);
+  const [item] = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, invoiceId));
+  assert.match(item.description, /promo-years\.com \(3 years\)/);
+  await billing.recordPayment({ invoiceId, gateway: "bank", externalId: "years", amount: invoice.total });
+  assert.equal(calls.find((c) => c.params.command === "AddDomain")!.params.period, "3");
+  const [d] = await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, domainId));
+  const [svc] = await db.select().from(dbm.schema.services).where(eq(dbm.schema.services.id, d.serviceId!));
+  assert.equal(svc.nextDueDate?.toISOString(), d.expiresAt?.toISOString(), "billed again when the registry says it expires");
+  assert.equal(svc.amount, 1490);
+
+  await db.update(dbm.schema.domainTlds).set({ promoUntil: new Date(Date.now() - 1000) }).where(eq(dbm.schema.domainTlds.tld, "com"));
+  assert.equal((await domains.searchDomains("after-promo.com"))[0].registerPrice, 1290, "an expired promotion is ignored");
+  const big = await domains.orderDomain({ clientId, companyId: null, domain: "too-many-years.com", action: "register", contact, years: 50 });
+  assert.equal((await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, big.invoiceId)))[0].subtotal, 1290 + 4 * 1490, "capped at five years");
+});
+
+test("email check: judges MX, SPF and DMARC like a receiving server would", async () => {
+  const { judgeMailDns } = await import("../src/lib/mail-check");
+  const levels = (dns: Parameters<typeof judgeMailDns>[0]) => judgeMailDns(dns).map((f) => f.level);
+  assert.deepEqual(levels({ mx: [{ exchange: "smtp.google.com", priority: 1 }], txt: ["google-site-verification=x", "v=spf1 include:_spf.google.com ~all"], dmarc: ["v=DMARC1; p=reject"] }), ["ok", "ok", "ok"]);
+  assert.deepEqual(levels({ mx: [], txt: [], dmarc: [] }), ["problem", "problem", "warning"]);
+  assert.deepEqual(levels({ mx: [{ exchange: "mx.a.it", priority: 10 }], txt: ["v=spf1 +all"], dmarc: ["v=DMARC1; p=none"] }), ["ok", "problem", "warning"]);
+  assert.deepEqual(levels({ mx: [{ exchange: "mx.a.it", priority: 10 }], txt: ["v=spf1 mx -all", "v=spf1 a -all"], dmarc: ["v=DMARC1; pct=100"] }), ["ok", "problem", "problem"]);
+  const many = `v=spf1 ${Array.from({ length: 11 }, (_, i) => `include:s${i}.example.net`).join(" ")} -all`;
+  assert.ok(judgeMailDns({ mx: [{ exchange: "mx.a.it", priority: 10 }], txt: [many], dmarc: [] }).some((f) => /11 DNS lookups/.test(f.text)));
+  assert.match(judgeMailDns({ mx: [{ exchange: "", priority: 0 }], txt: ["v=spf1 -all"], dmarc: ["v=DMARC1; p=reject"] })[0].text, /Null MX/);
+});

@@ -95,7 +95,12 @@ const readable = (err: unknown) => (err instanceof RegistrarError || err instanc
 
 // ─── Search ──────────────────────────────────────────────────────────────────
 
-export type SearchHit = { domain: string; tld: string; available: boolean | null; registerPrice: number; renewPrice: number; transferPrice: number };
+export type SearchHit = { domain: string; tld: string; available: boolean | null; registerPrice: number; renewPrice: number; transferPrice: number; /** The list price, when `registerPrice` is a promotion. */ listPrice?: number };
+
+export const MAX_YEARS = 5;
+
+/** What the first year of a new registration costs today. */
+export const firstYearPrice = (tld: { registerPrice: number; promoPrice: number | null; promoUntil: Date | null }, now = new Date()) => (tld.promoPrice != null && (!tld.promoUntil || tld.promoUntil > now) ? tld.promoPrice : tld.registerPrice);
 
 /** `example` checks every TLD on sale; `example.it` puts that one first. */
 export async function searchDomains(query: string): Promise<SearchHit[]> {
@@ -120,7 +125,7 @@ export async function searchDomains(query: string): Promise<SearchHit[]> {
       }
     }),
   );
-  return ordered.map((t) => ({ domain: `${sld}.${t.tld}`, tld: t.tld, available: taken.has(`${sld}.${t.tld}`) ? false : (hits.get(`${sld}.${t.tld}`) ?? null), registerPrice: t.registerPrice, renewPrice: t.renewPrice, transferPrice: t.transferPrice }));
+  return ordered.map((t) => ({ domain: `${sld}.${t.tld}`, tld: t.tld, available: taken.has(`${sld}.${t.tld}`) ? false : (hits.get(`${sld}.${t.tld}`) ?? null), registerPrice: firstYearPrice(t), listPrice: firstYearPrice(t) < t.registerPrice ? t.registerPrice : undefined, renewPrice: t.renewPrice, transferPrice: t.transferPrice }));
 }
 
 // ─── Ordering ────────────────────────────────────────────────────────────────
@@ -136,7 +141,7 @@ async function domainProduct(): Promise<string> {
   return product.id;
 }
 
-export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string }): Promise<{ invoiceId: string; domainId: string }> {
+export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string; /** Registrations only: 1 to 5 years paid up front. */ years?: number }): Promise<{ invoiceId: string; domainId: string }> {
   const db = await getDb();
   const tlds = await db.select().from(schema.domainTlds).where(eq(schema.domainTlds.enabled, true));
   const parts = splitDomain(input.domain, tlds.map((t) => t.tld));
@@ -158,7 +163,9 @@ export async function orderDomain(input: { clientId: string; companyId: string |
 
   const settings = await getSettings("registrars");
   const { placeOrder } = await import("./billing");
-  const first = input.action === "register" ? tld.registerPrice : tld.transferPrice;
+  const years = input.action === "register" ? Math.min(MAX_YEARS, Math.max(1, Math.round(input.years ?? 1))) : 1;
+  // The promotion covers the first year; further years are at the renewal price.
+  const first = input.action === "register" ? firstYearPrice(tld) + (years - 1) * tld.renewPrice : tld.transferPrice;
   const { invoiceId, serviceId } = await placeOrder({
     clientId: input.clientId,
     companyId: input.companyId,
@@ -166,9 +173,9 @@ export async function orderDomain(input: { clientId: string; companyId: string |
     cycle: "annually",
     domain: parts.name,
     ip: input.ip,
-    pricing: { first, recurring: tld.renewPrice, label: input.action === "register" ? "Domain registration" : "Domain transfer" },
+    pricing: { first, recurring: tld.renewPrice, label: input.action === "register" ? "Domain registration" : "Domain transfer", period: years > 1 ? `${years} years` : undefined },
     // The transfer code is a secret of the customer's: encrypted until used.
-    request: { action: input.action, authCode: authCode ? encryptJson(authCode) : "" },
+    request: { action: input.action, years, authCode: authCode ? encryptJson(authCode) : "" },
   });
   const row = { companyId: input.companyId, clientId: input.clientId, serviceId, registrar: tld.registrar, status: "pending" as const, statusMessage: "", contact: contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
   const [domain] = existing
@@ -188,7 +195,7 @@ async function byService(serviceId: string) {
 
 const DEFAULT_NS_HINT = "Set the default name servers in the registrar settings first";
 
-export async function provisionDomain(serviceId: string, request: { action?: string; authCode?: string }): Promise<void> {
+export async function provisionDomain(serviceId: string, request: { action?: string; authCode?: string; years?: number }): Promise<void> {
   const db = await getDb();
   const d = await byService(serviceId);
   // A retry after a half-finished attempt must not register (and pay for) the name twice.
@@ -202,12 +209,15 @@ export async function provisionDomain(serviceId: string, request: { action?: str
       await mod.transfer(creds, { domain: d.name, authCode: decryptJson<string>(request.authCode ?? "", ""), contact, nameservers }, http);
       await db.update(schema.domainNames).set({ status: "transferring", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
     } else {
-      await mod.register(creds, { domain: d.name, years: 1, contact, nameservers }, http);
+      await mod.register(creds, { domain: d.name, years: Math.min(MAX_YEARS, Math.max(1, Number(request.years) || 1)), contact, nameservers }, http);
       await db.update(schema.domainNames).set({ status: "active", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
       emitEvent(d.companyId, "domain.registered", { domain: d.name });
     }
     await hostZone(d, nameservers).catch(() => {});
     await syncDomain(d.id).catch(() => {});
+    // The next invoice follows the registry's expiry date, not the day the order happened to be paid.
+    const [synced] = await db.select({ expiresAt: schema.domainNames.expiresAt }).from(schema.domainNames).where(eq(schema.domainNames.id, d.id));
+    if (synced?.expiresAt && synced.expiresAt > new Date()) await db.update(schema.services).set({ nextDueDate: synced.expiresAt }).where(eq(schema.services.id, serviceId));
   } catch (err) {
     await db.update(schema.domainNames).set({ status: "failed", statusMessage: readable(err).slice(0, 300) }).where(eq(schema.domainNames.id, d.id));
     throw err;
