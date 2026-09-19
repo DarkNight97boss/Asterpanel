@@ -12,7 +12,7 @@ let settings: typeof import("../src/lib/settings");
 let clientId: string, companyId: string, productId: string;
 
 const calls: { method: string; url: string; body: string; headers: Record<string, string> }[] = [];
-let outcome = "delivered";
+const outcome = "delivered";
 let refuse = false;
 const fake = (async (url: string, init: RequestInit = {}) => {
   calls.push({ method: init.method ?? "GET", url, body: String(init.body ?? ""), headers: (init.headers ?? {}) as Record<string, string> });
