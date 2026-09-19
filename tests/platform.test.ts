@@ -940,3 +940,25 @@ test("PHP error log comes back as text for the tools page", async () => {
   const [job] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId));
   assert.match(JSON.parse(String(job.result.output)).errorLog, /PHP Fatal error: {2}Uncaught TypeError/);
 });
+
+test("app scale: copies, workers and persistent folders are validated and reach the node; previews stay single", async () => {
+  const id = await engine.createWorkload({ clientId, type: "app", name: "Scaled", config: { repoUrl: "https://github.com/acme/scaled.git", branch: "main", port: 3000 } });
+  await drain();
+  const save = (o: Partial<{ instances: number; workers: string; volumes: string }>) => engine.saveAppScale(id, { instances: 1, workers: "", volumes: "", ...o });
+  for (const [o, why] of [[{ workers: "Queue: node w.js" }, /name: command/], [{ workers: "q: a\nq: b" }, /Two workers/], [{ workers: "a: x\nb: x\nc: x\nd: x" }, /Up to 3 workers/], [{ volumes: "relative/path" }, /Not a valid folder/], [{ volumes: "/etc/ssl" }, /Not a valid folder/], [{ volumes: "/app/../etc" }, /Not a valid folder/], [{ volumes: "/a\n/b\n/c\n/d" }, /Up to 3 persistent/]] as const) await assert.rejects(save(o), why, JSON.stringify(o));
+
+  await save({ instances: 99, workers: "queue: node worker.js --concurrency 4\nmailer: python -m app.mailer", volumes: "/app/uploads/\n/data" });
+  assert.deepEqual((await engine.buildSpec(id)).scale, { instances: 5, workers: [{ name: "queue", command: "node worker.js --concurrency 4" }, { name: "mailer", command: "python -m app.mailer" }], volumes: ["/app/uploads", "/data"] });
+  await drain();
+  const db = await dbm.getDb();
+  const job = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id))).filter((j) => j.type === "workload.update").at(-1)!;
+  assert.match(job.log, /5 instance\(s\), workers: queue, mailer, volumes: \/app\/uploads, \/data/);
+
+  await engine.setPreviews(id, true);
+  const { id: previewId } = await engine.handlePush(id, engine.parsePush({ ref: "refs/heads/feat" }));
+  const scale = (await engine.buildSpec(previewId!)).scale!;
+  assert.deepEqual([scale.instances, scale.workers], [1, []], "a preview does not process production queues");
+  await drain();
+  await engine.setPreviews(id, false);
+  await drain();
+});

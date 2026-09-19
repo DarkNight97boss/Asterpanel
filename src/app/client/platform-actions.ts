@@ -247,6 +247,17 @@ export async function savePhp(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Saved. The site restarts with the new settings." };
 }
 
+export async function saveScale(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    await engine.saveAppScale(workload.id, { instances: Number(form.get("instances")), workers: String(form.get("workers") ?? "").slice(0, 3000), volumes: String(form.get("volumes") ?? "").slice(0, 1000) }, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved. The app is re-released with the new setup, without downtime." };
+}
+
 export async function saveCronJobs(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   try {
@@ -353,7 +364,7 @@ export async function runTool(_: ActionState, form: FormData): Promise<ActionSta
 export async function fetchLogs(form: FormData) {
   const { workload } = await requireWorkload(String(form.get("id")));
   const jobId = await engine.requestLogs(workload.id, 300);
-  redirect(`/client/workloads/${workload.id}/logs?job=${jobId}`);
+  redirect(`/client/workloads/${workload.id}/logs?job=${jobId}${form.get("live") === "1" ? "&live=1" : ""}`);
 }
 
 export async function saveSettings(_: ActionState, form: FormData): Promise<ActionState> {

@@ -490,11 +490,18 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
   async start(spec: WorkloadSpec, log: Log) {
     const { name } = this.check(spec);
     for (const c of [`${name}-db`, name, `${name}-cache`, `${name}-sftp`]) if (await this.exists("container", c)) await this.docker(["start", c], log);
+    for (const c of await this.satellites(name)) await this.docker(["start", c], log).catch(() => {});
     return {};
+  }
+
+  /** Extra copies (`-r-N`) and workers (`-w-name`) of an app. */
+  private async satellites(name: string) {
+    return (await this.docker(["ps", "-a", "--filter", `name=^${name}-(r|w)-`, "--format", "{{.Names}}"], undefined, { quiet: true }).catch(() => "")).split("\n").filter(Boolean);
   }
 
   async stop(spec: WorkloadSpec, log: Log) {
     const { name } = this.check(spec);
+    for (const c of await this.satellites(name)) await this.docker(["stop", c], log).catch(() => {});
     await rm(this.cronFile(spec), { force: true });
     for (const c of [`${name}-sftp`, `${name}-cache`, `${name}-redis`, name, `${name}-db`]) if (await this.exists("container", c)) await this.docker(["stop", c], log);
     return {};
@@ -503,8 +510,8 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
   async remove(spec: WorkloadSpec, log: Log) {
     const { name, net } = this.check(spec);
     log("removing containers, volumes, images and backups");
-    for (const c of [`${name}-sftp`, `${name}-cache`, `${name}-redis`, name, `${name}-db`]) await this.rmContainer(c);
-    for (const v of [`${name}-files`, `${name}-db`, `${name}-data`, `${name}-site`, `${name}-cache`]) if (await this.exists("volume", v)) await this.docker(["volume", "rm", "-f", v]);
+    for (const c of [...(await this.satellites(name)), `${name}-next`, `${name}-sftp`, `${name}-cache`, `${name}-redis`, name, `${name}-db`]) await this.rmContainer(c);
+    for (const v of [`${name}-files`, `${name}-db`, `${name}-data`, `${name}-site`, `${name}-cache`, `${name}-vol0`, `${name}-vol1`, `${name}-vol2`]) if (await this.exists("volume", v)) await this.docker(["volume", "rm", "-f", v]);
     if (await this.exists("network", net)) await this.docker(["network", "rm", net]).catch(() => {});
     await this.docker(["image", "rm", "-f", `${name}:current`], undefined, { quiet: true }).catch(() => {});
     await rm(path.join(this.opts.dataDir, "backups", spec.slug), { recursive: true, force: true });
@@ -632,9 +639,13 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     const port = spec.source?.port ?? 8080;
     const env = { ...spec.env, PORT: String(port) };
     const next = `${name}-next`;
+    const scale = spec.scale ?? { instances: 1, workers: [], volumes: [] };
+    // Persistent folders are named volumes shared by every copy and worker; they outlive deploys.
+    const mounts = scale.volumes.filter((v) => /^\/[\w.-]+(\/[\w.-]+)*$/.test(v)).slice(0, 3).flatMap((v, i) => ["-v", `${name}-vol${i}:${v}`]);
+    const run = (container: string, extra: string[], cmd: string[] = []) => this.docker(["run", "-d", "--name", container, "--network", net, "--restart", "unless-stopped", ...this.limits(spec), ...mounts, ...this.envArgs(env), ...extra, `${name}:current`, ...cmd], log, { env });
     await this.ensureNetwork(tenantNet);
     await this.rmContainer(next);
-    await this.docker(["run", "-d", "--name", next, "--network", net, ...this.limits(spec), ...this.envArgs(env), ...this.route(spec, port), `${name}:current`], log, { env });
+    await run(next, this.route(spec, port));
     await this.docker(["network", "connect", tenantNet, next]); // reach the tenant's databases by name
     try {
       await this.waitHealthy(next, net, port, log, spec.source?.healthPath);
@@ -646,7 +657,26 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     }
     await this.docker(["network", "connect", PROXY_NET, next]);
     await this.rmContainer(name);
-    await this.docker(["rename", next, name]);    await this.saveCrons(spec);
+    await this.docker(["rename", next, name]);
+
+    // Extra copies and workers follow the first healthy one; leftovers from a larger previous setup are removed.
+    const existing = (await this.docker(["ps", "-a", "--filter", `name=^${name}-(r|w)-`, "--format", "{{.Names}}"], undefined, { quiet: true }).catch(() => "")).split("\n").filter(Boolean);
+    for (const old of existing) await this.rmContainer(old);
+    for (let i = 2; i <= Math.min(5, scale.instances); i++) {
+      const replica = `${name}-r-${i}`;
+      await run(replica, this.route(spec, port));
+      await this.docker(["network", "connect", tenantNet, replica]);
+      await this.docker(["network", "connect", PROXY_NET, replica]);
+    }
+    for (const worker of scale.workers.slice(0, 3)) {
+      if (!/^[a-z][a-z0-9-]{0,19}$/.test(worker.name)) continue;
+      const container = `${name}-w-${worker.name}`;
+      log(`starting worker ${worker.name}`);
+      // The command is data for `sh -c` inside the customer's own image.
+      await this.docker(["run", "-d", "--name", container, "--network", net, "--restart", "unless-stopped", ...this.limits(spec), ...mounts, ...this.envArgs({ ...env, ASTER_WORKER: worker.command }), `${name}:current`, "sh", "-c", "exec sh -c \"$ASTER_WORKER\""], log, { env: { ...env, ASTER_WORKER: worker.command } });
+      await this.docker(["network", "connect", tenantNet, container]);
+    }
+    await this.saveCrons(spec);
   }
 
   /** Any HTTP answer below 500 counts: an app without a "/" route is still up. */
@@ -1289,7 +1319,7 @@ mv "$ROOT" /work/root
     const bySlug = new Map<string, { slug: string; cpuPercent: number; memMb: number; rxMb: number; txMb: number }>();
     for (const line of out.split("\n")) {
       const [name, cpu, mem, net] = line.split("|");
-      const slug = /^aster-(.+?)(-db|-cache|-sftp|-redis)?$/.exec(name ?? "")?.[1];
+      const slug = /^aster-(.+?)(-db|-cache|-sftp|-redis|-next|-r-\d|-w-[a-z0-9-]+)?$/.exec(name ?? "")?.[1];
       if (!slug || slug === "traefik" || slug === "dns" || !net) continue;
       const row = bySlug.get(slug) ?? { slug, cpuPercent: 0, memMb: 0, rxMb: 0, txMb: 0 };
       row.cpuPercent += parseFloat(cpu) || 0; // site + its database container
@@ -1302,6 +1332,6 @@ mv "$ROOT" /work/root
 
   async workloadCount() {
     const out = await this.docker(["ps", "-a", "--filter", "name=^aster-", "--format", "{{.Names}}"], undefined, { quiet: true });
-    return out.split("\n").filter((n) => n && n !== "aster-traefik" && n !== "aster-dns" && !/-(db|cache|sftp|redis)$/.test(n)).length;
+    return out.split("\n").filter((n) => n && n !== "aster-traefik" && n !== "aster-dns" && !/-(db|cache|sftp|redis|next|r-\d|w-[a-z0-9-]+)$/.test(n)).length;
   }
 }

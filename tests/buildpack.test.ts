@@ -25,3 +25,14 @@ test("buildpacks recognise the common stacks and honour versions, lockfiles and 
   assert.equal(detectBuildpack(repo({ "index.html": "" }), 80)!.name, "Static files (nginx)");
   assert.equal(detectBuildpack(repo({ "README.md": "" }), 3000), null);
 });
+
+test("buildpacks put dependencies in their own layer so deploys re-use them, unless install hooks need the sources", () => {
+  const order = (df: string, ...parts: string[]) => parts.map((p) => df.indexOf(p)).every((v, i, a) => v >= 0 && (i === 0 || v > a[i - 1]));
+  const node = detectBuildpack(repo({ "package.json": JSON.stringify({ scripts: { start: "node ." } }), "package-lock.json": "" }), 3000)!.dockerfile;
+  assert.ok(order(node, "COPY package.json package-lock.json ./", "RUN npm ci", "COPY . ."), node);
+  const hooked = detectBuildpack(repo({ "package.json": JSON.stringify({ scripts: { start: "node .", postinstall: "node scripts/build.js" } }), "package-lock.json": "" }), 3000)!.dockerfile;
+  assert.ok(order(hooked, "COPY . .", "RUN npm ci") && !hooked.includes("COPY package.json"), "a postinstall script may read the repository");
+  const py = detectBuildpack(repo({ "requirements.txt": "flask\n", "app.py": "" }), 5000)!.dockerfile;
+  assert.ok(order(py, "COPY requirements.txt ./", "RUN pip install --no-cache-dir -r requirements.txt && pip install --no-cache-dir gunicorn", "COPY . .", "USER app"), py);
+  assert.ok(!py.includes("\\n"), "real newlines, not escaped ones");
+});

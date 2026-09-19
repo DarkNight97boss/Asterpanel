@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
-import { DB_VERSIONS, PHP_LIMITS, readSecrets } from "@/platform/engine";
-import { dbAdmin, destroy, saveCronJobs, savePhp, saveProtection, saveSettings } from "../../../platform-actions";
+import { DB_VERSIONS, MAX_INSTANCES, PHP_LIMITS, readSecrets } from "@/platform/engine";
+import { dbAdmin, destroy, saveCronJobs, saveScale, savePhp, saveProtection, saveSettings } from "../../../platform-actions";
 
 export default async function Settings({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -131,6 +131,23 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
                 <Field label="max_input_vars"><Input name="maxInputVars" type="number" min={PHP_LIMITS.maxInputVars[0]} max={PHP_LIMITS.maxInputVars[1]} defaultValue={php.maxInputVars} /></Field>
               </div>
               <Checkbox name="objectCache" defaultChecked={!!c.objectCache} label={t("Redis object cache (installs and configures the Redis Object Cache plugin)")} />
+              <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+      )}
+
+      {w.type === "app" && w.environment === "live" && (
+        <Card>
+          <CardHeader title={t("Processes and storage")} description={t("More copies share the traffic; workers run the same image with another command (queues, schedulers); persistent folders keep their content across deploys and are shared by all copies.")} />
+          <div className="p-5">
+            <ActionForm action={saveScale}>
+              <input type="hidden" name="id" value={w.id} />
+              <Field label={t("Copies serving traffic")} className="max-w-40"><Select name="instances" defaultValue={String(c.instances ?? 1)}>{Array.from({ length: MAX_INSTANCES }, (_, i) => <option key={i}>{i + 1}</option>)}</Select></Field>
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Field label={t("Workers")} hint={t("One per line, as name: command. Up to 3. They get no traffic.")}><Textarea name="workers" rows={3} className="font-mono text-xs" defaultValue={(c.workers ?? []).map((x) => `${x.name}: ${x.command}`).join("\n")} placeholder={"queue: node worker.js\nmailer: python -m app.mailer"} /></Field>
+                <Field label={t("Persistent folders")} hint={t("Absolute paths inside the container, one per line. Up to 3. Everything else is replaced at each deploy.")}><Textarea name="volumes" rows={3} className="font-mono text-xs" defaultValue={(c.volumes ?? []).join("\n")} placeholder={"/app/uploads\n/data"} /></Field>
+              </div>
               <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
             </ActionForm>
           </div>

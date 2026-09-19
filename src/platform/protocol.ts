@@ -50,6 +50,8 @@ export type WorkloadSpec = {
   env?: Record<string, string>;
   /** Browser-facing extras at the proxy: HSTS, and HTTP basic auth in front of everything (`hash` is an htpasswd `{SHA}` value). */
   edge?: { hsts?: boolean; basicAuth?: { user: string; hash: string } };
+  /** Apps: copies behind the load balancer, background processes from the same image, persistent folders. */
+  scale?: { instances: number; workers: { name: string; command: string }[]; volumes: string[] };
   /** Apps: commands the agent runs inside the container on a schedule. */
   crons?: { schedule: string; command: string }[];
   /** Edge rules applied by the node's proxy. `from` is a path, `to` a path or absolute URL. */

@@ -4,11 +4,14 @@ import { Button, Card, CardHeader } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
+import { LiveLogs } from "@/components/live-logs";
 import { fetchLogs } from "../../../platform-actions";
 
-export default async function Logs({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ job?: string }> }) {
+export default async function Logs({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ job?: string; live?: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
-  const jobId = (await searchParams).job ?? "";
+  const sp = await searchParams;
+  const jobId = sp.job ?? "";
+  const live = sp.live === "1";
   const db = await getDb();
   const t = await getT();
   const [job] = /^[0-9a-f-]{36}$/i.test(jobId)
@@ -19,12 +22,15 @@ export default async function Logs({ params, searchParams }: { params: Promise<{
   return (
     <Card className="overflow-hidden">
       <AutoRefresh active={pending} intervalMs={1500} />
+      {/* Live: once the current fetch is shown, ask for the next one a few seconds later. */}
+      {live && !pending && w.status === "running" && <LiveLogs workloadId={w.id} />}
       <CardHeader
         title={t("Container logs")}
         description={t("Last 300 lines, fetched from the server on demand.")}
         action={
-          <form action={fetchLogs}>
+          <form action={fetchLogs} className="flex items-center gap-2">
             <input type="hidden" name="id" value={w.id} />
+            <label className="flex items-center gap-1.5 text-sm text-muted"><input type="checkbox" name="live" value="1" defaultChecked={live} className="accent-(--accent)" />{t("Live")}</label>
             <Button variant="secondary" disabled={pending || w.status === "creating"}>{pending ? t("Fetching logs…") : job ? t("Refresh") : t("Load logs")}</Button>
           </form>
         }
