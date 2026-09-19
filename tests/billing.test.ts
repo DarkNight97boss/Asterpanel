@@ -134,3 +134,25 @@ test("companies own what they order: service, invoice and renewal follow the com
   const renewals = (await db.select().from(dbm.schema.invoices)).filter((i) => i.companyId === co.id && i.id !== invoiceId);
   assert.equal(renewals.length, 1);
 });
+
+test("credit notes: a paid invoice is reversed by a numbered document of its own, once, without touching services", async () => {
+  const db = await dbm.getDb();
+  const { invoiceId, serviceId } = await billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "credit.com" });
+  await assert.rejects(billing.issueCreditNote(invoiceId, "changed mind"), /Only paid invoices/);
+  const [inv] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  await billing.recordPayment({ invoiceId, gateway: "bank", externalId: "cn-1", amount: inv.total });
+
+  const creditId = await billing.issueCreditNote(invoiceId, "Duplicate order");
+  const [credit] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, creditId));
+  const [after] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  assert.deepEqual([credit.kind, credit.creditsInvoiceId, credit.total, credit.status, after.status], ["credit_note", invoiceId, inv.total, "paid", "refunded"]);
+  assert.equal(credit.fiscalYear, inv.fiscalYear);
+  assert.ok(credit.number > inv.number, "same gapless series");
+  assert.match(credit.notes, /Duplicate order/);
+  const items = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, creditId));
+  assert.ok(items.length > 0 && items.every((i) => i.serviceId === null));
+  const [svc] = await db.select().from(dbm.schema.services).where(eq(dbm.schema.services.id, serviceId));
+  assert.equal(svc.status, "active", "staff decides separately what happens to the service");
+  await assert.rejects(billing.issueCreditNote(invoiceId, ""), /Only paid invoices/, "cannot be credited twice");
+  await assert.rejects(billing.issueCreditNote(creditId, ""), /Invoice not found/, "a credit note cannot be credited");
+});

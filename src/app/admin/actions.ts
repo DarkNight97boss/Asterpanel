@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type Pricing } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireArea } from "@/lib/auth";
-import { activateService, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
+import { activateService, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
 import { platformHomeBlocks, seedFooterColumns, seedPlatformPlans } from "@/lib/install";
@@ -149,6 +149,18 @@ export async function cancelInvoice(form: FormData) {
   await db.update(schema.invoices).set({ status: "cancelled" }).where(sql`${schema.invoices.id} = ${id} and ${schema.invoices.status} = 'unpaid'`);
   await audit(staff.id, "invoice.cancelled", "invoice", id);
   revalidatePath(`/admin/invoices/${id}`);
+}
+
+export async function creditInvoice(_: ActionState, form: FormData): Promise<ActionState> {
+  const staff = await requireArea("billing");
+  let creditId: string;
+  try {
+    creditId = await issueCreditNote(uuid.parse(form.get("invoiceId")), String(form.get("reason") ?? "").trim(), staff.id);
+  } catch (err) {
+    if (err instanceof BillingError) return { error: err.message };
+    throw err;
+  }
+  redirect(`/admin/invoices/${creditId}`);
 }
 
 // ─── Tickets ─────────────────────────────────────────────────────────────────

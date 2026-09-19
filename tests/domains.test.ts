@@ -53,6 +53,7 @@ before(async () => {
   domains.setRegistrarHttpForTests(fakeHttp);
   const db = await dbm.getDb();
   [{ id: clientId }] = await db.insert(dbm.schema.users).values({ email: "d@example.test", passwordHash: "x", firstName: "Mario" }).returning();
+  await updateSettings("dns", { nameservers: ["ns1.aster.test", "ns2.aster.test"], hostmaster: "" });
   await updateSettings("registrars", { accounts: { centralnic: { login: "reseller", password: "pw", sandbox: "1" }, internetbs: { apiKey: "key", password: "pw", sandbox: "1" } }, nameservers: ["ns1.aster.test", "ns2.aster.test"] });
   await db.insert(dbm.schema.domainTlds).values([
     { tld: "com", registrar: "centralnic", registerPrice: 1290, renewPrice: 1490, transferPrice: 1190, sort: 1 },
@@ -107,6 +108,8 @@ test("register: invoiced at the register price, registered on payment, renewed y
   assert.deepEqual([d.status, d.expiresAt?.toISOString(), d.locked, d.nameservers], ["active", "2027-09-19T10:00:00.000Z", true, ["ns1.aster.test", "ns2.aster.test"]]);
   const [svc] = await db.select().from(dbm.schema.services).where(eq(dbm.schema.services.id, d.serviceId!));
   assert.deepEqual([svc.status, svc.amount, svc.billingCycle], ["active", 1490, "annually"]);
+  const zones = await db.select().from(dbm.schema.dnsZones);
+  assert.deepEqual(zones.map((z) => [z.name, z.clientId]), [["aster-demo.com", clientId]], "our name servers: the DNS zone is ready right away");
 
   // Renewal: the billing run invoices it, paying renews at the registrar with the expiry-year guard.
   await billing.runAutomation(new Date(svc.nextDueDate!.getTime() - 86_400_000));

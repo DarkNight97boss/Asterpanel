@@ -6,7 +6,7 @@ import type { BillingCycle } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
 import { decryptJson } from "./crypto";
-import { addCycle, CYCLE_LABEL } from "./format";
+import { addCycle, CYCLE_LABEL, invoiceLabel } from "./format";
 import { mailConfigured } from "./mail/transport";
 import { notify } from "./notify";
 import { getSettings } from "./settings";
@@ -176,6 +176,33 @@ export async function recordPayment(input: {
     await fulfilInvoice(input.invoiceId);
   }
   return { paid: outcome.paid, duplicate: outcome.duplicate };
+}
+
+/**
+ * Reverses a paid invoice in full with a credit note (a document of its own in
+ * the same numbering series) and marks the invoice refunded. Bookkeeping only:
+ * the money itself is sent back from the gateway's dashboard.
+ */
+export async function issueCreditNote(invoiceId: string, reason: string, actorId: string | null = null): Promise<string> {
+  const db = await getDb();
+  const t = makeT((await getSettings("general")).locale);
+  const prefix = (await getSettings("billing")).invoicePrefix;
+  const creditId = await db.transaction(async (tx) => {
+    const [inv] = await tx.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId)).for("update");
+    if (!inv || inv.kind !== "invoice") throw new BillingError("Invoice not found");
+    if (inv.status !== "paid") throw new BillingError("Only paid invoices can be credited; cancel an unpaid one instead");
+    const items = await tx.select().from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, inv.id));
+    const [credit] = await tx
+      .insert(schema.invoices)
+      .values({ ...(await nextInvoiceNumber(tx)), kind: "credit_note", creditsInvoiceId: inv.id, clientId: inv.clientId, companyId: inv.companyId, status: "paid", paidAt: new Date(), currency: inv.currency, subtotal: inv.subtotal, taxRate: inv.taxRate, tax: inv.tax, total: inv.total, dueDate: new Date(), notes: `${t("Credit note for invoice {number}", { number: invoiceLabel(prefix, inv) })}${reason ? ` — ${reason.slice(0, 300)}` : ""}` })
+      .returning({ id: schema.invoices.id });
+    // Lines are copied without their service link: a credit note never activates or renews anything.
+    await tx.insert(schema.invoiceItems).values(items.map((i) => ({ invoiceId: credit.id, kind: "custom" as const, description: i.description, amount: i.amount })));
+    await tx.update(schema.invoices).set({ status: "refunded" }).where(eq(schema.invoices.id, inv.id));
+    return credit.id;
+  });
+  await audit(actorId, "invoice.credited", "invoice", invoiceId, { creditNoteId: creditId });
+  return creditId;
 }
 
 /** Applies the effects of a paid invoice to the services it bills. */

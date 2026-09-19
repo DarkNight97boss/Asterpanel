@@ -5,7 +5,7 @@ import { Button, buttonClass, Card, Field, Input } from "@/components/ui";
 import { getT } from "@/i18n";
 import { centsToInput } from "@/lib/format";
 import { loadInvoice } from "@/lib/invoices";
-import { addPayment, cancelInvoice, resendInvoiceEmail } from "../../actions";
+import { addPayment, cancelInvoice, creditInvoice, resendInvoiceEmail } from "../../actions";
 import { requireArea } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 
@@ -50,6 +50,17 @@ export default async function AdminInvoice({ params }: { params: Promise<{ id: s
               <Button variant="secondary" className="w-full">{t("Cancel invoice")}</Button>
             </form>
           </>
+        )}
+        {invoice.status === "paid" && invoice.kind === "invoice" && (
+          <Card className="p-5">
+            <h2 className="mb-1 font-semibold">{t("Credit note")}</h2>
+            <p className="mb-3 text-xs text-muted">{t("Reverses this invoice in full with a numbered credit note. The money itself is refunded from the payment gateway.")}</p>
+            <ActionForm action={creditInvoice}>
+              <input type="hidden" name="invoiceId" value={invoice.id} />
+              <Field label={t("Reason")}><Input name="reason" maxLength={300} /></Field>
+              <SubmitButton variant="secondary" className="w-full">{t("Issue credit note")}</SubmitButton>
+            </ActionForm>
+          </Card>
         )}
       </div>
     </div>

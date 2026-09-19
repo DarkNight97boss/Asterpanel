@@ -57,7 +57,8 @@ export type JobPayloads = {
   "workload.delete": { spec: WorkloadSpec };
   /** Copies files + database of `from` into `spec` (staging ⇄ live). */
   "workload.clone": { spec: WorkloadSpec; from: WorkloadSpec };
-  "workload.deploy": { spec: WorkloadSpec; deploymentId: string };
+  /** With `rollbackTo`, nothing is built: the image kept from that deployment goes live again. */
+  "workload.deploy": { spec: WorkloadSpec; deploymentId: string; rollbackTo?: string; /** Deployments whose images the node should keep for rollbacks. */ keepImages?: string[] };
   "workload.logs": { spec: WorkloadSpec; lines: number };
   "workload.tool": { spec: WorkloadSpec; tool: ToolName; args?: Record<string, string> };
   /** Request-level performance report from the proxy's access log. */

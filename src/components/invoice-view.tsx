@@ -16,7 +16,7 @@ export async function InvoiceView({ invoice }: { invoice: LoadedInvoice }) {
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div>
           <p className="text-2xl font-bold tracking-tight">
-            {t("Invoice")} {invoiceLabel(billing.invoicePrefix, invoice)}
+            {t(invoice.kind === "credit_note" ? "Credit note" : "Invoice")} {invoiceLabel(billing.invoicePrefix, invoice)}
           </p>
           <div className="mt-2">
             <StatusBadge status={invoice.status} label={t(STATUS_LABEL[invoice.status])} />

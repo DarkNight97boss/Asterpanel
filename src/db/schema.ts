@@ -340,6 +340,9 @@ export const invoices = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     status: text("status").$type<InvoiceStatus>().notNull().default("unpaid"),
+    /** A credit note reverses `creditsInvoiceId` in full; it shares the numbering series. */
+    kind: text("kind").$type<"invoice" | "credit_note">().notNull().default("invoice"),
+    creditsInvoiceId: uuid("credits_invoice_id"),
     currency: text("currency").notNull(),
     subtotal: integer("subtotal").notNull().default(0),
     /** Basis points, e.g. 2200 = 22%. */
@@ -550,7 +553,9 @@ export const deployments = pgTable(
       .notNull()
       .references(() => workloads.id, { onDelete: "cascade" }),
     status: text("status").$type<DeploymentStatus>().notNull().default("queued"),
-    trigger: text("trigger").$type<"manual" | "push" | "create">().notNull().default("manual"),
+    trigger: text("trigger").$type<"manual" | "push" | "create" | "rollback">().notNull().default("manual"),
+    /** For a rollback: the deployment whose image was put back. */
+    rollbackOf: uuid("rollback_of"),
     commitSha: text("commit_sha").notNull().default(""),
     commitMessage: text("commit_message").notNull().default(""),
     createdAt: createdAt(),

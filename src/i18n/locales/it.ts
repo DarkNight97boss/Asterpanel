@@ -1343,6 +1343,17 @@ const it: Record<string, string> = {
   "SDI recipient code": "Codice destinatario SDI",
   "Certified email (PEC)": "PEC",
   "Name, VAT number and full address are required": "Denominazione, partita IVA e indirizzo completo sono obbligatori",
+  "Credit note": "Nota di credito",
+  "Credit note for invoice {number}": "Nota di credito per la fattura {number}",
+  "Reverses this invoice in full with a numbered credit note. The money itself is refunded from the payment gateway.": "Storna per intero questa fattura con una nota di credito numerata. Il rimborso del denaro va fatto dal gateway di pagamento.",
+  "Reason": "Motivo",
+  "Issue credit note": "Emetti nota di credito",
+  "Only paid invoices can be credited; cancel an unpaid one instead": "Si possono stornare solo fatture pagate; una non pagata va annullata",
+  "Rollback": "Rollback",
+  "Put this version back in service, without rebuilding. Switches with no downtime.": "Rimetti in servizio questa versione, senza ricompilare. Il passaggio avviene senza downtime.",
+  "Roll back to this version": "Torna a questa versione",
+  "Only applications can be rolled back; static sites are rebuilt from Git": "Il rollback è disponibile solo per le applicazioni; i siti statici si ricostruiscono da Git",
+  "This deployment is too old to roll back to": "Questo deploy è troppo vecchio per il rollback",
 };
 
 export default it;

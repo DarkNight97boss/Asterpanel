@@ -64,7 +64,7 @@ export async function renderInvoicePdf(invoice: LoadedInvoice): Promise<{ filena
   const brand = hexToRgb(theme.primary);
 
   const pdf = await PDFDocument.create();
-  pdf.setTitle(`${t("Invoice")} ${number}`);
+  pdf.setTitle(`${t(invoice.kind === "credit_note" ? "Credit note" : "Invoice")} ${number}`);
   pdf.setAuthor(general.companyName || general.siteName);
   pdf.setCreator("AsterPanel");
   pdf.setCreationDate(invoice.createdAt);
@@ -106,7 +106,7 @@ export async function renderInvoicePdf(invoice: LoadedInvoice): Promise<{ filena
 
   // ── Header ────────────────────────────────────────────────────────────────
   draw(general.companyName || general.siteName, MARGIN, y - 14, { font: bold, size: 18, color: brand });
-  draw(`${t("Invoice")} ${number}`, RIGHT, y - 12, { font: bold, size: 15, align: "right" });
+  draw(`${t(invoice.kind === "credit_note" ? "Credit note" : "Invoice")} ${number}`, RIGHT, y - 12, { font: bold, size: 15, align: "right" });
   const status = STATUS[invoice.status] ?? STATUS.draft;
   draw(t(status.label).toUpperCase(), RIGHT, y - 28, { font: bold, size: 9, color: status.color, align: "right" });
   y -= 48;

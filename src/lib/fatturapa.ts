@@ -6,7 +6,7 @@
 
 export type FpaSeller = { name: string; vatCountry: string; vatNumber: string; fiscalCode: string; regime: string; address: string; zip: string; city: string; province: string; zeroVatNature: string; zeroVatNote: string; iban: string };
 export type FpaBuyer = { name: string; firstName: string; lastName: string; isCompany: boolean; vatId: string; taxCode: string; address: string; zip: string; city: string; province: string; country: string; sdiCode: string; pec: string };
-export type FpaInvoice = { number: string; progressive: number; date: Date; dueDate: Date; currency: string; taxRateBp: number; subtotal: number; tax: number; total: number; paid: boolean; paidBy: "card" | "transfer"; lines: { description: string; amount: number }[] };
+export type FpaInvoice = { number: string; progressive: number; date: Date; dueDate: Date; currency: string; taxRateBp: number; subtotal: number; tax: number; total: number; paid: boolean; paidBy: "card" | "transfer"; /** Set on credit notes: the invoice being reversed. */ credits?: { number: string; date: Date }; lines: { description: string; amount: number }[] };
 
 export class FpaError extends Error {}
 
@@ -75,13 +75,15 @@ export function buildFatturaPa(seller: FpaSeller, buyer: FpaBuyer, inv: FpaInvoi
     "</FatturaElettronicaHeader>",
     "<FatturaElettronicaBody>",
     "<DatiGenerali><DatiGeneraliDocumento>",
-    tag("TipoDocumento", "TD01"),
+    tag("TipoDocumento", inv.credits ? "TD04" : "TD01"),
     tag("Divisa", "EUR"),
     tag("Data", day(inv.date)),
     tag("Numero", latin(inv.number, 20)),
     tag("ImportoTotaleDocumento", money(inv.total)),
     zeroVat && tag("Causale", latin(seller.zeroVatNote, 200)),
-    "</DatiGeneraliDocumento></DatiGenerali>",
+    "</DatiGeneraliDocumento>",
+    inv.credits && `<DatiFattureCollegate>${tag("IdDocumento", latin(inv.credits.number, 20))}${tag("Data", day(inv.credits.date))}</DatiFattureCollegate>`,
+    "</DatiGenerali>",
     "<DatiBeniServizi>",
     ...inv.lines.map((l, i) => `<DettaglioLinee>${tag("NumeroLinea", String(i + 1))}${tag("Descrizione", latin(l.description, 1000) || "-")}${tag("Quantita", "1.00")}${tag("PrezzoUnitario", money(l.amount))}${tag("PrezzoTotale", money(l.amount))}${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", seller.zeroVatNature) : ""}</DettaglioLinee>`),
     `<DatiRiepilogo>${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", seller.zeroVatNature) : ""}${tag("ImponibileImporto", money(inv.subtotal))}${tag("Imposta", money(inv.tax))}${zeroVat ? tag("RiferimentoNormativo", latin(seller.zeroVatNote, 100)) : tag("EsigibilitaIVA", "I")}</DatiRiepilogo>`,
