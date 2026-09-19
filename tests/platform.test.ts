@@ -930,3 +930,13 @@ test("staging: up to three per site, each at its own address, and a push can be 
   assert.ok(/copying database/.test(dbPush.log) && !/copying files/.test(dbPush.log));
   assert.ok((await workload(live)).backups.filter((bk) => bk.note === "Before push from staging").length >= 2);
 });
+
+test("PHP error log comes back as text for the tools page", async () => {
+  const db = await dbm.getDb();
+  const id = await engine.createWorkload({ clientId, type: "wordpress", name: "Noisy Site" });
+  await drain();
+  const jobId = await engine.runTool(id, "wp.error_log");
+  await drain();
+  const [job] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId));
+  assert.match(JSON.parse(String(job.result.output)).errorLog, /PHP Fatal error: {2}Uncaught TypeError/);
+});

@@ -1830,6 +1830,14 @@ const it: Record<string, string> = {
   "A quote needs between 1 and 50 lines": "Un preventivo richiede da 1 a 50 righe",
   "Add at least one line with an amount": "Aggiungi almeno una riga con un importo",
   "Choose a customer": "Scegli un cliente",
+  "PHP errors": "Errori PHP",
+  "The latest warnings and fatal errors of this site, straight from PHP. Nothing has to be switched on.": "Gli ultimi avvisi ed errori fatali di questo sito, direttamente da PHP. Non serve attivare nulla.",
+  "Read the log": "Leggi il log",
+  "No PHP errors in the recent log.": "Nessun errore PHP nel log recente.",
+  "Still free": "Ancora liberi",
+  "Close to what you searched for.": "Vicini a quello che hai cercato.",
+  "The legal owner as known to the registry. Keep it current: an unreachable owner can lose the domain.": "Il titolare legale come risulta al registro. Tienilo aggiornato: un titolare irraggiungibile può perdere il dominio.",
+  "Saved. The registry may email the old and the new address to confirm the change.": "Salvato. Il registro potrebbe scrivere al vecchio e al nuovo indirizzo per confermare la modifica.",
 };
 
 export default it;

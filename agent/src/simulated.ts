@@ -166,6 +166,9 @@ export class SimulatedDriver implements Driver {
       await this.step(log, "[sim] purging edge cache");
       return { output: "Cache cleared." };
     }
+    if (tool === "wp.error_log") {
+      return { output: JSON.stringify({ errorLog: /clean/i.test(spec.slug) ? "" : "[php:warn] PHP Warning:  Undefined array key \"size\" in /var/www/html/wp-content/plugins/gallery/render.php on line 88\n[php:error] PHP Fatal error:  Uncaught TypeError: count(): Argument #1 must be of type Countable in /var/www/html/wp-content/themes/shop/functions.php:412" }) };
+    }
     if (tool === "wp.scan") {
       await this.step(log, "[sim] verifying core and plugin checksums, scanning files");
       // A site named "infected…" stands in for a compromised one.

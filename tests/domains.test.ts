@@ -211,3 +211,21 @@ test("email check: judges MX, SPF and DMARC like a receiving server would", asyn
   assert.ok(judgeMailDns({ mx: [{ exchange: "mx.a.it", priority: 10 }], txt: [many], dmarc: [] }).some((f) => /11 DNS lookups/.test(f.text)));
   assert.match(judgeMailDns({ mx: [{ exchange: "", priority: 0 }], txt: ["v=spf1 -all"], dmarc: ["v=DMARC1; p=reject"] })[0].text, /Null MX/);
 });
+
+test("suggestions are only free names near the search; contact changes are validated and sent to the registrar", async () => {
+  const db = await dbm.getDb();
+  assert.deepEqual(domains.suggestNames("aster").slice(0, 3), ["getaster", "asterapp", "asterhq"]);
+  assert.ok(domains.suggestNames("a".repeat(62)).every((n) => n.length <= 63), "never an invalid label");
+  registered.add("gettaken.com");
+  const hits = await domains.suggestDomains("taken.com");
+  assert.ok(hits.length > 0 && hits.every((h) => h.available) && !hits.some((h) => h.domain === "gettaken.com"));
+  assert.deepEqual(await domains.suggestDomains("not valid!"), []);
+
+  const [d] = await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.name, "aster-demo.com"));
+  await assert.rejects(domains.updateDomainContact(d.id, { ...contact, email: "nope" }), /registrant details/);
+  calls.length = 0;
+  await domains.updateDomainContact(d.id, { ...contact, firstName: "Luigi", city: "Napoli" });
+  assert.deepEqual(calls.map((c) => c.params.command), ["AddContact", "ModifyDomain"]);
+  assert.deepEqual([calls[0].params.firstname, calls[1].params.ownercontact0], ["Luigi", "P-ABC123"]);
+  assert.equal((await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, d.id)))[0].contact.city, "Napoli");
+});
