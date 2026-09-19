@@ -170,9 +170,9 @@ export async function staging(_: ActionState, form: FormData): Promise<ActionSta
   let target = workload.id;
   try {
     const action = form.get("action");
-    if (action === "create") target = await engine.createStaging(workload.id, user.id);
+    if (action === "create") target = await engine.createStaging(workload.id, user.id, String(form.get("label") ?? ""));
     else if (action === "push") {
-      await engine.pushStagingToLive(workload.id, user.id);
+      await engine.pushStagingToLive(workload.id, user.id, z.enum(["all", "files", "database"]).catch("all").parse(form.get("scope")));
       target = workload.parentId ?? workload.id;
     } else {
       await engine.deleteWorkload(workload.id, user.id);

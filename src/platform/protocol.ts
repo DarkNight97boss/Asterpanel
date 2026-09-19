@@ -74,7 +74,8 @@ export type JobPayloads = {
   "workload.restart": { spec: WorkloadSpec };
   "workload.delete": { spec: WorkloadSpec };
   /** Copies files + database of `from` into `spec` (staging ⇄ live). */
-  "workload.clone": { spec: WorkloadSpec; from: WorkloadSpec };
+  /** `scope` limits what is copied onto an existing site: its files, its database, or (default) both. */
+  "workload.clone": { spec: WorkloadSpec; from: WorkloadSpec; scope?: "all" | "files" | "database" };
   /** With `rollbackTo`, nothing is built: the image kept from that deployment goes live again. */
   "workload.deploy": { spec: WorkloadSpec; deploymentId: string; rollbackTo?: string; /** Deployments whose images the node should keep for rollbacks. */ keepImages?: string[] };
   "workload.logs": { spec: WorkloadSpec; lines: number };

@@ -440,14 +440,19 @@ export async function deleteBackup(workloadId: string, backupId: string, actorId
 
 // ─── Staging ─────────────────────────────────────────────────────────────────
 
-export async function createStaging(liveId: string, actorId: string | null = null): Promise<string> {
+export const MAX_STAGING = 3;
+
+export async function createStaging(liveId: string, actorId: string | null = null, label = ""): Promise<string> {
   const live = await load(liveId);
   if (live.type !== "wordpress" || live.environment !== "live") throw new PlatformError("Staging is available for live WordPress sites");
-  if ((await stagingOf(live.id)).some((s) => s.environment === "staging")) throw new PlatformError("This site already has a staging environment");
+  const existing = (await stagingOf(live.id)).filter((s) => s.environment === "staging");
+  if (existing.length >= MAX_STAGING) throw new PlatformError(`A site can have up to ${MAX_STAGING} staging environments`);
 
   const db = await getDb();
   const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, live.nodeId));
-  const slug = `stg-${live.slug}`.slice(0, 40);
+  // The first keeps the plain name (and its address); further ones get a suffix.
+  const slug = `${existing.length ? `stg${existing.length + 1}` : "stg"}-${live.slug}`.slice(0, 40);
+  const tag = label.trim().replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 30);
   const secrets: Secrets = { ...readSecrets(live), dbPassword: password() };
 
   const stagingId = await db.transaction(async (tx) => {
@@ -461,7 +466,7 @@ export async function createStaging(liveId: string, actorId: string | null = nul
         parentId: live.id,
         type: live.type,
         environment: "staging",
-        name: `${live.name} (staging)`,
+        name: tag ? `${live.name} (staging: ${tag})` : `${live.name} (staging)`,
         slug,
         config: live.config,
         secrets: encryptJson(secrets),
@@ -477,13 +482,14 @@ export async function createStaging(liveId: string, actorId: string | null = nul
 }
 
 /** Replaces live with staging's files and database, after a safety backup. */
-export async function pushStagingToLive(stagingId: string, actorId: string | null = null) {
+/** `scope`: everything, only the files (theme and plugin work), or only the database (content work). */
+export async function pushStagingToLive(stagingId: string, actorId: string | null = null, scope: "all" | "files" | "database" = "all") {
   const staging = await load(stagingId);
   if (staging.environment !== "staging" || !staging.parentId) throw new PlatformError("Not a staging environment");
   const live = await load(staging.parentId);
   await createBackup(live.id, "Before push from staging", "system", actorId);
-  await enqueue(live, "workload.clone", { spec: await buildSpec(live.id), from: await buildSpec(staging.id) }, { actorId });
-  await audit(actorId, "staging.push", "workload", live.id, { stagingId });
+  await enqueue(live, "workload.clone", { spec: await buildSpec(live.id), from: await buildSpec(staging.id), scope }, { actorId });
+  await audit(actorId, "staging.push", "workload", live.id, { stagingId, scope });
 }
 
 // ─── Deployments, tools, logs ────────────────────────────────────────────────

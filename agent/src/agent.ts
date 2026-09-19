@@ -151,7 +151,7 @@ export class Agent {
       case "workload.delete":
         return d.remove(p.spec, log);
       case "workload.clone":
-        return d.clone(p.spec, p.from, log);
+        return d.clone(p.spec, p.from, log, (envelope.payload as JobPayloads["workload.clone"]).scope);
       case "workload.deploy":
         return d.deploy(p.spec, log, envelope.payload as JobPayloads["workload.deploy"]);
       case "workload.logs":

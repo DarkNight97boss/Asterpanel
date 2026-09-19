@@ -1760,6 +1760,11 @@ const it: Record<string, string> = {
   "Group not found": "Gruppo non trovato",
   "Detach the group from its services first": "Scollega prima il gruppo dai suoi servizi",
   "The health check path starts with / and has no query string": "Il percorso di health check inizia con / e non ha query string",
+  "Label (optional): redesign, client review…": "Etichetta (facoltativa): restyling, revisione cliente…",
+  "What to push": "Cosa pubblicare",
+  "Files and database": "File e database",
+  "Files only (themes, plugins, uploads)": "Solo file (temi, plugin, upload)",
+  "Database only (content and settings)": "Solo database (contenuti e impostazioni)",
 };
 
 export default it;

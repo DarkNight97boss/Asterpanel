@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { and, desc, eq, ne } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, buttonClass, ButtonLink, Card, CardHeader, DataField, PageHeader, StatusBadge } from "@/components/ui";
+import { Badge, buttonClass, ButtonLink, Card, CardHeader, DataField, PageHeader, StatusBadge, Input, Select } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { requireWorkload } from "@/platform/access";
-import { readSecrets } from "@/platform/engine";
+import { readSecrets, MAX_STAGING } from "@/platform/engine";
 import { power, staging, wpLogin } from "../../platform-actions";
 
 const Secret = ({ value, reveal }: { value: string; reveal: string }) => (
@@ -149,21 +149,30 @@ export default async function Overview({ params }: { params: Promise<{ id: strin
             <CardHeader title={t("Staging")} description={w.environment === "live" ? t("A private copy of your site to test changes safely.") : t("Changes here do not affect the live site until you push them.")} />
             <div className="space-y-3 p-5">
               {w.environment === "live" ? (
-                stagingEnvs.length ? (
-                  <ButtonLink href={`/client/workloads/${stagingEnvs[0].id}`} variant="secondary" className="w-full">{t("Open staging environment")} →</ButtonLink>
-                ) : (
-                  <ActionForm action={staging}>
-                    <input type="hidden" name="id" value={w.id} />
-                    <input type="hidden" name="action" value="create" />
-                    <SubmitButton className="w-full" disabled={w.status !== "running"}>{t("Create staging environment")}</SubmitButton>
-                  </ActionForm>
-                )
+                <>
+                  {stagingEnvs.filter((s) => s.environment === "staging").map((s) => (
+                    <ButtonLink key={s.id} href={`/client/workloads/${s.id}`} variant="secondary" className="w-full">{s.name.replace(/^.*\((staging[^)]*)\)$/, "$1")} →</ButtonLink>
+                  ))}
+                  {stagingEnvs.filter((s) => s.environment === "staging").length < MAX_STAGING && (
+                    <ActionForm action={staging}>
+                      <input type="hidden" name="id" value={w.id} />
+                      <input type="hidden" name="action" value="create" />
+                      <Input name="label" maxLength={30} placeholder={t("Label (optional): redesign, client review…")} />
+                      <SubmitButton className="w-full" disabled={w.status !== "running"}>{t("Create staging environment")}</SubmitButton>
+                    </ActionForm>
+                  )}
+                </>
               ) : (
                 <>
                   {parent && <Link href={`/client/workloads/${parent.id}`} className="block text-sm text-link">← {t("Live site")}: {parent.name}</Link>}
                   <ActionForm action={staging}>
                     <input type="hidden" name="id" value={w.id} />
                     <input type="hidden" name="action" value="push" />
+                    <Select name="scope" defaultValue="all" aria-label={t("What to push")}>
+                      <option value="all">{t("Files and database")}</option>
+                      <option value="files">{t("Files only (themes, plugins, uploads)")}</option>
+                      <option value="database">{t("Database only (content and settings)")}</option>
+                    </Select>
                     <SubmitButton className="w-full" disabled={w.status !== "running"} confirm={t("Replace the live site with this staging copy? A backup of live is taken first.")}>{t("Push staging to live")}</SubmitButton>
                   </ActionForm>
                   <ActionForm action={staging}>
