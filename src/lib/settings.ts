@@ -82,13 +82,25 @@ export const settingsSchemas = {
     hostmaster: z.string().default(""),
   }),
   /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
+  backups: z.object({
+    /** Scheduled daily backups kept per service. */
+    keepScheduled: z.number().int().min(1).max(90).default(14),
+    offsiteEnabled: z.boolean().default(false),
+    endpoint: z.string().default(""),
+    region: z.string().default(""),
+    bucket: z.string().default(""),
+    prefix: z.string().default("aster-backups"),
+    accessKey: z.string().default(""),
+    secretKey: z.string().default(""),
+    keepLocal: z.boolean().default(true),
+  }),
   platform: z.object({
     signingPrivateKey: z.string().default(""),
     signingPublicKey: z.string().default(""),
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

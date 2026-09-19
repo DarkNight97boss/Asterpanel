@@ -526,6 +526,9 @@ export const backups = pgTable(
     status: text("status").$type<BackupStatus>().notNull().default("creating"),
     note: text("note").notNull().default(""),
     sizeBytes: integer("size_bytes").notNull().default(0),
+    /** Copy in object storage: `pending` while the job runs, then `uploaded` or `failed`. */
+    offsite: text("offsite").$type<"none" | "pending" | "uploaded" | "failed">().notNull().default("none"),
+    offsiteError: text("offsite_error").notNull().default(""),
     createdAt: createdAt(),
   },
   (t) => [index("backups_workload_idx").on(t.workloadId)],

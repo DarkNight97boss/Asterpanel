@@ -10,8 +10,8 @@ import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { baseUrl } from "@/lib/url";
-import { updateSettings } from "@/lib/settings";
-import { signingKeys, syncDns } from "@/platform/engine";
+import { getSettings, updateSettings } from "@/lib/settings";
+import { PlatformError, signingKeys, syncDns, testOffsite } from "@/platform/engine";
 
 const nodeFields = z.object({
   name: z.string().trim().min(1).max(60),
@@ -97,4 +97,43 @@ export async function saveDnsSettings(_: ActionState, form: FormData): Promise<A
 export async function syncDnsNow(): Promise<ActionState> {
   await requireAdmin();
   return { ok: `Queued for ${await syncDns()} node(s)` };
+}
+
+// ─── Backups ─────────────────────────────────────────────────────────────────
+
+export async function saveBackups(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("backups");
+  const parsed = z
+    .object({
+      keepScheduled: z.coerce.number().int().min(1).max(90),
+      endpoint: z.union([z.string().trim().url().regex(/^https?:\/\//i).max(300), z.literal("")]),
+      region: z.string().trim().max(60).regex(/^[a-z0-9-]*$/i),
+      // S3 bucket naming rules.
+      bucket: z.union([z.string().trim().regex(/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/), z.literal("")]),
+      prefix: z.string().trim().max(200).regex(/^[\w./-]*$/),
+      accessKey: z.string().trim().max(200),
+      keepLocal: z.enum(["0", "1"]),
+    })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: `${parsed.error.issues[0].path.join(".")}: ${parsed.error.issues[0].message}` };
+  const offsiteEnabled = form.has("offsiteEnabled");
+  const secretKey = String(form.get("secretKey") ?? "").trim() || current.secretKey;
+  if (offsiteEnabled && (!parsed.data.bucket || !parsed.data.accessKey || !secretKey)) return { error: "Bucket, access key and secret key are required" };
+  await updateSettings("backups", { ...parsed.data, keepLocal: parsed.data.keepLocal === "1", offsiteEnabled, secretKey });
+  await audit(admin.id, "settings.updated", "settings", "backups");
+  revalidatePath("/admin/settings/backups");
+  return { ok: "Saved" };
+}
+
+export async function testOffsiteStorage(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  try {
+    await testOffsite(z.string().uuid().parse(form.get("nodeId")), admin.id);
+  } catch (err) {
+    if (err instanceof PlatformError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath("/admin/settings/backups");
+  return { ok: "Test started: the result appears below in a few seconds" };
 }

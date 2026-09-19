@@ -60,6 +60,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   { href: "/admin/settings/billing", label: t("Billing"), icon: "¤" },
                   { href: "/admin/settings/gateways", label: t("Payment gateways"), icon: "▭" },
                   { href: "/admin/settings/mail", label: t("Email"), icon: "@" },
+                  { href: "/admin/settings/backups", label: t("Backups"), icon: "⛁" },
                 ]
               : []),
           ],

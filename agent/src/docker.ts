@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { mkdir, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
-import type { ApmReport, JobPayloads, JobResult, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
+import type { ApmReport, JobPayloads, JobResult, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
 import type { Driver, Log } from "./driver";
 
 /**
@@ -769,7 +769,40 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return [];
   }
 
-  async backupCreate(spec: WorkloadSpec, backupId: string, log: Log) {
+  // ── Off-site copies (rclone, S3-compatible) ─────────────────────────────────
+
+  /**
+   * Runs rclone against the target. The remote is configured purely through
+   * environment variables, so keys never appear in argv or on disk.
+   */
+  private rclone(o: OffsiteTarget, args: string[], log?: Log, mounts: string[] = []) {
+    const env: Record<string, string> = {
+      RCLONE_CONFIG_R_TYPE: "s3",
+      RCLONE_CONFIG_R_PROVIDER: o.endpoint ? "Other" : "AWS",
+      RCLONE_CONFIG_R_ACCESS_KEY_ID: o.accessKey,
+      RCLONE_CONFIG_R_SECRET_ACCESS_KEY: o.secretKey,
+      RCLONE_CONFIG_R_ENDPOINT: o.endpoint,
+      RCLONE_CONFIG_R_REGION: o.region,
+      // The bucket is expected to exist; do not require CreateBucket permission.
+      RCLONE_S3_NO_CHECK_BUCKET: "true",
+    };
+    return this.docker(["run", "--rm", ...mounts.flatMap((m) => ["-v", m]), ...Object.keys(env).flatMap((k) => ["-e", k]), "rclone/rclone:1", ...args, "--retries", "3", "--low-level-retries", "5"], log, { env, timeoutMs: 6 * 60 * 60_000 });
+  }
+  private remotePath = (o: OffsiteTarget, ...parts: string[]) => `r:${[o.bucket, o.prefix, ...parts].filter(Boolean).join("/")}`;
+
+  async offsiteTest(o: OffsiteTarget, log: Log) {
+    const probe = `.aster-probe-${Date.now()}`;
+    log(`writing ${probe}`);
+    await this.rclone(o, ["touch", this.remotePath(o, probe)], log);
+    log("reading it back");
+    const listed = await this.rclone(o, ["lsf", this.remotePath(o)], undefined, []);
+    if (!listed.split("\n").includes(probe)) throw new Error("The probe object was written but could not be listed");
+    log("deleting it");
+    await this.rclone(o, ["deletefile", this.remotePath(o, probe)], log);
+    return { output: "ok" };
+  }
+
+  async backupCreate(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
     const dir = this.backupDir(spec, backupId);
     await mkdir(dir, { recursive: true });
     const db = this.dbCommand(spec, "dump");
@@ -784,12 +817,36 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       await this.docker(["run", "--rm", "-v", `${volume}:/data:ro`, "-v", `${dir}:/backup`, "alpine:3", "tar", "czf", `/backup/${volume}.tar.gz`, "-C", "/data", "."], log);
     }
     const out = await this.exec("du", ["-sk", dir], undefined, { quiet: true });
-    return { sizeBytes: (parseInt(out, 10) || 0) * 1024 };
+    const sizeBytes = (parseInt(out, 10) || 0) * 1024;
+    if (!offsite) return { sizeBytes };
+    // The local archive is already safe: an upload problem is reported, not fatal.
+    try {
+      log(`uploading to ${offsite.bucket}`);
+      await this.rclone(offsite, ["copy", "/backup", this.remotePath(offsite, spec.slug, backupId)], log, [`${dir}:/backup:ro`]);
+      // Trust, but verify: every local file must be present remotely with the same size/hash.
+      await this.rclone(offsite, ["check", "/backup", this.remotePath(offsite, spec.slug, backupId), "--one-way"], log, [`${dir}:/backup:ro`]);
+    } catch (err) {
+      return { sizeBytes, offsite: "failed" as const, offsiteError: err instanceof Error ? err.message.slice(0, 500) : String(err) };
+    }
+    if (!offsite.keepLocal) await rm(dir, { recursive: true, force: true });
+    return { sizeBytes, offsite: "uploaded" as const };
   }
 
-  async backupRestore(spec: WorkloadSpec, backupId: string, log: Log) {
+  async backupRestore(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
     const dir = this.backupDir(spec, backupId);
-    if (!(await stat(dir).then(() => true, () => false))) throw new Error("Backup archive not found on this node");
+    if (!(await stat(dir).then(() => true, () => false))) {
+      if (!offsite) throw new Error("Backup archive not found on this node");
+      log(`downloading from ${offsite.bucket}`);
+      await mkdir(dir, { recursive: true });
+      try {
+        await this.rclone(offsite, ["copy", this.remotePath(offsite, spec.slug, backupId), "/backup"], log, [`${dir}:/backup`]);
+        if (!(await readdir(dir)).length) throw new Error("The off-site copy is empty or missing");
+      } catch (err) {
+        // Never leave a half-downloaded archive that a retry would mistake for a good one.
+        await rm(dir, { recursive: true, force: true });
+        throw err;
+      }
+    }
     for (const volume of this.volumesToArchive(spec)) {
       log(`restoring ${volume}`);
       await this.docker(["run", "--rm", "-v", `${volume}:/data`, "-v", `${dir}:/backup:ro`, "alpine:3", "sh", "-c", `find /data -mindepth 1 -delete && tar xzf "/backup/${volume}.tar.gz" -C /data`], log);
@@ -804,7 +861,11 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return {};
   }
 
-  async backupDelete(spec: WorkloadSpec, backupId: string) {
+  async backupDelete(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
+    // Remote first: if it fails the backup stays listed and the delete can be retried.
+    if (offsite) await this.rclone(offsite, ["purge", this.remotePath(offsite, spec.slug, backupId)], log).catch((err: Error) => {
+      if (!/not found|doesn't exist/i.test(err.message)) throw err;
+    });
     await rm(this.backupDir(spec, backupId), { recursive: true, force: true });
     return {};
   }

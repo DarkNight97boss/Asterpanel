@@ -15,6 +15,7 @@ import {
   type JobReport,
   type JobResult,
   type JobType,
+  type OffsiteTarget,
   type PollRequest,
   type SignedJob,
   type ToolName,
@@ -333,9 +334,28 @@ export async function createBackup(workloadId: string, note = "", kind: "manual"
   const w = await load(workloadId);
   if (w.type === "static") throw new PlatformError("Static sites are rebuilt from Git and have no backups");
   const db = await getDb();
-  const [b] = await db.insert(schema.backups).values({ workloadId: w.id, note: note.slice(0, 200), kind }).returning({ id: schema.backups.id });
-  await enqueue(w, "backup.create", { spec: await buildSpec(w.id), backupId: b.id }, { backupId: b.id, actorId });
+  const offsite = await offsiteTarget();
+  const [b] = await db.insert(schema.backups).values({ workloadId: w.id, note: note.slice(0, 200), kind, offsite: offsite ? "pending" : "none" }).returning({ id: schema.backups.id });
+  await enqueue(w, "backup.create", { spec: await buildSpec(w.id), backupId: b.id, offsite }, { backupId: b.id, actorId });
   return b.id;
+}
+
+/** The configured object storage, or undefined when off-site backups are off or incomplete. */
+export async function offsiteTarget(): Promise<OffsiteTarget | undefined> {
+  const s = await getSettings("backups");
+  if (!s.offsiteEnabled || !s.bucket || !s.accessKey || !s.secretKey) return undefined;
+  return { endpoint: s.endpoint, region: s.region, bucket: s.bucket, prefix: s.prefix.replace(/^\/+|\/+$/g, ""), accessKey: s.accessKey, secretKey: s.secretKey, keepLocal: s.keepLocal };
+}
+
+/** Asks a node to write, read and delete a probe object with the saved settings. Returns the job id. */
+export async function testOffsite(nodeId: string, actorId: string | null = null): Promise<string> {
+  const offsite = await offsiteTarget();
+  if (!offsite) throw new PlatformError("Enable off-site backups and fill in bucket and keys first");
+  const db = await getDb();
+  const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId));
+  if (!node || !nodeIsOnline(node)) throw new PlatformError("This server is offline");
+  const [job] = await db.insert(schema.jobs).values({ nodeId: node.id, type: "offsite.test", payload: encryptJson({ offsite }), actorId }).returning({ id: schema.jobs.id });
+  return job.id;
 }
 
 async function backupOf(workloadId: string, backupId: string) {
@@ -353,14 +373,14 @@ export async function restoreBackup(workloadId: string, backupId: string, actorI
   // before the restore starts.
   await createBackup(w.id, "Before restore", "system", actorId);
   await db.update(schema.backups).set({ status: "restoring" }).where(eq(schema.backups.id, b.id));
-  await enqueue(w, "backup.restore", { spec: await buildSpec(w.id), backupId: b.id }, { backupId: b.id, actorId });
+  await enqueue(w, "backup.restore", { spec: await buildSpec(w.id), backupId: b.id, offsite: b.offsite === "uploaded" ? await offsiteTarget() : undefined }, { backupId: b.id, actorId });
   await audit(actorId, "backup.restore", "workload", w.id, { backupId: b.id });
 }
 
 export async function deleteBackup(workloadId: string, backupId: string, actorId: string | null = null) {
   const w = await load(workloadId);
   const b = await backupOf(w.id, backupId);
-  await enqueue(w, "backup.delete", { spec: await buildSpec(w.id), backupId: b.id }, { backupId: b.id, actorId });
+  await enqueue(w, "backup.delete", { spec: await buildSpec(w.id), backupId: b.id, offsite: b.offsite === "uploaded" ? await offsiteTarget() : undefined }, { backupId: b.id, actorId });
 }
 
 // ─── Staging ─────────────────────────────────────────────────────────────────
@@ -692,7 +712,6 @@ export async function runDbJob(workloadId: string, action: "tables" | "query", s
 // ─── Scheduled backups ───────────────────────────────────────────────────────
 
 const BACKUP_EVERY_MS = 24 * 60 * MINUTE;
-const KEEP_SCHEDULED = 14;
 
 /** Daily backup of every running site/database, keeping the most recent ones. Idempotent. */
 export async function runScheduledBackups(now = new Date()): Promise<{ created: number; pruned: number }> {
@@ -701,6 +720,7 @@ export async function runScheduledBackups(now = new Date()): Promise<{ created: 
     .select({ id: schema.workloads.id })
     .from(schema.workloads)
     .where(and(eq(schema.workloads.status, "running"), eq(schema.workloads.environment, "live"), inArray(schema.workloads.type, ["wordpress", "database"])));
+  const keep = (await getSettings("backups")).keepScheduled;
   let created = 0;
   let pruned = 0;
   for (const { id } of targets) {
@@ -709,7 +729,7 @@ export async function runScheduledBackups(now = new Date()): Promise<{ created: 
       await createBackup(id, "", "scheduled");
       created++;
     }
-    for (const old of scheduled.filter((b) => b.status === "ready").slice(KEEP_SCHEDULED - 1)) {
+    for (const old of scheduled.filter((b) => b.status === "ready").slice(keep - 1)) {
       await deleteBackup(id, old.id).catch(() => {});
       pruned++;
     }
@@ -787,7 +807,13 @@ export async function reportJob(nodeId: string, jobId: string, report: JobReport
   const result: JobResult = ok ? (report.result ?? {}) : {};
   const error = ok ? "" : String(report.error ?? "Failed").slice(0, 2000);
   // File contents and SQL have done their job: do not keep them in the queue.
-  const scrubbed = job.type === "workload.files" ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), content: undefined, spec: undefined }) : job.payload;
+  // Finished jobs do not keep what they no longer need: file contents, storage keys.
+  const scrubbed =
+    job.type === "workload.files"
+      ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), content: undefined, spec: undefined })
+      : job.type.startsWith("backup.") || job.type === "offsite.test"
+        ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), offsite: undefined })
+        : job.payload;
   await db.update(schema.jobs).set({ status: report.status, log, result, error, finishedAt: new Date(), payload: scrubbed }).where(eq(schema.jobs.id, job.id));
   await applyOutcome(job, ok, result, error);
   return true;
@@ -807,7 +833,11 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   }
   if (job.backupId) {
     if (job.type === "backup.delete" && ok) await db.delete(backups).where(eq(backups.id, job.backupId));
-    else if (job.type === "backup.create") await db.update(backups).set({ status: ok ? "ready" : "failed", sizeBytes: Math.round(result.sizeBytes ?? 0) }).where(eq(backups.id, job.backupId));
+    else if (job.type === "backup.create")
+      await db
+        .update(backups)
+        .set({ status: ok ? "ready" : "failed", sizeBytes: Math.round(result.sizeBytes ?? 0), offsite: ok ? (result.offsite ?? "none") : "none", offsiteError: (result.offsiteError ?? "").slice(0, 500) })
+        .where(eq(backups.id, job.backupId));
     else await db.update(backups).set({ status: "ready" }).where(eq(backups.id, job.backupId));
   }
   if (!w) return;

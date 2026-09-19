@@ -29,13 +29,14 @@ export default async function Backups({ params }: { params: Promise<{ id: string
       </Card>
       <Card>
         {backups.length ? (
-          <Table head={[t("Created"), t("Type"), t("Note"), t("Size"), t("Status"), ""]}>
+          <Table head={[t("Created"), t("Type"), t("Note"), t("Size"), t("Off-site copy"), t("Status"), ""]}>
             {backups.map((b) => (
               <tr key={b.id}>
                 <Td>{formatDateTime(b.createdAt, locale)}</Td>
                 <Td>{t(KIND[b.kind])}</Td>
                 <Td className="text-muted">{t(b.note) || "—"}</Td>
                 <Td>{b.sizeBytes ? size(b.sizeBytes) : "—"}</Td>
+                <Td className="text-body">{b.offsite === "uploaded" ? `✓ ${t("Stored off-site")}` : b.offsite === "pending" && b.status === "creating" ? "…" : b.offsite === "failed" ? <span className="text-danger" title={b.offsiteError}>{t("Upload failed")}</span> : <span className="text-muted">—</span>}</Td>
                 <Td><StatusBadge status={b.status} label={t(b.status)} /></Td>
                 <Td className="text-right">
                   {b.status === "ready" && (

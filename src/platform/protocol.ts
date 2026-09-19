@@ -68,9 +68,25 @@ export type JobPayloads = {
   "dns.sync": { nameservers: string[]; hostmaster: string; zones: DnsZoneData[] };
   /** Database console: `tables` lists them with sizes, `query` runs one statement. */
   "workload.db": { spec: WorkloadSpec; action: "tables" | "query"; sql?: string };
-  "backup.create": { spec: WorkloadSpec; backupId: string };
-  "backup.restore": { spec: WorkloadSpec; backupId: string };
-  "backup.delete": { spec: WorkloadSpec; backupId: string };
+  /** With `offsite`, the archive is also copied to object storage (and fetched back from it when the local copy is gone). */
+  "backup.create": { spec: WorkloadSpec; backupId: string; offsite?: OffsiteTarget };
+  "backup.restore": { spec: WorkloadSpec; backupId: string; offsite?: OffsiteTarget };
+  "backup.delete": { spec: WorkloadSpec; backupId: string; offsite?: OffsiteTarget };
+  /** Node-level: write, read back and delete a probe object to prove the storage settings work from this node. */
+  "offsite.test": { offsite: OffsiteTarget };
+};
+
+/** S3-compatible object storage for off-site backups. Travels only inside the encrypted, signed job payload. */
+export type OffsiteTarget = {
+  /** Empty for AWS S3. */
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKey: string;
+  secretKey: string;
+  /** false = delete the node's copy once the upload succeeded. */
+  keepLocal: boolean;
 };
 
 export type JobType = keyof JobPayloads;
@@ -110,6 +126,9 @@ export type ToolName = (typeof TOOLS)[number];
 export type JobResult = {
   runtime?: { internalHost?: string; dbName?: string; dbUser?: string; diskUsedMb?: number; version?: string };
   sizeBytes?: number;
+  /** `backup.create` with an off-site target: a failed upload does not fail the backup itself. */
+  offsite?: "uploaded" | "failed";
+  offsiteError?: string;
   commitSha?: string;
   commitMessage?: string;
   /** For `workload.logs` and tools with output. */
