@@ -52,11 +52,11 @@ test("order and payment send localized emails with the invoice PDF attached", as
   assert.equal(outbox.length, 1);
   const created = outbox[0];
   assert.equal(created.to, "mario@example.test");
-  assert.match(created.subject, /^Fattura INV-1/);
+  assert.match(created.subject, /^Fattura INV-\d{4}\/0001 /);
   assert.match(created.html, /Ciao Mario,/);
   assert.match(created.html, /https:\/\/billing\.example\.test\/client\/invoices\//, "links use APP_URL without a double slash");
   assert.match(created.text, /Totale: /);
-  assert.equal(created.attachments[0].filename, "INV-1.pdf");
+  assert.match(created.attachments[0].filename, /^INV-\d{4}_0001\.pdf$/);
   assert.equal(Buffer.from(created.attachments[0].content, "base64").subarray(0, 5).toString(), "%PDF-");
 
   await billing.recordPayment({ invoiceId, gateway: "manual", externalId: "", amount: 1220 });
@@ -90,6 +90,6 @@ test("PDF renders non-Latin and exotic characters without throwing", async () =>
   const { renderInvoicePdf } = await import("../src/lib/invoice-pdf");
   const [row] = await db.select().from(dbm.schema.invoices);
   const { bytes, filename } = await renderInvoicePdf((await loadInvoice(row.id))!);
-  assert.equal(filename, "INV-1.pdf");
+  assert.match(filename, /^INV-\d{4}_0001\.pdf$/);
   assert.ok(bytes.length > 1500);
 });

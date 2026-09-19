@@ -1,6 +1,6 @@
 import { getLocale, getT } from "@/i18n";
 import { displayName } from "@/lib/auth";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import type { LoadedInvoice } from "@/lib/invoices";
 import { getSettings } from "@/lib/settings";
 import { Card, StatusBadge, STATUS_LABEL } from "./ui";
@@ -16,8 +16,7 @@ export async function InvoiceView({ invoice }: { invoice: LoadedInvoice }) {
       <div className="flex flex-wrap items-start justify-between gap-6">
         <div>
           <p className="text-2xl font-bold tracking-tight">
-            {t("Invoice")} {billing.invoicePrefix}
-            {invoice.number}
+            {t("Invoice")} {invoiceLabel(billing.invoicePrefix, invoice)}
           </p>
           <div className="mt-2">
             <StatusBadge status={invoice.status} label={t(STATUS_LABEL[invoice.status])} />

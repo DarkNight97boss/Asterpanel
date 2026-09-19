@@ -1,5 +1,6 @@
 "use server";
 
+import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -8,11 +9,12 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { createSession, destroySession, isStaff, safeNext } from "@/lib/auth";
 import { requestMeta } from "@/lib/request";
-import { hashPassword, safeEqual, verifyPassword } from "@/lib/crypto";
+import { hashPassword, safeEqual, signValue, verifyPassword, verifyValue } from "@/lib/crypto";
 import { seedStarterContent } from "@/lib/install";
 import { notify } from "@/lib/notify";
 import { requestPasswordReset, resetPassword } from "@/lib/password-reset";
 import { rateLimit } from "@/lib/rate-limit";
+import { verifySecondFactor } from "@/lib/totp";
 import { getSettings, updateSettings } from "@/lib/settings";
 import { baseUrl } from "@/lib/url";
 
@@ -39,9 +41,32 @@ export async function login(_: ActionState, form: FormData): Promise<ActionState
   }
   if (user.status !== "active") return { error: "This account is not active. Contact support." };
 
+  const next = safeNext(form.get("next"), isStaff(user) ? "/admin" : "/client");
+  if (user.totpEnabledAt) {
+    // Password accepted, but no session yet: only a 5-minute signed note of who is half-way in.
+    (await cookies()).set(PENDING_2FA, signValue(user.id, 5 * 60_000), { httpOnly: true, sameSite: "lax", secure: process.env.NODE_ENV === "production", path: "/", maxAge: 300 });
+    redirect(`/login/verify?next=${encodeURIComponent(next)}`);
+  }
   await createSession(user.id);
   await audit(user.id, "auth.login", "user", user.id);
-  redirect(safeNext(form.get("next"), isStaff(user) ? "/admin" : "/client"));
+  redirect(next);
+}
+
+const PENDING_2FA = "aster_2fa";
+
+export async function verifyLogin(_: ActionState, form: FormData): Promise<ActionState> {
+  const jar = await cookies();
+  const userId = verifyValue(jar.get(PENDING_2FA)?.value);
+  if (!userId) redirect("/login");
+  if (!rateLimit(`2fa:${userId}`, 6, 10 * 60_000)) return { error: "Too many attempts. Try again in a few minutes." };
+  if (!(await verifySecondFactor(userId, String(form.get("code") ?? "")))) {
+    await audit(userId, "auth.2fa.failed", "user", userId);
+    return { error: "That code is not valid" };
+  }
+  jar.delete(PENDING_2FA);
+  await createSession(userId);
+  await audit(userId, "auth.login", "user", userId, { secondFactor: true });
+  redirect(safeNext(form.get("next"), "/client"));
 }
 
 export async function register(_: ActionState, form: FormData): Promise<ActionState> {

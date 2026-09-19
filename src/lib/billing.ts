@@ -17,6 +17,26 @@ export class BillingError extends Error {}
 
 const taxOn = (subtotal: number, rateBp: number) => Math.round((subtotal * rateBp) / 10_000);
 
+// ─── Invoice numbering ───────────────────────────────────────────────────────
+
+type Tx = Parameters<Parameters<Awaited<ReturnType<typeof getDb>>["transaction"]>[0]>[0];
+
+/**
+ * Next invoice number of the fiscal year: progressive and without gaps, as
+ * tax rules require. The counter row is updated in the same transaction that
+ * inserts the invoice — it serialises concurrent issuers and, if anything
+ * fails, the rollback gives the number back.
+ */
+async function nextInvoiceNumber(tx: Tx, issuedAt = new Date()): Promise<{ number: number; fiscalYear: number }> {
+  const fiscalYear = issuedAt.getUTCFullYear();
+  const [row] = await tx
+    .insert(schema.counters)
+    .values({ key: `invoice:${fiscalYear}`, value: 1 })
+    .onConflictDoUpdate({ target: schema.counters.key, set: { value: sql`${schema.counters.value} + 1` } })
+    .returning({ value: schema.counters.value });
+  return { number: row.value, fiscalYear };
+}
+
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
 export async function placeOrder(input: {
@@ -64,6 +84,7 @@ export async function placeOrder(input: {
     const [invoice] = await tx
       .insert(schema.invoices)
       .values({
+        ...(await nextInvoiceNumber(tx)),
         clientId: input.clientId,
         currency: billing.currency,
         subtotal,
@@ -297,7 +318,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
         const dueDate = new Date(Math.min(...list.map((s) => s.nextDueDate!.getTime())));
         const [invoice] = await tx
           .insert(schema.invoices)
-          .values({ clientId, currency: billing.currency, subtotal, taxRate: billing.taxRate, tax, total: subtotal + tax, dueDate })
+          .values({ ...(await nextInvoiceNumber(tx, now)), clientId, currency: billing.currency, subtotal, taxRate: billing.taxRate, tax, total: subtotal + tax, dueDate })
           .returning();
         await tx.insert(schema.invoiceItems).values(
           list.map((s) => ({

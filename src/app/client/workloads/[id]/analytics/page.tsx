@@ -3,6 +3,7 @@ import { Card, EmptyState, PageHeader } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
+import { uptimeSummary } from "@/platform/uptime";
 
 type Point = { at: Date; v: number };
 
@@ -30,6 +31,7 @@ export default async function Analytics({ params, searchParams }: { params: Prom
     getLocale(),
     db.select().from(schema.workloadMetrics).where(and(eq(schema.workloadMetrics.workloadId, w.id), gte(schema.workloadMetrics.at, hoursAgo(hours)))).orderBy(asc(schema.workloadMetrics.at)),
   ]);
+  const uptime = w.type === "database" ? null : await uptimeSummary(w.id);
   const base = `/client/workloads/${w.id}/analytics`;
   // Network counters are cumulative: chart the traffic between samples.
   const delta = (key: "txMb" | "rxMb"): Point[] => rows.slice(1).map((r, i) => ({ at: r.at, v: Math.max(0, r[key] - rows[i][key]) }));
@@ -56,6 +58,26 @@ export default async function Analytics({ params, searchParams }: { params: Prom
           </div>
         }
       />
+      {uptime && (
+        <Card className="mb-6 p-6">
+          <div className="flex flex-wrap items-baseline justify-between gap-4">
+            <h2 className="text-xl font-medium">{t("Uptime")}</h2>
+            <span className="text-sm text-muted">{t("Checked from outside every 5 minutes, last 7 days")}</span>
+          </div>
+          {uptime.checks ? (
+            <div className="mt-4 grid gap-6 sm:grid-cols-3">
+              <div><p className="font-display text-4xl">{uptime.percent}%</p><p className="text-sm text-muted">{t("Availability")}</p></div>
+              <div><p className="font-display text-4xl">{uptime.avgMs ?? "—"} ms</p><p className="text-sm text-muted">{t("Average response")}</p></div>
+              <div>
+                <p className={`text-lg font-medium ${uptime.last?.ok ? "text-success" : "text-danger"}`}>{uptime.last?.ok ? t("Online") : t("Not responding")}</p>
+                {uptime.recentFailures.length > 0 && <p className="mt-1 text-xs text-muted">{t("Last failure")}: {uptime.recentFailures[0].at.toISOString().slice(0, 16).replace("T", " ")} · {uptime.recentFailures[0].error || `HTTP ${uptime.recentFailures[0].status}`}</p>}
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 text-sm text-muted">{t("No checks yet. Monitoring starts with the next scheduled run.")}</p>
+          )}
+        </Card>
+      )}
       {rows.length < 2 ? (
         <Card><EmptyState title={t("Collecting data…")} description={t("The server reports resource usage every few minutes. Charts appear after the first samples.")} /></Card>
       ) : (

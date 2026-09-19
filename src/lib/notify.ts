@@ -2,7 +2,7 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { makeT, type T } from "@/i18n/shared";
-import { CYCLE_LABEL, displayName, formatDate, formatMoney } from "./format";
+import { CYCLE_LABEL, displayName, formatDate, formatMoney, invoiceLabel } from "./format";
 import { renderInvoicePdf } from "./invoice-pdf";
 import { loadInvoice } from "./invoices";
 import { renderMail, type MailContent } from "./mail/layout";
@@ -117,7 +117,7 @@ async function invoiceMail(invoiceId: string, id: "invoice.created" | "invoice.p
   const invoice = ctx && (await loadInvoice(invoiceId));
   if (!ctx || !invoice) return { ok: false, error: "Email is not configured" };
   const { t, locale, billing, origin } = ctx;
-  const number = `${billing.invoicePrefix}${invoice.number}`;
+  const number = invoiceLabel(billing.invoicePrefix, invoice);
   const paid = invoice.status === "paid";
   const money = (cents: number) => formatMoney(cents, invoice.currency, locale);
   const pdf = await renderInvoicePdf(invoice);
@@ -227,6 +227,23 @@ export const notify = {
     dispatch(async () => serviceMail(serviceId, "service.suspended", { reason: makeT((await getSettings("general")).locale)(reason) })),
   serviceUnsuspended: (serviceId: string) => dispatch(() => serviceMail(serviceId, "service.unsuspended")),
   serviceTerminated: (serviceId: string) => dispatch(() => serviceMail(serviceId, "service.terminated")),
+
+  uptime: (workloadId: string, state: "down" | "up", reason: string) =>
+    dispatch(async () => {
+      const ctx = await context();
+      if (!ctx) return;
+      const db = await getDb();
+      const w = await db.query.workloads.findFirst({ where: eq(schema.workloads.id, workloadId), with: { client: { columns: { passwordHash: false } }, domains: true } });
+      if (!w) return;
+      const name = firstName(w.client);
+      await ctx.send({
+        id: `uptime.${state}`,
+        to: w.client.email,
+        userId: w.clientId,
+        vars: { name, service: `${w.name}${w.domains[0] ? ` (${w.domains[0].hostname})` : ""}`, reason },
+        structure: { greeting: ctx.t("Hi {name},", { name }), cta: { label: ctx.t("Open the dashboard"), url: `${ctx.origin}/client/workloads/${w.id}` } },
+      });
+    }),
 
   ticketOpened: (ticketId: string, body: string) => dispatch(() => ticketMail(ticketId, "ticket.opened", body)),
   ticketClientReply: (ticketId: string, body: string) => dispatch(() => ticketMail(ticketId, "ticket.client_reply", body)),

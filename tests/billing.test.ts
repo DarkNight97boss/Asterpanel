@@ -88,3 +88,29 @@ test("automation: invoices a renewal once, suspends when overdue, payment restor
   assert.equal(restored.status, "active");
   assert.ok(restored.nextDueDate!.getTime() > due.getTime() + 27 * DAY);
 });
+
+test("invoice numbers are progressive per fiscal year and a failed order leaves no gap", async () => {
+  const db = await dbm.getDb();
+  const year = new Date().getUTCFullYear();
+  const numbers = async () => (await db.select().from(dbm.schema.invoices)).filter((i) => i.fiscalYear === year).map((i) => i.number).sort((a, b) => a - b);
+  const before = await numbers();
+  assert.deepEqual(before, before.map((_, i) => i + 1), "1..n with no holes so far");
+
+  await assert.rejects(billing.placeOrder({ clientId, productId, cycle: "annually", domain: "gap.com" }), billing.BillingError);
+  await assert.rejects(billing.placeOrder({ clientId: "00000000-0000-4000-8000-000000000000", productId, cycle: "monthly", domain: "gap.com" }), "unknown client: the insert fails inside the transaction");
+  await billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "next.com" });
+  const after = await numbers();
+  assert.equal(after.length, before.length + 1);
+  assert.equal(after.at(-1), before.length + 1, "the rolled-back attempt gave its number back");
+
+  // A renewal run dated next year starts that year's series at 1.
+  const [svc] = await db.select().from(dbm.schema.services);
+  const nextYear = new Date(Date.UTC(year + 1, 5, 1));
+  await db.update(dbm.schema.services).set({ status: "active", nextDueDate: nextYear, renewalInvoicedFor: null }).where(eq(dbm.schema.services.id, svc.id));
+  await billing.runAutomation(nextYear);
+  const first = (await db.select().from(dbm.schema.invoices)).filter((i) => i.fiscalYear === year + 1);
+  assert.deepEqual(first.map((i) => i.number), [1]);
+  const { invoiceLabel } = await import("../src/lib/format");
+  assert.equal(invoiceLabel("INV-", first[0]), `INV-${year + 1}/0001`);
+  assert.equal(invoiceLabel("INV-", { number: 7, fiscalYear: 0 }), "INV-7", "legacy invoices keep their old label");
+});

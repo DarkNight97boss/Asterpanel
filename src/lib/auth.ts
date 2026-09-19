@@ -11,7 +11,8 @@ const COOKIE = "aster_session";
 const SESSION_DAYS = 14;
 const DAY = 86_400_000;
 
-export type SessionUser = Omit<typeof schema.users.$inferSelect, "passwordHash">;
+/** Never carries the password hash, the TOTP secret or the recovery codes. */
+export type SessionUser = Omit<typeof schema.users.$inferSelect, "passwordHash" | "totpSecret" | "recoveryCodes" | "totpLastStep">;
 
 export async function createSession(userId: string) {
   const token = randomToken();
@@ -56,8 +57,8 @@ export const getUser = cache(async (): Promise<SessionUser | null> => {
     .where(and(eq(schema.sessions.id, sha256(token)), gt(schema.sessions.expiresAt, new Date())))
     .limit(1);
   if (!row || row.user.status !== "active") return null;
-  const { passwordHash: _omit, ...user } = row.user;
-  void _omit;
+  const { passwordHash: _h, totpSecret: _s, recoveryCodes: _r, totpLastStep: _l, ...user } = row.user;
+  void [_h, _s, _r, _l];
   return user;
 });
 

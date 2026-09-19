@@ -2,21 +2,32 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Badge, Button, Card, CardHeader, Input, Table, Td } from "@/components/ui";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
+import { checkDomain } from "@/platform/dns-check";
 import { addDomain, domainAction } from "../../../platform-actions";
 
 export default async function Domains({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
   const t = await getT();
+  const checks = new Map(await Promise.all(w.domains.map(async (d) => [d.id, d.isSystem ? null : await checkDomain(d.hostname, w.node.publicIp)] as const)));
   return (
     <div className="space-y-6">
       <Card>
-        <Table head={[t("Domain"), "", ""]}>
+        <Table head={[t("Domain"), "", t("DNS"), ""]}>
           {w.domains.map((d) => (
             <tr key={d.id}>
               <Td><a href={`https://${d.hostname}`} target="_blank" rel="noopener noreferrer" className="font-medium hover:text-link">{d.hostname}</a></Td>
               <Td className="space-x-1">
                 {d.isPrimary && <Badge tone="info">{t("Primary")}</Badge>}
                 {d.isSystem && <Badge>{t("Included")}</Badge>}
+              </Td>
+              <Td className="text-sm">
+                {(() => {
+                  const c = checks.get(d.id);
+                  if (!c || c.state === "unknown") return null;
+                  if (c.state === "ok") return <span className="text-success">✓ {t("Points to this server")}</span>;
+                  if (c.state === "missing") return <span className="text-warning">{t("No DNS record found yet. Add an A record to {ip}.", { ip: w.node.publicIp })}</span>;
+                  return <span className="text-danger">{t("Points to {found} instead of {ip}", { found: c.found.slice(0, 2).join(", "), ip: w.node.publicIp })}</span>;
+                })()}
               </Td>
               <Td className="text-right">
                 <form action={domainAction} className="inline-flex gap-1">

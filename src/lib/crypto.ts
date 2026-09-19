@@ -3,6 +3,7 @@ import {
   createCipheriv,
   createDecipheriv,
   createHash,
+  createHmac,
   randomBytes,
   scrypt,
   timingSafeEqual,
@@ -98,4 +99,18 @@ export function decryptJson<T>(payload: string, fallback: T): T {
   decipher.setAuthTag(Buffer.from(tag, "base64"));
   const plain = Buffer.concat([decipher.update(Buffer.from(data, "base64")), decipher.final()]);
   return JSON.parse(plain.toString("utf8")) as T;
+}
+
+// ─── Short-lived signed values (e.g. "password ok, second factor pending") ───
+
+export function signValue(value: string, ttlMs: number): string {
+  const body = `${value}.${Date.now() + ttlMs}`;
+  return `${body}.${createHmac("sha256", appKey()).update(body).digest("base64url")}`;
+}
+
+export function verifyValue(token: string | undefined): string | null {
+  const [value, expires, mac] = (token ?? "").split(".");
+  if (!value || !expires || !mac) return null;
+  const expected = createHmac("sha256", appKey()).update(`${value}.${expires}`).digest("base64url");
+  return safeEqual(mac, expected) && Number(expires) > Date.now() ? value : null;
 }

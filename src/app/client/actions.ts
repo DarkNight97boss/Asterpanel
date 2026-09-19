@@ -1,5 +1,6 @@
 "use server";
 
+import { invoiceLabel } from "@/lib/format";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { and, eq } from "drizzle-orm";
@@ -12,6 +13,7 @@ import { createSession, destroyAllSessions, requireUser } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
+import { beginEnrolment, confirmEnrolment, disableTotp, verifySecondFactor } from "@/lib/totp";
 import { baseUrl } from "@/lib/url";
 import { enabledGateways } from "@/modules/gateways";
 
@@ -35,7 +37,7 @@ export async function payInvoice(_: ActionState, form: FormData): Promise<Action
       invoice,
       email: me.email,
       returnUrl: `${await baseUrl()}/client/invoices/${invoice.id}`,
-      label: `${billing.invoicePrefix}${invoice.number}`,
+      label: invoiceLabel(billing.invoicePrefix, invoice),
     });
     if (result.kind !== "redirect") return { ok: result.text };
     url = result.url;
@@ -137,4 +139,30 @@ export async function changePassword(_: ActionState, form: FormData): Promise<Ac
   await audit(user.id, "auth.password.changed", "user", user.id);
   notify.passwordChanged(user.id);
   return { ok: "Password updated" };
+}
+
+// ─── Two-factor authentication ───────────────────────────────────────────────
+
+export async function startTwoFactor() {
+  const user = await requireUser();
+  await beginEnrolment(user.id);
+  revalidatePath("/client/profile");
+}
+
+export async function confirmTwoFactor(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  const codes = await confirmEnrolment(user.id, String(form.get("code") ?? ""));
+  if (!codes) return { error: "That code is not valid" };
+  await audit(user.id, "auth.2fa.enabled", "user", user.id);
+  revalidatePath("/client/profile");
+  return { ok: `Two-factor authentication is on. Save these recovery codes now — each works once and they are not shown again:\n\n${codes.join("\n")}` };
+}
+
+export async function disableTwoFactor(_: ActionState, form: FormData): Promise<ActionState> {
+  const user = await requireUser();
+  if (!(await verifySecondFactor(user.id, String(form.get("code") ?? "")))) return { error: "That code is not valid" };
+  await disableTotp(user.id);
+  await audit(user.id, "auth.2fa.disabled", "user", user.id);
+  revalidatePath("/client/profile");
+  return { ok: "Two-factor authentication is off" };
 }
