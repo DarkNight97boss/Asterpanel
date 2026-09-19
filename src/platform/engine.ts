@@ -225,9 +225,9 @@ export async function createWorkload(input: NewWorkload): Promise<string> {
   return workloadId;
 }
 
-async function newDeployment(workloadId: string, trigger: "manual" | "push" | "create") {
+async function newDeployment(workloadId: string, trigger: "manual" | "push" | "create" | "rollback", extra: Partial<typeof schema.deployments.$inferInsert> = {}) {
   const db = await getDb();
-  const [d] = await db.insert(schema.deployments).values({ workloadId, trigger }).returning({ id: schema.deployments.id });
+  const [d] = await db.insert(schema.deployments).values({ ...extra, workloadId, trigger }).returning({ id: schema.deployments.id });
   return d.id;
 }
 
@@ -439,8 +439,36 @@ export async function deployWorkload(workloadId: string, trigger: "manual" | "pu
   if (w.type !== "app" && w.type !== "static") throw new PlatformError("This workload is not deployed from Git");
   if (w.status === "suspended") throw new PlatformError("This service is suspended");
   const deploymentId = await newDeployment(w.id, trigger);
-  await enqueue(w, "workload.deploy", { spec: await buildSpec(w.id), deploymentId }, { deploymentId, actorId });
+  const keepImages = (await rollbackCandidates(w.id)).slice(0, ROLLBACK_DEPTH - 1).map((d) => d.id);
+  await enqueue(w, "workload.deploy", { spec: await buildSpec(w.id), deploymentId, keepImages }, { deploymentId, actorId });
   return deploymentId;
+}
+
+/** How many past images a node keeps per app, and therefore how far back a rollback can go. */
+export const ROLLBACK_DEPTH = 5;
+
+/** Successful deployments whose image is still on the node, newest first; the first one is what is live now. */
+export async function rollbackCandidates(workloadId: string) {
+  const db = await getDb();
+  return db
+    .select()
+    .from(schema.deployments)
+    .where(and(eq(schema.deployments.workloadId, workloadId), eq(schema.deployments.status, "live"), ne(schema.deployments.trigger, "rollback")))
+    .orderBy(desc(schema.deployments.createdAt))
+    .limit(ROLLBACK_DEPTH);
+}
+
+/** Puts a previous build back in service without rebuilding. */
+export async function rollbackDeployment(workloadId: string, deploymentId: string, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "app") throw new PlatformError("Only applications can be rolled back; static sites are rebuilt from Git");
+  if (w.status === "suspended") throw new PlatformError("This service is suspended");
+  const target = (await rollbackCandidates(w.id)).find((d) => d.id === deploymentId);
+  if (!target) throw new PlatformError("This deployment is too old to roll back to");
+  const id = await newDeployment(w.id, "rollback", { rollbackOf: target.id, commitSha: target.commitSha, commitMessage: target.commitMessage });
+  await enqueue(w, "workload.deploy", { spec: await buildSpec(w.id), deploymentId: id, rollbackTo: target.id }, { deploymentId: id, actorId });
+  await audit(actorId, "workload.rollback", "workload", w.id, { to: target.commitSha.slice(0, 7) });
+  return id;
 }
 
 export async function runTool(workloadId: string, tool: ToolName, args: Record<string, string> = {}, actorId: string | null = null) {
@@ -900,7 +928,8 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   if (job.deploymentId) {
     await db
       .update(deployments)
-      .set({ status: ok ? "live" : "failed", commitSha: result.commitSha ?? "", commitMessage: (result.commitMessage ?? "").slice(0, 300), finishedAt: new Date() })
+      // A rollback already knows its commit; a build reports it.
+      .set({ status: ok ? "live" : "failed", ...(result.commitSha ? { commitSha: result.commitSha, commitMessage: (result.commitMessage ?? "").slice(0, 300) } : {}), finishedAt: new Date() })
       .where(eq(deployments.id, job.deploymentId));
   }
   if (job.backupId) {

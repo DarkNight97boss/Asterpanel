@@ -14,6 +14,7 @@ export async function invoiceXml(invoice: LoadedInvoice): Promise<{ filename: st
   if (invoice.status === "draft" || invoice.status === "cancelled") throw new FpaError("Only issued invoices can be exported");
   const [co] = invoice.companyId ? await (await getDb()).select().from(schema.companies).where(eq(schema.companies.id, invoice.companyId)) : [];
   const c = invoice.client;
+  const [credited] = invoice.creditsInvoiceId ? await (await getDb()).select().from(schema.invoices).where(eq(schema.invoices.id, invoice.creditsInvoiceId)) : [];
   const progressive = (invoice.fiscalYear % 100) * 100_000 + invoice.number;
   const xml = buildFatturaPa(
     seller,
@@ -43,6 +44,7 @@ export async function invoiceXml(invoice: LoadedInvoice): Promise<{ filename: st
       tax: invoice.tax,
       total: invoice.total,
       paid: invoice.status === "paid",
+      credits: credited && { number: invoiceLabel(billing.invoicePrefix, credited), date: credited.createdAt },
       paidBy: invoice.transactions.some((t) => t.gateway === "stripe") ? "card" : "transfer",
       lines: invoice.items.map((i) => ({ description: i.description, amount: i.amount })),
     },

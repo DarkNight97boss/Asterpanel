@@ -81,7 +81,6 @@ export const settingsSchemas = {
     nameservers: z.array(z.string()).max(8).default([]),
     hostmaster: z.string().default(""),
   }),
-  /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
   /** Italian electronic invoicing (FatturaPA): the seller block of the XML. */
   einvoice: z.object({
     enabled: z.boolean().default(false),
@@ -118,6 +117,7 @@ export const settingsSchemas = {
     secretKey: z.string().default(""),
     keepLocal: z.boolean().default(true),
   }),
+  /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
   platform: z.object({
     signingPrivateKey: z.string().default(""),
     signingPublicKey: z.string().default(""),

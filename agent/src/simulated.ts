@@ -110,9 +110,14 @@ export class SimulatedDriver implements Driver {
     return this.runtime(spec);
   }
 
-  async deploy(spec: WorkloadSpec, log: Log) {
+  async deploy(spec: WorkloadSpec, log: Log, ids?: { deploymentId: string; rollbackTo?: string; keepImages?: string[] }) {
     this.must(spec);
     const src = spec.source!;
+    if (ids?.rollbackTo) {
+      await this.step(log, `[sim] re-tagging image d-${ids.rollbackTo.slice(0, 8)} as current`);
+      await this.step(log, "[sim] new container healthy, switching traffic");
+      return this.runtime(spec);
+    }
     if (/fail/i.test(src.branch)) {
       await this.step(log, `[sim] git clone --branch ${src.branch} ${src.repoUrl}`);
       throw new Error(`Remote branch ${src.branch} not found`);
@@ -125,6 +130,7 @@ export class SimulatedDriver implements Driver {
       await this.step(log, `[sim] publishing ./${src.outputDir || "."}`);
     } else {
       await this.step(log, "[sim] docker build . (Dockerfile)");
+      if (/unhealthy/i.test(src.branch)) throw new Error("The new version did not answer on its port within 90 seconds; the previous version keeps serving");
       await this.step(log, `[sim] starting container on port ${src.port ?? 8080} with ${Object.keys(spec.env ?? {}).length} env vars`);
     }
     await this.step(log, `[sim] live at https://${spec.domains[0]}`);

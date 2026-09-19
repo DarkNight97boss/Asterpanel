@@ -485,25 +485,74 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
   }
 
   /** (Re)starts the serving container of an app or static site from what is already built. */
+  /** Tags what just went live so it can be rolled back to, and drops the oldest kept builds. */
+  private async keepImage(name: string, deploymentId: string, keep: string[]) {
+    await this.docker(["tag", `${name}:current`, `${name}:d-${deploymentId}`]);
+    const wanted = new Set([deploymentId, ...keep].map((id) => `d-${id}`));
+    const out = await this.docker(["images", name, "--format", "{{.Tag}}"], undefined, { quiet: true }).catch(() => "");
+    for (const tag of out.split("\n")) if (tag.startsWith("d-") && !wanted.has(tag)) await this.docker(["rmi", `${name}:${tag}`], undefined, { quiet: true }).catch(() => {});
+  }
+
+  /**
+   * Puts `<name>:current` in service. Apps switch without downtime: the new
+   * container starts beside the old one, must answer on its port, and only then
+   * joins the proxy network; the old one is removed afterwards. If it never
+   * answers, it is discarded and the old version keeps serving.
+   */
   private async release(spec: WorkloadSpec, log: Log) {
     const { name, net, tenantNet } = this.check(spec);
     await this.ensureNetwork(net);
-    await this.rmContainer(name);
     if (spec.kind === "static") {
+      await this.rmContainer(name);
       await this.docker(["run", "-d", "--name", name, "--network", net, ...this.limits(spec), "--read-only", "--tmpfs", "/var/cache/nginx", "--tmpfs", "/var/run", "-v", `${name}-site:/usr/share/nginx/html:ro`, ...this.route(spec, 80), "nginx:alpine"], log);
-    } else {
-      const port = spec.source?.port ?? 8080;
-      const env = { ...spec.env, PORT: String(port) };
-      await this.ensureNetwork(tenantNet);
-      await this.docker(["run", "-d", "--name", name, "--network", net, ...this.limits(spec), ...this.envArgs(env), ...this.route(spec, port), `${name}:current`], log, { env });
-      await this.docker(["network", "connect", tenantNet, name]); // reach the tenant's databases by name
+      await this.docker(["network", "connect", PROXY_NET, name]);
+      return;
     }
-    await this.docker(["network", "connect", PROXY_NET, name]);
+    const port = spec.source?.port ?? 8080;
+    const env = { ...spec.env, PORT: String(port) };
+    const next = `${name}-next`;
+    await this.ensureNetwork(tenantNet);
+    await this.rmContainer(next);
+    await this.docker(["run", "-d", "--name", next, "--network", net, ...this.limits(spec), ...this.envArgs(env), ...this.route(spec, port), `${name}:current`], log, { env });
+    await this.docker(["network", "connect", tenantNet, next]); // reach the tenant's databases by name
+    try {
+      await this.waitHealthy(next, net, port, log);
+    } catch (err) {
+      const tail = await this.docker(["logs", "--tail", "40", next], undefined, { quiet: true }).catch(() => "");
+      if (tail) log(tail);
+      await this.rmContainer(next);
+      throw err;
+    }
+    await this.docker(["network", "connect", PROXY_NET, next]);
+    await this.rmContainer(name);
+    await this.docker(["rename", next, name]);
   }
 
-  async deploy(spec: WorkloadSpec, log: Log): Promise<JobResult> {
+  /** Any HTTP answer below 500 counts: an app without a "/" route is still up. */
+  private async waitHealthy(container: string, net: string, port: number, log: Log) {
+    log("waiting for the new version to answer");
+    for (let i = 0; i < 30; i++) {
+      const state = await this.docker(["inspect", "-f", "{{.State.Running}}", container], undefined, { quiet: true }).catch(() => "false");
+      if (state.trim() !== "true") throw new Error("The new version exited right after starting; the previous version keeps serving");
+      const code = await this.docker(["run", "--rm", "--network", net, "curlimages/curl:latest", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", `http://${container}:${port}/`], undefined, { quiet: true, timeoutMs: 20_000 }).catch(() => "000");
+      if (/^[1-4]\d\d$/.test(code.trim())) return;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+    throw new Error(`The new version did not answer on port ${port} within 90 seconds; the previous version keeps serving`);
+  }
+
+  async deploy(spec: WorkloadSpec, log: Log, ids?: { deploymentId: string; rollbackTo?: string; keepImages?: string[] }): Promise<JobResult> {
     const { name } = this.check(spec);
     await this.ensureProxy(log);
+    if (ids?.rollbackTo) {
+      if (!ID.test(ids.rollbackTo)) throw new Error("Invalid deployment id");
+      const image = `${name}:d-${ids.rollbackTo}`;
+      if (!(await this.exists("image", image))) throw new Error("The image of that deployment is no longer on this server");
+      log(`rolling back to ${image}`);
+      await this.docker(["tag", image, `${name}:current`]);
+      await this.release(spec, log);
+      return { runtime: { internalHost: name } };
+    }
     const { dir, commitSha, commitMessage } = await this.checkout(spec, log);
     const src = spec.source!;
 
@@ -530,6 +579,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       await this.docker(["tag", `${name}:build`, `${name}:current`]);
     }
     await this.release(spec, log);
+    if (spec.kind === "app" && ids && ID.test(ids.deploymentId)) await this.keepImage(name, ids.deploymentId, ids.keepImages ?? []);
     await rm(dir, { recursive: true, force: true });
     log(`live at https://${spec.domains[0] ?? name}`);
     return { commitSha, commitMessage, runtime: { internalHost: name } };

@@ -594,3 +594,36 @@ test("migration: inputs are confined, a safety backup runs first, and the passwo
   assert.deepEqual([failed.status, failed.error], ["failed", "Permission denied (password)"]);
   assert.equal((await workload(id)).status, "running", "a failed migration leaves the site up");
 });
+
+test("rollback: a kept build goes live again without rebuilding; an unhealthy release leaves the old one serving", async () => {
+  const db = await dbm.getDb();
+  const id = await engine.createWorkload({ clientId, type: "app", name: "Rolling", config: { repoUrl: "https://github.com/acme/rolling.git", branch: "main", port: 3000 } });
+  await drain();
+  await engine.deployWorkload(id, "manual");
+  await drain();
+  const [live, first] = await engine.rollbackCandidates(id);
+  assert.ok(live && first && live.id !== first.id);
+
+  const rb = await engine.rollbackDeployment(id, first.id);
+  const [job] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.deploymentId, rb));
+  const { decryptJson } = await import("../src/lib/crypto");
+  assert.equal(decryptJson<{ rollbackTo?: string }>(job.payload, {}).rollbackTo, first.id);
+  await drain();
+  const [done] = await db.select().from(dbm.schema.deployments).where(eq(dbm.schema.deployments.id, rb));
+  assert.deepEqual([done.status, done.trigger, done.rollbackOf, done.commitSha], ["live", "rollback", first.id, first.commitSha], "keeps the commit of the build it restored");
+  const [finished] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.deploymentId, rb));
+  assert.ok(/re-tagging image/.test(finished.log) && !/git clone/.test(finished.log));
+  assert.ok(!(await engine.rollbackCandidates(id)).some((d) => d.trigger === "rollback"), "a rollback is not itself a build to roll back to");
+
+  await assert.rejects(engine.rollbackDeployment(id, "00000000-0000-4000-8000-000000000000"), /too old/);
+  const dbw = await engine.createWorkload({ clientId, type: "database", name: "NoRoll", config: { engine: "redis" } });
+  await assert.rejects(engine.rollbackDeployment(dbw, first.id), /Only applications/);
+
+  await engine.updateWorkloadConfig(id, { branch: "unhealthy" });
+  await drain();
+  const bad = await engine.deployWorkload(id, "manual");
+  await drain();
+  const [failed] = await db.select().from(dbm.schema.deployments).where(eq(dbm.schema.deployments.id, bad));
+  assert.equal(failed.status, "failed");
+  assert.equal((await workload(id)).status, "running", "the previous version keeps serving");
+});

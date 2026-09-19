@@ -153,7 +153,7 @@ export class Agent {
       case "workload.clone":
         return d.clone(p.spec, p.from, log);
       case "workload.deploy":
-        return d.deploy(p.spec, log);
+        return d.deploy(p.spec, log, envelope.payload as JobPayloads["workload.deploy"]);
       case "workload.logs":
         return d.logs(p.spec, p.lines);
       case "workload.tool":

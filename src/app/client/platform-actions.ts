@@ -194,6 +194,16 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function rollback(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    await engine.rollbackDeployment(workload.id, String(form.get("deploymentId")), user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+}
+
 export async function runTool(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   const tool = z.enum(TOOLS).parse(form.get("tool"));

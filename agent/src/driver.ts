@@ -15,7 +15,7 @@ export interface Driver {
   stop(spec: WorkloadSpec, log: Log): Promise<JobResult>;
   remove(spec: WorkloadSpec, log: Log): Promise<JobResult>;
   clone(spec: WorkloadSpec, from: WorkloadSpec, log: Log): Promise<JobResult>;
-  deploy(spec: WorkloadSpec, log: Log): Promise<JobResult>;
+  deploy(spec: WorkloadSpec, log: Log, ids?: { deploymentId: string; rollbackTo?: string; keepImages?: string[] }): Promise<JobResult>;
   logs(spec: WorkloadSpec, lines: number): Promise<JobResult>;
   tool(spec: WorkloadSpec, tool: ToolName, args: Record<string, string>, log: Log): Promise<JobResult>;
   db(spec: WorkloadSpec, action: "tables" | "query", sql: string, log: Log): Promise<JobResult>;

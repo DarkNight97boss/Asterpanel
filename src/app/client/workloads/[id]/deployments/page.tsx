@@ -6,7 +6,8 @@ import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { baseUrl } from "@/lib/url";
 import { requireWorkload } from "@/platform/access";
-import { deploy } from "../../../platform-actions";
+import { rollbackCandidates } from "@/platform/engine";
+import { deploy, rollback } from "../../../platform-actions";
 
 export default async function Deployments({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -18,7 +19,9 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
     db.select().from(schema.deployments).where(eq(schema.deployments.workloadId, w.id)).orderBy(desc(schema.deployments.createdAt)).limit(30),
     db.select({ deploymentId: schema.jobs.deploymentId, log: schema.jobs.log, error: schema.jobs.error, status: schema.jobs.status }).from(schema.jobs).where(eq(schema.jobs.workloadId, w.id)).orderBy(desc(schema.jobs.createdAt)).limit(60),
   ]);
-  const TRIGGER: Record<string, string> = { manual: "Manual", push: "Git push", create: "First deploy" };
+  const TRIGGER: Record<string, string> = { manual: "Manual", push: "Git push", create: "First deploy", rollback: "Rollback" };
+  // The newest kept build is what is live now: rolling back to it would change nothing.
+  const canRollBack = new Set(w.type === "app" ? (await rollbackCandidates(w.id)).slice(1).map((d) => d.id) : []);
 
   return (
     <div className="space-y-6">
@@ -54,6 +57,16 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
                       <span className="min-w-0 flex-1 truncate">{d.commitMessage || "—"}</span>
                       <span className="text-xs text-muted">{t(TRIGGER[d.trigger])} · {formatDateTime(d.createdAt, locale)}</span>
                     </summary>
+                    {canRollBack.has(d.id) && w.status !== "suspended" && (
+                      <div className="flex items-center justify-between gap-4 border-t border-border bg-subtle px-5 py-3 text-sm">
+                        <span className="text-muted">{t("Put this version back in service, without rebuilding. Switches with no downtime.")}</span>
+                        <ActionForm action={rollback} className="">
+                          <input type="hidden" name="id" value={w.id} />
+                          <input type="hidden" name="deploymentId" value={d.id} />
+                          <SubmitButton size="sm" variant="secondary">{t("Roll back to this version")}</SubmitButton>
+                        </ActionForm>
+                      </div>
+                    )}
                     <pre className="max-h-96 overflow-auto bg-ink px-5 py-4 font-mono text-xs leading-relaxed text-ink-fg">{job?.log || t("No output yet.")}</pre>
                   </details>
                 </li>

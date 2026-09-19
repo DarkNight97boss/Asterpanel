@@ -204,11 +204,20 @@ export async function provisionDomain(serviceId: string, request: { action?: str
       await mod.register(creds, { domain: d.name, years: 1, contact, nameservers }, http);
       await db.update(schema.domainNames).set({ status: "active", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
     }
+    await hostZone(d, nameservers).catch(() => {});
     await syncDomain(d.id).catch(() => {});
   } catch (err) {
     await db.update(schema.domainNames).set({ status: "failed", statusMessage: readable(err).slice(0, 300) }).where(eq(schema.domainNames.id, d.id));
     throw err;
   }
+}
+
+/** A domain pointed at our own name servers gets its DNS zone right away, ready for records. */
+async function hostZone(d: typeof schema.domainNames.$inferSelect, nameservers: string[]) {
+  const ours = new Set((await getSettings("dns")).nameservers);
+  if (!ours.size || !nameservers.every((ns) => ours.has(ns))) return;
+  const { createZone } = await import("@/platform/engine");
+  await createZone(d.clientId, d.name, null, d.companyId);
 }
 
 export async function renewDomain(serviceId: string): Promise<void> {
