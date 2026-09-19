@@ -127,6 +127,11 @@ export const centralnic: RegistrarModule = {
     await call(c, http, "ModifyDomain", { domain, ...list("nameserver", nameservers) });
   },
 
+  async setPrivacy(c, domain, enabled, http) {
+    // "WHOIS trustee": the registrar's own details are published in place of the owner's.
+    await call(c, http, "ModifyDomain", { domain, "X-ACCEPT-WHOISTRUSTEE-TAC": enabled ? "1" : "0" });
+  },
+
   async updateContact(c, domain, contact, http) {
     const handle = await contactHandle(c, http, contact);
     await call(c, http, "ModifyDomain", { domain, ...roles(handle), ...itExtensions(domain, contact) });

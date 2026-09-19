@@ -36,6 +36,17 @@ const fakeHttp = (async (url: string | URL | Request, init?: RequestInit) => {
     }
   }
   const json = (o: unknown) => new Response(JSON.stringify(o));
+  if (u.includes("openprovider")) {
+    const body = init?.body && String(init.body).startsWith("{") ? JSON.parse(String(init.body)) : {};
+    calls[calls.length - 1].params = { ...body, __method: init?.method ?? "GET", __auth: (init?.headers as Record<string, string>)?.Authorization ?? "" };
+    if (u.endsWith("/auth/login")) return json(body.password === "op-pw" ? { code: 0, data: { token: "op-token" } } : { code: 196, desc: "Authentication/Authorization Failed" });
+    if (u.endsWith("/domains/check")) return json({ code: 0, data: { results: body.domains.map((d: { name: string; extension: string }) => ({ domain: `${d.name}.${d.extension}`, status: registered.has(`${d.name}.${d.extension}`) ? "active" : "free" })) } });
+    if (u.endsWith("/customers")) return json({ code: 0, data: { handle: "MR000001-IT" } });
+    if (u.endsWith("/domains") && init?.method === "POST") return json({ code: 0, data: { id: 555, status: "ACT" } });
+    if (u.includes("/domains?")) return json({ code: 0, data: { results: [{ id: 555, domain: { name: "opdemo", extension: "eu" } }] } });
+    if (u.endsWith("/domains/555")) return init?.method === "PUT" ? json({ code: 0, data: {} }) : json({ code: 0, data: { status: "ACT", expiration_date: "2027-09-20 12:00:00", is_locked: true, name_servers: [{ name: "NS1.ASTER.TEST" }, { name: "ns2.aster.test" }] } });
+    return json({ code: 0, data: {} });
+  }
   if (u.endsWith("/Domain/Check")) return json({ status: registered.has(params.Domain) ? "UNAVAILABLE" : "AVAILABLE" });
   if (u.endsWith("/Domain/Info")) return json({ status: "SUCCESS", domainstatus: "REGISTERED", expirationdate: "2027/09/19", registrarlock: "ENABLED", nameserver: ["ns1.aster.test", "ns2.aster.test"], transferauthinfo: "IBS-CODE" });
   if (u.endsWith("/Account/Balance/Get")) return json({ status: "SUCCESS", balance: [{ amount: "12.50", currency: "USD" }] });
@@ -228,4 +239,33 @@ test("suggestions are only free names near the search; contact changes are valid
   assert.deepEqual(calls.map((c) => c.params.command), ["AddContact", "ModifyDomain"]);
   assert.deepEqual([calls[0].params.firstname, calls[1].params.ownercontact0], ["Luigi", "P-ABC123"]);
   assert.equal((await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, d.id)))[0].contact.city, "Napoli");
+});
+
+test("Openprovider: token login, {name, extension} domains, customer handles, numeric ids for later changes", async () => {
+  const db = await dbm.getDb();
+  const { getSettings, updateSettings } = await import("../src/lib/settings");
+  const current = await getSettings("registrars");
+  await updateSettings("registrars", { ...current, accounts: { ...current.accounts, openprovider: { username: "reseller", password: "op-pw", sandbox: "1" } } });
+  await db.insert(dbm.schema.domainTlds).values({ tld: "eu", registrar: "openprovider", registerPrice: 790, renewPrice: 890, transferPrice: 790, sort: 9 });
+
+  calls.length = 0;
+  const { invoiceId, domainId } = await domains.orderDomain({ clientId, companyId: null, domain: "opdemo.eu", action: "register", contact, years: 2 });
+  const [invoice] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  await billing.recordPayment({ invoiceId, gateway: "bank", externalId: "op-1", amount: invoice.total });
+  assert.ok(calls.every((c) => !c.url.includes("openprovider") || c.url.startsWith("https://api.cte.openprovider.eu/v1beta")), "sandbox host");
+  const create = calls.find((c) => c.url.endsWith("/domains") && c.params.__method === "POST")!;
+  assert.deepEqual([create.params.domain, create.params.period, create.params.owner_handle, create.params.__auth], [{ name: "opdemo", extension: "eu" }, 2, "MR000001-IT", "Bearer op-token"]);
+  const customer = calls.find((c) => c.url.endsWith("/customers"))!.params as unknown as { phone: { country_code: string; area_code: string; subscriber_number: string }; address: { country: string } };
+  assert.deepEqual([customer.phone, customer.address.country], [{ country_code: "+39", area_code: "061", subscriber_number: "234567" }, "IT"]);
+  const [d] = await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, domainId));
+  assert.deepEqual([d.status, d.expiresAt?.toISOString(), d.nameservers[0]], ["active", "2027-09-20T12:00:00.000Z", "ns1.aster.test"]);
+
+  calls.length = 0;
+  await domains.setDomainPrivacy(domainId, true);
+  const put = calls.find((c) => c.params.__method === "PUT")!;
+  assert.ok(put.url.endsWith("/domains/555") && (put.params as Record<string, unknown>).is_private_whois_enabled === true);
+  assert.equal((await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, domainId)))[0].privacy, true);
+
+  await updateSettings("registrars", { ...current, accounts: { ...current.accounts, openprovider: { username: "reseller", password: "wrong", sandbox: "1" } } });
+  await assert.rejects(domains.testRegistrar("openprovider"), /Authentication/);
 });

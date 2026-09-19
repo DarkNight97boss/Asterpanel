@@ -1909,6 +1909,11 @@ const it: Record<string, string> = {
   "This address is in use by a server": "Questo indirizzo è in uso da un server",
   "Enable the provider again to release its addresses": "Riattiva il provider per restituire i suoi indirizzi",
   "Release the pool's addresses first": "Restituisci prima gli indirizzi del pool",
+  "WHOIS privacy": "Privacy WHOIS",
+  "Your details are hidden from public WHOIS": "I tuoi dati sono nascosti dal WHOIS pubblico",
+  "Your details are public, where the registry publishes them": "I tuoi dati sono pubblici, dove il registro li pubblica",
+  "Show my details": "Mostra i miei dati",
+  "Hide my details": "Nascondi i miei dati",
 };
 
 export default it;

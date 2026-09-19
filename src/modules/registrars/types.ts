@@ -58,6 +58,8 @@ export interface RegistrarModule {
   setNameservers(c: RegistrarCredentials, domain: string, nameservers: string[], http: Http): Promise<void>;
   setLock(c: RegistrarCredentials, domain: string, locked: boolean, http: Http): Promise<void>;
   authCode(c: RegistrarCredentials, domain: string, http: Http): Promise<string>;
+  /** Hides (or shows again) the registrant's details in public WHOIS, where the registry allows it. */
+  setPrivacy(c: RegistrarCredentials, domain: string, enabled: boolean, http: Http): Promise<void>;
   /** Replaces the four contacts of a domain. Some registries treat a new owner as a paid "trade": the module says so by throwing. */
   updateContact(c: RegistrarCredentials, domain: string, contact: DomainContact, http: Http): Promise<void>;
 }
