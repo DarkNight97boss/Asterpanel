@@ -1856,6 +1856,18 @@ const it: Record<string, string> = {
   "Referral commission (%)": "Commissione referral (%)",
   "Share of each paid invoice credited to who brought the customer. 0 = programme off.": "Quota di ogni fattura pagata accreditata a chi ha portato il cliente. 0 = programma spento.",
   "Commission lasts (months)": "Durata della commissione (mesi)",
+  "Processes and storage": "Processi e archiviazione",
+  "More copies share the traffic; workers run the same image with another command (queues, schedulers); persistent folders keep their content across deploys and are shared by all copies.": "Più copie si dividono il traffico; i worker eseguono la stessa immagine con un altro comando (code, scheduler); le cartelle persistenti mantengono il contenuto tra un deploy e l'altro e sono condivise da tutte le copie.",
+  "Copies serving traffic": "Copie che servono traffico",
+  "Workers": "Worker",
+  "One per line, as name: command. Up to 3. They get no traffic.": "Uno per riga, come nome: comando. Fino a 3. Non ricevono traffico.",
+  "Persistent folders": "Cartelle persistenti",
+  "Absolute paths inside the container, one per line. Up to 3. Everything else is replaced at each deploy.": "Percorsi assoluti dentro il container, uno per riga. Fino a 3. Tutto il resto viene sostituito a ogni deploy.",
+  "Saved. The app is re-released with the new setup, without downtime.": "Salvato. L'app viene rilasciata di nuovo con la nuova configurazione, senza downtime.",
+  "Live": "Live",
+  "Available for applications": "Disponibile per le applicazioni",
+  "Up to 3 workers per app": "Fino a 3 worker per app",
+  "Up to 3 persistent folders per app": "Fino a 3 cartelle persistenti per app",
 };
 
 export default it;

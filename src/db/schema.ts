@@ -501,6 +501,10 @@ export type WorkloadConfig = {
   healthPath?: string;
   /** Shared variable groups attached to this service. */
   envGroupIds?: string[];
+  /** Apps: how many copies serve traffic (1-5), extra background processes, and folders that survive deploys. */
+  instances?: number;
+  workers?: { name: string; command: string }[];
+  volumes?: string[];
   /** Commands run inside the app's container on a schedule (UTC). */
   crons?: { schedule: string; command: string }[];
   /** Build a preview environment for every other branch that is pushed. */

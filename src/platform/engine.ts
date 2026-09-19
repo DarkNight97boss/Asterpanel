@@ -162,6 +162,8 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
       w.type === "database"
         ? { engine: c.engine ?? "mysql", version: c.version ?? "", name: dbSafe, user: dbSafe, password: secrets.dbPassword ?? "" }
         : undefined,
+    // Previews run a single copy without workers: they exist to look at a branch, not to process production queues.
+    scale: w.type === "app" ? { instances: w.environment === "live" ? Math.min(5, Math.max(1, c.instances ?? 1)) : 1, workers: w.environment === "live" ? (c.workers ?? []) : [], volumes: c.volumes ?? [] } : undefined,
     crons: w.type === "app" && w.environment === "live" ? c.crons : w.type === "wordpress" && c.systemCron ? [{ schedule: "*/5 * * * *", command: "cd /var/www/html && php wp-cron.php" }] : undefined,
     edge:
       w.type !== "database" && (c.hsts || (c.sitePasswordUser && secrets.sitePassword))
@@ -771,6 +773,34 @@ export async function attachEnvGroups(workloadId: string, groupIds: string[], ac
   const mine = w.companyId ? await db.select({ id: schema.envGroups.id }).from(schema.envGroups).where(eq(schema.envGroups.companyId, w.companyId)) : [];
   const envGroupIds = [...new Set(groupIds)].filter((id) => mine.some((g) => g.id === id)).slice(0, 10);
   await updateWorkloadConfig(w.id, { envGroupIds }, actorId);
+}
+
+export const MAX_INSTANCES = 5;
+
+/**
+ * Copies, background workers and persistent folders of an app. Workers are
+ * written one per line as `name: command`; folders are absolute paths inside
+ * the container.
+ */
+export async function saveAppScale(workloadId: string, input: { instances: number; workers: string; volumes: string }, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "app" || w.environment !== "live") throw new PlatformError("Available for applications");
+  const instances = Math.min(MAX_INSTANCES, Math.max(1, Math.round(input.instances) || 1));
+  const workers: { name: string; command: string }[] = [];
+  for (const raw of input.workers.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^([a-z][a-z0-9-]{0,19}):\s*(\S.{0,499})$/.exec(line);
+    if (!m || /[\0-\x1f]/.test(m[2])) throw new PlatformError(`Write each worker as “name: command”, with a short lower-case name: ${line.slice(0, 40)}`);
+    if (workers.some((x) => x.name === m[1])) throw new PlatformError(`Two workers are called ${m[1]}`);
+    workers.push({ name: m[1], command: m[2] });
+  }
+  if (workers.length > 3) throw new PlatformError("Up to 3 workers per app");
+  const volumes = [...new Set(input.volumes.split(/[\r\n,]+/).map((v) => v.trim().replace(/\/+$/, "")).filter(Boolean))];
+  // Absolute, plain, and never a system folder: a volume there would hide the image's own files.
+  for (const v of volumes) if (!/^\/[\w.-]+(\/[\w.-]+)*$/.test(v) || v.includes("..") || /^\/(bin|sbin|lib|lib64|usr|etc|proc|sys|dev|boot|run)(\/|$)/.test(v)) throw new PlatformError(`Not a valid folder for persistent data: ${v.slice(0, 60)}`);
+  if (volumes.length > 3) throw new PlatformError("Up to 3 persistent folders per app");
+  await updateWorkloadConfig(w.id, { instances, workers, volumes }, actorId);
 }
 
 /** Replaces the scheduled jobs of an app. `text` is one job per line, see `parseCronLines`. */

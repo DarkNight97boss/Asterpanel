@@ -34,12 +34,17 @@ export function detectBuildpack(files: Files, port: number): Buildpack | null {
     const pm = files.has("pnpm-lock.yaml") ? "pnpm" : files.has("yarn.lock") ? "yarn" : files.has("bun.lockb") || files.has("bun.lock") ? "bun" : "npm";
     const install = { pnpm: "corepack enable && pnpm install --frozen-lockfile", yarn: "corepack enable && yarn install --immutable || yarn install --frozen-lockfile", bun: "npm i -g bun && bun install --frozen-lockfile", npm: files.has("package-lock.json") ? "npm ci" : "npm install" }[pm];
     const run = pm === "npm" ? "npm run" : `${pm} run`;
+    // Manifests first: Docker re-uses the installed dependencies until they change, so most deploys skip the install.
+    // Only when there are no install scripts that need the sources (postinstall hooks reading the repo).
+    const lock = { pnpm: "pnpm-lock.yaml", yarn: "yarn.lock", bun: files.has("bun.lock") ? "bun.lock" : "bun.lockb", npm: "package-lock.json" }[pm];
+    const hooks = ["preinstall", "install", "postinstall", "prepare"].some((h) => h in scripts);
+    const manifests = !hooks && files.has(lock) ? `COPY package.json ${lock} ./\n` : "COPY . .\n";
     const start = scripts.start ? `${run} start` : typeof pkg.main === "string" && /^[\w./-]+$/.test(pkg.main) ? `node ${pkg.main}` : files.has("server.js") ? "node server.js" : files.has("index.js") ? "node index.js" : "";
     if (!start) return null;
     return {
       name: `Node.js ${node} (${pm})`,
       // Dev dependencies are needed by the build; production mode starts after it.
-      dockerfile: `FROM node:${node}-slim\nWORKDIR /app\nENV CI=true\nCOPY . .\nRUN ${install}\n${scripts.build ? `RUN ${run} build\n` : ""}ENV NODE_ENV=production\nRUN chown -R node:node /app\nUSER node\n${tail(port, sh(start))}`,
+      dockerfile: `FROM node:${node}-slim\nWORKDIR /app\nENV CI=true\n${manifests}RUN ${install}\nCOPY . .\n${scripts.build ? `RUN ${run} build\n` : ""}ENV NODE_ENV=production\nRUN chown -R node:node /app\nUSER node\n${tail(port, sh(start))}`,
     };
   }
 
@@ -56,7 +61,10 @@ export function detectBuildpack(files: Files, port: number): Buildpack | null {
       (files.has("main.py") ? "python main.py" : files.has("app.py") ? "python app.py" : "");
     if (!start) return null;
     const extra = /gunicorn/.test(start) && !deps.includes("gunicorn") ? " gunicorn" : /uvicorn/.test(start) && !deps.includes("uvicorn") ? " uvicorn" : "";
-    return { name: `Python ${py}`, dockerfile: `FROM python:${py}-slim\nWORKDIR /app\nENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1\nCOPY . .\nRUN ${install}${extra ? ` && pip install --no-cache-dir${extra}` : ""}\nRUN useradd -m app && chown -R app /app\nUSER app\n${tail(port, sh(start))}` };
+    const pip = extra ? ` && pip install --no-cache-dir${extra}` : "";
+    // requirements.txt first: the dependency layer is re-used until it changes.
+    const steps = files.has("requirements.txt") ? `COPY requirements.txt ./\nRUN ${install}${pip}\nCOPY . .` : `COPY . .\nRUN ${install}${pip}`;
+    return { name: `Python ${py}`, dockerfile: `FROM python:${py}-slim\nWORKDIR /app\nENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1\n${steps}\nRUN useradd -m app && chown -R app /app\nUSER app\n${tail(port, sh(start))}` };
   }
 
   if (files.has("go.mod")) {
