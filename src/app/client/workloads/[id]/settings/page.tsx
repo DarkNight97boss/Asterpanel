@@ -1,5 +1,7 @@
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, CardHeader, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
+import { eq } from "drizzle-orm";
+import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
 import { DB_VERSIONS, PHP_LIMITS, readSecrets } from "@/platform/engine";
@@ -11,6 +13,7 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
   const c = w.config;
   const versions: readonly string[] = w.type === "database" ? DB_VERSIONS[c.engine ?? "mysql"] : [];
   const newer = versions.slice(versions.indexOf(c.version || versions.at(-1) || "") + 1);
+  const groups = w.companyId && (w.type === "app" || w.type === "static") ? await (await getDb()).select({ id: schema.envGroups.id, name: schema.envGroups.name }).from(schema.envGroups).where(eq(schema.envGroups.companyId, w.companyId)) : [];
   const php = c.php ?? { memoryLimitMb: 256, uploadMaxMb: 64, maxExecutionTime: 60, maxInputVars: 3000 };
   const env = Object.entries(readSecrets(w).env ?? {}).map(([k, v]) => `${k}=${v}`).join("\n");
   const git = w.type === "app" || w.type === "static";
@@ -33,7 +36,20 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
               {git && (
                 <>
                   <Field label={t("Branch")}><Input name="branch" defaultValue={c.branch ?? "main"} required /></Field>
-                  <Field label={t("Git repository (HTTPS)")} className="sm:col-span-2"><Input name="repoUrl" type="url" defaultValue={c.repoUrl} required /></Field>
+                  <Field label={t("Git repository (HTTPS)")} className="sm:col-span-2"><Input name="repoUrl" type="url" defaultValue={c.repoUrl} required={w.type === "static"} /></Field>
+                  {w.type === "app" && (
+                    <>
+                      <Field label={t("…or a ready-made Docker image")} hint={t("Public images only. Leave the repository empty to use it.")}><Input name="image" defaultValue={c.image ?? ""} placeholder="ghcr.io/acme/api:1.4.2" /></Field>
+                      <Field label={t("Health check path")} hint={t("A new version gets traffic only after this path answers OK. Empty = any answer on /.")}><Input name="healthPath" defaultValue={c.healthPath ?? ""} placeholder="/healthz" /></Field>
+                    </>
+                  )}
+                  {groups.length > 0 && (
+                    <fieldset className="sm:col-span-2">
+                      <legend className="mb-1.5 text-sm font-medium">{t("Shared variable groups")}</legend>
+                      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm">{groups.map((g) => <label key={g.id} className="flex items-center gap-2"><input type="checkbox" name="envGroup" value={g.id} defaultChecked={c.envGroupIds?.includes(g.id)} className="accent-(--accent)" />{g.name}</label>)}</div>
+                      <p className="mt-1 text-xs text-muted">{t("The variables below win over the ones of a group.")}</p>
+                    </fieldset>
+                  )}
                   {w.type === "static" ? (
                     <>
                       <Field label={t("Build command")}><Input name="buildCommand" defaultValue={c.buildCommand} /></Field>

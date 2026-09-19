@@ -487,6 +487,12 @@ export type WorkloadConfig = {
   // wordpress: automatic updates
   autoUpdate?: "off" | "minor" | "all";
   autoUpdateLastAt?: string;
+  /** Apps: a ready-made public image to run instead of building from Git. */
+  image?: string;
+  /** Apps: path that must answer 2xx/3xx before a new version gets traffic (default: any answer on /). */
+  healthPath?: string;
+  /** Shared variable groups attached to this service. */
+  envGroupIds?: string[];
   /** Commands run inside the app's container on a schedule (UTC). */
   crons?: { schedule: string; command: string }[];
   /** Build a preview environment for every other branch that is pushed. */
@@ -789,6 +795,22 @@ export const domainNames = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("domain_names_company_idx").on(t.companyId)],
+);
+
+/** Environment variables shared by several services of a company (e.g. one database URL for three apps). */
+export const envGroups = pgTable(
+  "env_groups",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** Encrypted `Record<string, string>`. */
+    vars: text("vars").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("env_groups_company_idx").on(t.companyId)],
 );
 
 // ─── API keys & webhooks ─────────────────────────────────────────────────────

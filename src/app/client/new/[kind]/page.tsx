@@ -117,7 +117,8 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
               )}
               {git && (
                 <>
-                  <Field label={t("Git repository (HTTPS)")} className="sm:col-span-2"><Input name="repoUrl" type="url" placeholder="https://github.com/you/project.git" required /></Field>
+                  <Field label={t("Git repository (HTTPS)")} className="sm:col-span-2"><Input name="repoUrl" type="url" placeholder="https://github.com/you/project.git" required={type === "static"} /></Field>
+                  {type === "app" && <Field label={t("…or a ready-made Docker image")} hint={t("Public images only. Leave the repository empty to use it.")} className="sm:col-span-2"><Input name="image" placeholder="ghcr.io/acme/api:1.4.2" /></Field>}
                   <Field label={t("Branch")}><Input name="branch" defaultValue="main" required /></Field>
                   <Field label={t("Access token")} hint={t("Only for private repositories. Stored encrypted.")}><Input name="accessToken" type="password" autoComplete="off" /></Field>
                   {type === "static" ? (

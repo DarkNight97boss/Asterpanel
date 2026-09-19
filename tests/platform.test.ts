@@ -868,3 +868,40 @@ test("managed databases: password rotation lands only after the node did it; imp
   await assert.rejects(engine.importDbDump(redis, "https://files.example.com/d.sql"), /MySQL and PostgreSQL/);
   await drain();
 });
+
+test("apps: shared variable groups, deploys from a ready-made image, custom health path", async () => {
+  const db = await dbm.getDb();
+  const [{ id: companyId }] = await db.insert(dbm.schema.companies).values({ name: "Env Co" }).returning();
+  const [{ id: other }] = await db.insert(dbm.schema.companies).values({ name: "Other Co" }).returning();
+
+  for (const bad of ["", "UPPER/case", "-flag", "img --privileged", "a/../b", "ghcr.io/acme/api:tag with space", "https://ghcr.io/acme/api"]) assert.throws(() => engine.cleanImage(bad), engine.PlatformError, bad);
+  assert.equal(engine.cleanImage(" ghcr.io/acme/api:1.4.2 "), "ghcr.io/acme/api:1.4.2");
+  assert.equal(engine.cleanImage("registry.example.com:5000/team/app@sha256:" + "a".repeat(64)), "registry.example.com:5000/team/app@sha256:" + "a".repeat(64));
+
+  const id = await engine.createWorkload({ clientId, companyId, type: "app", name: "From Image", config: { image: "ghcr.io/acme/api:1.4.2", port: 8080, healthPath: "/healthz" }, env: { LOG_LEVEL: "debug", SHARED: "mine" } });
+  await drain();
+  const w = await workload(id);
+  assert.equal(w.status, "running");
+  const job = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id)))[0];
+  assert.match(job.log, /docker pull ghcr\.io\/acme\/api:1\.4\.2/);
+  assert.match(job.log, /health check \/healthz ok/);
+  assert.ok(!/git clone/.test(job.log));
+
+  const g1 = await engine.saveEnvGroup(companyId, { name: "database", vars: { DATABASE_URL: "postgres://one", SHARED: "from-group" } });
+  const foreign = await engine.saveEnvGroup(other, { name: "theirs", vars: { STOLEN: "1" } });
+  await assert.rejects(engine.saveEnvGroup(companyId, { name: "bad", vars: { "NOT VALID": "x" } }), /Invalid variable name/);
+  await engine.attachEnvGroups(id, [g1, foreign, g1]);
+  assert.deepEqual((await workload(id)).config.envGroupIds, [g1], "another company's group cannot be attached");
+  assert.deepEqual((await engine.buildSpec(id)).env, { DATABASE_URL: "postgres://one", SHARED: "mine", LOG_LEVEL: "debug" }, "the app's own value wins over the group's");
+  await drain();
+
+  const before = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id))).length;
+  await engine.saveEnvGroup(companyId, { id: g1, name: "database", vars: { DATABASE_URL: "postgres://two" } });
+  assert.equal((await engine.buildSpec(id)).env?.DATABASE_URL, "postgres://two");
+  assert.equal((await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id))).length, before + 1, "changing a group re-applies the apps that use it");
+  await assert.rejects(engine.saveEnvGroup(other, { id: g1, name: "hijack", vars: {} }), /Group not found/);
+  await assert.rejects(engine.deleteEnvGroup(companyId, g1), /Detach the group/);
+  await engine.attachEnvGroups(id, []);
+  await engine.deleteEnvGroup(companyId, g1);
+  await drain();
+});

@@ -1744,6 +1744,22 @@ const it: Record<string, string> = {
   "The metrics endpoint is off.": "L'endpoint delle metriche è spento.",
   "New token": "Nuovo token",
   "Metrics endpoint switched off": "Endpoint delle metriche disattivato",
+  "…or a ready-made Docker image": "…oppure un'immagine Docker già pronta",
+  "Public images only. Leave the repository empty to use it.": "Solo immagini pubbliche. Lascia vuoto il repository per usarla.",
+  "Health check path": "Percorso di health check",
+  "A new version gets traffic only after this path answers OK. Empty = any answer on /.": "Una nuova versione riceve traffico solo dopo che questo percorso risponde OK. Vuoto = qualsiasi risposta su /.",
+  "Shared variable groups": "Gruppi di variabili condivise",
+  "The variables below win over the ones of a group.": "Le variabili qui sotto prevalgono su quelle di un gruppo.",
+  "Variable groups": "Gruppi di variabili",
+  "Environment variables shared by several apps: change a value once, every app that uses the group gets it. Attach groups from each app's Settings.": "Variabili d'ambiente condivise da più app: cambi un valore una volta e lo ricevono tutte le app che usano il gruppo. I gruppi si collegano dalle Impostazioni di ogni app.",
+  "One KEY=value per line. Encrypted at rest.": "Una CHIAVE=valore per riga. Cifrate a riposo.",
+  "Saved. The services that use this group restart with the new values.": "Salvato. I servizi che usano questo gruppo si riavviano con i nuovi valori.",
+  "Enter a Git repository or a Docker image": "Inserisci un repository Git o un'immagine Docker",
+  "Enter an image such as ghcr.io/acme/api:1.4.2": "Inserisci un'immagine come ghcr.io/acme/api:1.4.2",
+  "Give the group a name": "Dai un nome al gruppo",
+  "Group not found": "Gruppo non trovato",
+  "Detach the group from its services first": "Scollega prima il gruppo dai suoi servizi",
+  "The health check path starts with / and has no query string": "Il percorso di health check inizia con / e non ha query string",
 };
 
 export default it;
