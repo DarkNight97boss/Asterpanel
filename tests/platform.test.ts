@@ -716,3 +716,24 @@ test("automatic updates: backup first, once a day, and a broken site gets its ba
   assert.equal(await engine.runWpAutoUpdates(new Date(now.getTime() + 25 * 3_600_000)), 2, "and tomorrow it tries again");
   await drain();
 });
+
+test("scheduled jobs: saved on the app, carried to the node, run only when due and only for running live apps", async () => {
+  const id = await engine.createWorkload({ clientId, type: "app", name: "Cronned", config: { repoUrl: "https://github.com/acme/cronned.git", branch: "main", port: 3000 } });
+  await drain();
+  await assert.rejects(engine.saveCrons(id, "whenever node x.js"), /Not a valid schedule/);
+  await engine.saveCrons(id, "*/10 * * * * node scripts/sync.js\n@daily node scripts/report.js");
+  assert.deepEqual((await engine.buildSpec(id)).crons?.map((c) => c.schedule), ["*/10 * * * *", "@daily"]);
+  await drain();
+  const slug = (await workload(id)).slug;
+  const due = (iso: string) => agent.cronTick(new Date(iso)).then((list) => list.filter((l) => l.startsWith(slug)));
+  assert.deepEqual(await due("2026-09-19T10:20:30Z"), [`${slug}: node scripts/sync.js`]);
+  assert.deepEqual(await due("2026-09-19T10:20:59Z"), [], "the same minute is never run twice");
+  assert.deepEqual(await due("2026-09-19T10:21:00Z"), []);
+  assert.deepEqual(await due("2026-09-20T00:00:05Z"), [`${slug}: node scripts/sync.js`, `${slug}: node scripts/report.js`]);
+
+  await engine.powerWorkload(id, "stop");
+  await drain();
+  assert.deepEqual(await due("2026-09-19T10:30:00Z"), [], "a stopped app runs nothing");
+  const wp = await engine.createWorkload({ clientId, type: "wordpress", name: "NoCron" });
+  await assert.rejects(engine.saveCrons(wp, "@daily true"), /available for applications/);
+});

@@ -1604,6 +1604,11 @@ const it: Record<string, string> = {
   "Everything, major versions included": "Tutto, versioni maggiori comprese",
   "Before automatic update": "Prima dell'aggiornamento automatico",
   "Automatic updates are available for live WordPress sites": "Gli aggiornamenti automatici sono disponibili per i siti WordPress live",
+  "Scheduled jobs": "Job pianificati",
+  "Commands run inside your app's container, with its environment variables. Times are UTC. A job that is still running is not started again on top of itself; output shows up in Logs.": "Comandi eseguiti dentro il container della tua app, con le sue variabili d'ambiente. Gli orari sono UTC. Un job ancora in corso non viene riavviato sopra se stesso; l'output compare nei Log.",
+  "One job per line: schedule, then command": "Un job per riga: pianificazione, poi comando",
+  "Five cron fields or @hourly, @daily, @weekly, @monthly. Up to 5 jobs.": "Cinque campi cron oppure @hourly, @daily, @weekly, @monthly. Fino a 5 job.",
+  "Scheduled jobs are available for applications": "I job pianificati sono disponibili per le applicazioni",
 };
 
 export default it;

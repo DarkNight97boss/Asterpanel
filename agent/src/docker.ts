@@ -5,6 +5,7 @@ import { mkdir, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs
 import { createInterface } from "node:readline";
 import path from "node:path";
 import type { ApmReport, JobPayloads, JobResult, MigrationSource, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
+import { cronMatches, parseCron } from "../../src/platform/cron";
 import { detectBuildpack } from "./buildpack";
 import type { Driver, Log } from "./driver";
 
@@ -442,6 +443,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
 
   async stop(spec: WorkloadSpec, log: Log) {
     const { name } = this.check(spec);
+    await rm(this.cronFile(spec), { force: true });
     for (const c of [`${name}-sftp`, `${name}-cache`, name, `${name}-db`]) if (await this.exists("container", c)) await this.docker(["stop", c], log);
     return {};
   }
@@ -457,6 +459,8 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     await rm(path.join(this.opts.dataDir, "builds", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "cache", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "sftp", spec.slug), { recursive: true, force: true });
+    await rm(this.cronFile(spec), { force: true });
+    await rm(path.join(this.opts.dataDir, "cron-logs", `${spec.slug}.log`), { force: true });
     return {};
   }
 
@@ -504,6 +508,46 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return { dir, commitSha, commitMessage: message.join(" ") };
   }
 
+  // ─── Scheduled jobs of apps ──────────────────────────────────────────────
+
+  private cronFile = (spec: Pick<WorkloadSpec, "slug">) => path.join(this.opts.dataDir, "crons", `${spec.slug}.json`);
+  private cronsRunning = new Set<string>();
+
+  /** The agent is the scheduler: jobs are kept on disk so they survive its restarts. */
+  private async saveCrons(spec: WorkloadSpec) {
+    this.check(spec);
+    if (!spec.crons?.length) return void (await rm(this.cronFile(spec), { force: true }));
+    await mkdir(path.dirname(this.cronFile(spec)), { recursive: true });
+    await writeFile(this.cronFile(spec), JSON.stringify({ slug: spec.slug, crons: spec.crons }), { mode: 0o600 });
+  }
+
+  async runDueCrons(now: Date) {
+    const dir = path.join(this.opts.dataDir, "crons");
+    const started: string[] = [];
+    for (const file of await readdir(dir).catch(() => [] as string[])) {
+      const { slug, crons } = JSON.parse(await readFile(path.join(dir, file), "utf8").catch(() => "{}")) as { slug?: string; crons?: { schedule: string; command: string }[] };
+      if (!slug || !SLUG.test(slug)) continue;
+      for (const [i, job] of (crons ?? []).entries()) {
+        const schedule = parseCron(job.schedule);
+        const key = `${slug}#${i}`;
+        // A job still running from its previous turn is not started again on top of itself.
+        if (!schedule || !cronMatches(schedule, now) || this.cronsRunning.has(key)) continue;
+        this.cronsRunning.add(key);
+        started.push(`${slug}: ${job.command}`);
+        const logFile = path.join(this.opts.dataDir, "cron-logs", `${slug}.log`);
+        void (async () => {
+          const stamp = () => new Date().toISOString();
+          // The command is data for `sh -c` inside the customer's own container, never part of our command line.
+          const out = await this.docker(["exec", "-e", "ASTER_CRON", `aster-${slug}`, "sh", "-c", "$ASTER_CRON"], undefined, { env: { ASTER_CRON: job.command }, quiet: true, timeoutMs: 15 * 60_000 }).then((o) => `ok\n${o}`, (err: Error) => `failed: ${err.message}`);
+          await mkdir(path.dirname(logFile), { recursive: true });
+          const previous = await readFile(logFile, "utf8").catch(() => "");
+          await writeFile(logFile, `${previous}${stamp()} $ ${job.command}\n${out.trim().slice(-4000)}\n`.slice(-200_000), { mode: 0o600 });
+        })().finally(() => this.cronsRunning.delete(key));
+      }
+    }
+    return started;
+  }
+
   /** Tags what just went live so it can be rolled back to, and drops the oldest kept builds. */
   private async keepImage(name: string, deploymentId: string, keep: string[]) {
     await this.docker(["tag", `${name}:current`, `${name}:d-${deploymentId}`]);
@@ -544,7 +588,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     }
     await this.docker(["network", "connect", PROXY_NET, next]);
     await this.rmContainer(name);
-    await this.docker(["rename", next, name]);
+    await this.docker(["rename", next, name]);    await this.saveCrons(spec);
   }
 
   /** Any HTTP answer below 500 counts: an app without a "/" route is still up. */
@@ -612,7 +656,8 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     const output = await new Promise<string>((resolve) =>
       execFile("docker", ["logs", "--tail", String(lines), "--timestamps", name], { maxBuffer: 16 * 1024 * 1024 }, (_err, out, errOut) => resolve(`${out}${errOut}`)),
     );
-    return { output: output.slice(-200_000) };
+    const cron = spec.kind === "app" ? await readFile(path.join(this.opts.dataDir, "cron-logs", `${spec.slug}.log`), "utf8").catch(() => "") : "";
+    return { output: `${output}${cron ? `\n── scheduled jobs ──\n${cron.split("\n").slice(-60).join("\n")}` : ""}`.slice(-200_000) };
   }
 
   async tool(spec: WorkloadSpec, tool: ToolName, args: Record<string, string>, log: Log): Promise<JobResult> {

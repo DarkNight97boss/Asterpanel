@@ -4,6 +4,7 @@ import { and, asc, count, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm
 import { getDb, schema } from "@/db";
 import type { WorkloadConfig, WorkloadType } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { parseCronLines, type CronJob } from "./cron";
 import { publicHttpsUrl } from "@/lib/net";
 import { emitEvent } from "@/lib/webhooks";
 import { decryptJson, encryptJson, randomToken } from "@/lib/crypto";
@@ -143,6 +144,7 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
       w.type === "database"
         ? { engine: c.engine ?? "mysql", version: c.version ?? "", name: dbSafe, user: dbSafe, password: secrets.dbPassword ?? "" }
         : undefined,
+    crons: w.type === "app" && w.environment === "live" ? c.crons : undefined,
     source:
       w.type === "app" || w.type === "static"
         ? { repoUrl: c.repoUrl ?? "", branch: c.branch ?? "main", accessToken: secrets.accessToken, buildCommand: c.buildCommand, outputDir: c.outputDir, port: c.port }
@@ -630,6 +632,19 @@ export async function listMigrations(workloadId: string): Promise<MigrationRun[]
     } catch {}
     return { id: j.id, status: j.status, label: String(decryptJson<{ label?: string }>(j.payload, {}).label ?? ""), createdAt: j.createdAt, finishedAt: j.finishedAt, error: j.error, log: j.log, summary };
   });
+}
+
+/** Replaces the scheduled jobs of an app. `text` is one job per line, see `parseCronLines`. */
+export async function saveCrons(workloadId: string, text: string, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "app" || w.environment !== "live") throw new PlatformError("Scheduled jobs are available for applications");
+  let crons: CronJob[];
+  try {
+    crons = parseCronLines(text);
+  } catch (err) {
+    throw new PlatformError(err instanceof Error ? err.message : "Invalid schedule");
+  }
+  await updateWorkloadConfig(w.id, { crons }, actorId);
 }
 
 // ─── WordPress: one-click login and automatic updates ───────────────────────

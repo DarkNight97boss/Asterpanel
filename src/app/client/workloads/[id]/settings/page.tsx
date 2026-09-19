@@ -3,7 +3,7 @@ import { Card, CardHeader, Field, Input, Select, Textarea } from "@/components/u
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
 import { readSecrets } from "@/platform/engine";
-import { destroy, saveSettings } from "../../../platform-actions";
+import { destroy, saveCronJobs, saveSettings } from "../../../platform-actions";
 
 export default async function Settings({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -49,6 +49,21 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
           </ActionForm>
         </div>
       </Card>
+
+      {w.type === "app" && w.environment === "live" && (
+        <Card>
+          <CardHeader title={t("Scheduled jobs")} description={t("Commands run inside your app's container, with its environment variables. Times are UTC. A job that is still running is not started again on top of itself; output shows up in Logs.")} />
+          <div className="p-5">
+            <ActionForm action={saveCronJobs}>
+              <input type="hidden" name="id" value={w.id} />
+              <Field label={t("One job per line: schedule, then command")} hint={t("Five cron fields or @hourly, @daily, @weekly, @monthly. Up to 5 jobs.")}>
+                <Textarea name="crons" rows={5} className="font-mono text-xs" defaultValue={(w.config.crons ?? []).map((j) => `${j.schedule} ${j.command}`).join("\n")} placeholder={"*/15 * * * * node scripts/sync.js\n@daily php artisan schedule:run"} />
+              </Field>
+              <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+      )}
 
       {w.environment === "live" && (
         <Card className="border-danger/40">

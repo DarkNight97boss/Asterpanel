@@ -468,6 +468,8 @@ export type WorkloadConfig = {
   // wordpress: automatic updates
   autoUpdate?: "off" | "minor" | "all";
   autoUpdateLastAt?: string;
+  /** Commands run inside the app's container on a schedule (UTC). */
+  crons?: { schedule: string; command: string }[];
   /** Build a preview environment for every other branch that is pushed. */
   previews?: boolean;
   // edge rules (web workloads)

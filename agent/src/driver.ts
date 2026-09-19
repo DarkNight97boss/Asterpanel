@@ -27,6 +27,8 @@ export interface Driver {
   backupRestore(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget): Promise<JobResult>;
   backupDelete(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget): Promise<JobResult>;
   offsiteTest(offsite: OffsiteTarget, log: Log): Promise<JobResult>;
+  /** Runs the scheduled jobs that are due in the minute of `now`. Returns what it started, for logs and tests. */
+  runDueCrons(now: Date): Promise<string[]>;
   workloadCount(): Promise<number>;
   /** Resource usage per workload slug, for analytics. */
   workloadStats(): Promise<{ slug: string; cpuPercent: number; memMb: number; rxMb: number; txMb: number }[]>;

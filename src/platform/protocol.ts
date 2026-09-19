@@ -34,6 +34,8 @@ export type WorkloadSpec = {
   database?: { engine: "mysql" | "postgres" | "redis"; version: string; name: string; user: string; password: string };
   source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number };
   env?: Record<string, string>;
+  /** Apps: commands the agent runs inside the container on a schedule. */
+  crons?: { schedule: string; command: string }[];
   /** Edge rules applied by the node's proxy. `from` is a path, `to` a path or absolute URL. */
   redirects?: { from: string; to: string; code: 301 | 302 }[];
   denyIps?: string[];

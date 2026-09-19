@@ -2,9 +2,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
 import type { JobPayloads, JobResult, MigrationSource, OffsiteTarget, WorkloadSpec } from "../../src/platform/protocol";
+import { cronMatches, parseCron } from "../../src/platform/cron";
 import type { Driver, Log } from "./driver";
 
-type State = { offsite?: Record<string, number>; workloads: Record<string, { kind: string; running: boolean; domains: string[]; updated?: string[]; net?: number; files?: Record<string, string> }>; backups: Record<string, number> };
+type State = { offsite?: Record<string, number>; workloads: Record<string, { crons?: { schedule: string; command: string }[]; kind: string; running: boolean; domains: string[]; updated?: string[]; net?: number; files?: Record<string, string> }>; backups: Record<string, number> };
 
 /**
  * Pretends to be a container host. State lives in a JSON file so restarts of
@@ -74,7 +75,11 @@ export class SimulatedDriver implements Driver {
     if (spec.redirects?.length) await this.step(log, `[sim] ${spec.redirects.length} redirect rule(s): ${spec.redirects.map((r) => `${r.from} → ${r.to} (${r.code})`).join(", ")}`);
     if (spec.denyIps?.length) await this.step(log, `[sim] denying ${spec.denyIps.length} address(es): ${spec.denyIps.join(", ")}`);
     await this.step(log, `[sim] routing ${spec.domains.join(", ")}`);
-    this.write((s) => (s.workloads[spec.slug].domains = spec.domains));
+    if (spec.crons?.length) await this.step(log, `[sim] ${spec.crons.length} scheduled job(s)`);
+    this.write((s) => {
+      s.workloads[spec.slug].domains = spec.domains;
+      s.workloads[spec.slug].crons = spec.crons ?? [];
+    });
     return this.runtime(spec);
   }
 
@@ -272,6 +277,18 @@ export class SimulatedDriver implements Driver {
     await this.step(log, `[sim] replacing https://old-site.example with ${newUrl}`);
     this.write((s) => (s.workloads[spec.slug].files = { ...s.workloads[spec.slug].files, "wp-content/migrated.txt": from }));
     return { runtime: { version: "6.7" }, output: JSON.stringify({ oldUrl: "https://old-site.example", tablePrefix: "wpx_", wpVersion: "6.7" }) };
+  }
+
+  async runDueCrons(now: Date) {
+    const started: string[] = [];
+    for (const [slug, w] of Object.entries(this.read().workloads)) {
+      if (!w.running) continue;
+      for (const job of w.crons ?? []) {
+        const schedule = parseCron(job.schedule);
+        if (schedule && cronMatches(schedule, now)) started.push(`${slug}: ${job.command}`);
+      }
+    }
+    return started;
   }
 
   async backupCreate(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
