@@ -4,7 +4,7 @@ import { flushNotifications } from "@/lib/notify";
 import { syncDueDomains } from "@/lib/domains";
 import { runAutoCharges } from "@/lib/payment-methods";
 import { pollSdi } from "@/lib/sdi";
-import { syncCloudNodes } from "@/lib/cloud";
+import { maintainCapacity, syncCloudNodes } from "@/lib/cloud";
 import { runScheduledBackups } from "@/platform/engine";
 import { runUptimeChecks } from "@/platform/uptime";
 
@@ -28,11 +28,12 @@ async function handle(request: Request) {
   const charges = await runAutoCharges().catch(() => ({ paid: 0, failed: 0 }));
   const sdi = await pollSdi().catch(() => 0);
   await syncCloudNodes().catch(() => 0);
+  const capacity = await maintainCapacity().catch(() => ({ created: 0, removed: 0 }));
   const backups = await runScheduledBackups();
   const domains = await syncDueDomains().catch(() => 0);
   const uptime = await runUptimeChecks();
   await flushNotifications();
-  return Response.json({ ...report, charges, sdi, backups, domains, uptime });
+  return Response.json({ ...report, charges, sdi, capacity, backups, domains, uptime });
 }
 
 export { handle as GET, handle as POST };

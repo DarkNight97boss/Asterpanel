@@ -210,7 +210,7 @@ export async function saveCloudProvider(_: ActionState, form: FormData): Promise
   if (account.enabled && provider.fields.some((f) => !f.optional && !account[f.name])) return { error: "Fill in the credentials before enabling this provider" };
   const acmeEmail = String(form.get("acmeEmail") ?? current.acmeEmail).trim();
   if (acmeEmail && !z.string().email().safeParse(acmeEmail).success) return { error: "Enter a valid email address" };
-  await updateSettings("cloud", { acmeEmail, accounts: { ...current.accounts, [provider.id]: account } });
+  await updateSettings("cloud", { ...current, acmeEmail, accounts: { ...current.accounts, [provider.id]: account } });
   await audit(admin.id, "settings.updated", "settings", `cloud.${provider.id}`);
   revalidatePath("/admin/settings/cloud");
   return { ok: "Saved" };
@@ -241,4 +241,33 @@ export async function createCloudServer(_: ActionState, form: FormData): Promise
   }
   revalidatePath("/admin/nodes");
   return { ok: "The server is being created. It installs the agent by itself and comes online in about five minutes." };
+}
+
+/** Own servers only, or let the panel create cloud servers when room runs out. */
+export async function saveInfrastructureMode(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("cloud");
+  const enabled = form.get("mode") === "auto";
+  const parsed = z
+    .object({
+      provider: z.string().trim(),
+      region: z.string().trim().regex(/^[a-z0-9][a-z0-9.-]{0,40}$/i).or(z.literal("")),
+      size: z.string().trim().regex(/^[a-z0-9][a-z0-9.-]{0,40}$/i).or(z.literal("")),
+      maxNodes: z.coerce.number().int().min(1).max(200),
+      workloadsPerNode: z.coerce.number().int().min(1).max(500),
+      minFreeSlots: z.coerce.number().int().min(0).max(500),
+      removeEmptyAfterHours: z.coerce.number().int().min(0).max(720),
+      baseDomainTemplate: z.string().trim().toLowerCase().regex(/^(\{name\}\.)([a-z0-9-]+\.)+[a-z]{2,}$/, "Use the form {name}.nodes.example.com").or(z.literal("")),
+    })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: `${parsed.error.issues[0].path.join(".")}: ${parsed.error.issues[0].message}` };
+  if (enabled) {
+    if (current.accounts[parsed.data.provider]?.enabled !== "1") return { error: "Enable and configure the provider above first" };
+    if (!parsed.data.region || !parsed.data.size) return { error: "Choose a region and a size" };
+    if (!parsed.data.baseDomainTemplate) return { error: "Automatic servers need a base domain template, otherwise their sites get no address" };
+  }
+  await updateSettings("cloud", { ...current, autoscale: { ...parsed.data, enabled } });
+  await audit(admin.id, "settings.updated", "settings", "cloud.autoscale", { enabled, provider: parsed.data.provider });
+  revalidatePath("/admin/settings/cloud");
+  return { ok: "Saved" };
 }

@@ -44,7 +44,7 @@ export default async function Nodes() {
                   <Td>
                     <Link href={`/admin/nodes/${n.id}`} className="font-medium hover:text-link">{n.name}</Link>
                     <span className="block font-mono text-xs text-muted">*.{n.baseDomain || "—"}</span>
-                    <span className="block text-xs text-muted">{n.provider ? `${n.provider} · ${n.providerSize} · ${n.publicIp || t("address pending")}` : t("Own server")}</span>
+                    <span className="block text-xs text-muted">{n.provider ? `${n.provider} · ${n.providerSize} · ${n.publicIp || t("address pending")}${n.autoscaled ? ` · ${t("automatic")}` : ""}` : t("Own server")}</span>
                   </Td>
                   <Td>{n.region || "—"}</Td>
                   <Td>

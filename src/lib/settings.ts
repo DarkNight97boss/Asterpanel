@@ -123,6 +123,26 @@ export const settingsSchemas = {
     accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),
     /** Let's Encrypt contact given to nodes created from here. */
     acmeEmail: z.string().default(""),
+    /**
+     * How capacity is managed. Off: the administrator adds servers (own hardware or cloud) by hand.
+     * On: when no server has room, the panel creates one at the chosen provider by itself.
+     */
+    autoscale: z
+      .object({
+        enabled: z.boolean().default(false),
+        provider: z.string().default(""),
+        region: z.string().default(""),
+        size: z.string().default(""),
+        maxNodes: z.number().int().min(1).max(200).default(5),
+        workloadsPerNode: z.number().int().min(1).max(500).default(25),
+        /** Keep at least this many free places ready (0 = create servers only when needed). */
+        minFreeSlots: z.number().int().min(0).max(500).default(0),
+        /** `{name}` becomes the server name: `{name}.nodes.example.com`. */
+        baseDomainTemplate: z.string().default(""),
+        /** Destroy automatically created servers that stayed empty this long (0 = never). */
+        removeEmptyAfterHours: z.number().int().min(0).max(720).default(0),
+      })
+      .default({ enabled: false, provider: "", region: "", size: "", maxNodes: 5, workloadsPerNode: 25, minFreeSlots: 0, baseDomainTemplate: "", removeEmptyAfterHours: 0 }),
   }),
   registrars: z.object({
     /** Credentials per registrar module id. */

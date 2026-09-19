@@ -126,3 +126,62 @@ test("AWS and Google requests carry what each API expects", async () => {
   await cloud.syncCloudNodes();
   assert.equal((await nodeBy("gcp-node-01")).publicIp, "192.0.2.44");
 });
+
+test("automatic mode: no room means a new cloud server, shared by orders arriving together, within the ceiling", async () => {
+  const db = await dbm.getDb();
+  const engine = await import("../src/platform/engine");
+  const [{ id: clientId }] = await db.insert(dbm.schema.users).values({ email: "auto@example.test", passwordHash: "x" }).returning();
+  const s = await settings.getSettings("cloud");
+  const auto = { enabled: false, provider: "hetzner", region: "fsn1", size: "cx32", maxNodes: 2, workloadsPerNode: 2, minFreeSlots: 0, baseDomainTemplate: "{name}.nodes.example.com", removeEmptyAfterHours: 1 };
+  await settings.updateSettings("cloud", { ...s, autoscale: auto });
+  await db.update(dbm.schema.nodes).set({ status: "disabled" });
+  await assert.rejects(engine.createWorkload({ clientId, type: "database", name: "Manual", config: { engine: "redis" } }), /No server is available/, "manual mode: orders wait for the administrator");
+
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...auto, enabled: true } });
+  process.env.APP_URL = ORIGIN;
+  calls.length = 0;
+  const [a, b] = await Promise.all([engine.createWorkload({ clientId, type: "database", name: "One", config: { engine: "redis" } }), engine.createWorkload({ clientId, type: "database", name: "Two", config: { engine: "redis" } })]);
+  assert.equal(calls.filter((c) => c.method === "POST" && c.url.endsWith("/servers")).length, 1, "two simultaneous orders, one new server");
+  const wa = (await db.select().from(dbm.schema.workloads).where(eq(dbm.schema.workloads.id, a)))[0];
+  const wb = (await db.select().from(dbm.schema.workloads).where(eq(dbm.schema.workloads.id, b)))[0];
+  assert.equal(wa.nodeId, wb.nodeId);
+  const [node] = await db.select().from(dbm.schema.nodes).where(eq(dbm.schema.nodes.id, wa.nodeId));
+  assert.deepEqual([node.autoscaled, node.provider, node.providerSize, node.maxWorkloads, node.baseDomain, wa.status], [true, "hetzner", "cx32", 2, `${node.name}.nodes.example.com`, "creating"]);
+
+  const c = await engine.createWorkload({ clientId, type: "database", name: "Three", config: { engine: "redis" } });
+  assert.notEqual((await db.select().from(dbm.schema.workloads).where(eq(dbm.schema.workloads.id, c)))[0].nodeId, node.id, "the first server is full: a second one");
+  await engine.createWorkload({ clientId, type: "database", name: "Four", config: { engine: "redis" } });
+  await assert.rejects(engine.createWorkload({ clientId, type: "database", name: "Five", config: { engine: "redis" } }), /No server is available/, "the ceiling on servers holds");
+  await assert.rejects(engine.createWorkload({ clientId, type: "database", name: "Elsewhere", region: "us-east", config: { engine: "redis" } }), /in this region/);
+
+  // The wildcard record appears by itself when the parent zone is hosted here.
+  await db.insert(dbm.schema.dnsZones).values({ clientId, name: "nodes.example.com" });
+  await db.update(dbm.schema.nodes).set({ publicIp: "" }).where(eq(dbm.schema.nodes.id, node.id));
+  await cloud.syncCloudNodes();
+  const records = await db.select().from(dbm.schema.dnsRecords);
+  assert.deepEqual(records.filter((r) => r.name.endsWith(node.name)).map((r) => [r.name, r.type, r.value]).sort(), [[`*.${node.name}`, "A", "203.0.113.7"], [node.name, "A", "203.0.113.7"]]);
+});
+
+test("automatic mode keeps the reserve asked for and retires servers that stayed empty, never below the reserve", async () => {
+  const db = await dbm.getDb();
+  const s = await settings.getSettings("cloud");
+  await db.delete(dbm.schema.workloads);
+  await db.update(dbm.schema.nodes).set({ lastSeenAt: new Date(), status: "online" }).where(eq(dbm.schema.nodes.autoscaled, true));
+  const now = new Date();
+  assert.deepEqual(await cloud.maintainCapacity(now, ORIGIN), { created: 0, removed: 0 }, "first run only notes that they are empty");
+  const later = new Date(now.getTime() + 2 * 3_600_000);
+  await db.update(dbm.schema.nodes).set({ lastSeenAt: later }).where(eq(dbm.schema.nodes.autoscaled, true));
+
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, minFreeSlots: 3 } });
+  assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 0, removed: 0 }, "4 free places, 3 to keep: removing a server of 2 would break the reserve");
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, minFreeSlots: 2 } });
+  calls.length = 0;
+  assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 0, removed: 1 });
+  assert.ok(calls.some((c) => c.method === "DELETE"));
+  assert.equal((await db.select().from(dbm.schema.nodes).where(eq(dbm.schema.nodes.autoscaled, true))).length, 1);
+
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, minFreeSlots: 4, removeEmptyAfterHours: 0 } });
+  assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 1, removed: 0 }, "short of the reserve: one more server");
+  await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, enabled: false } });
+  assert.deepEqual(await cloud.maintainCapacity(later, ORIGIN), { created: 0, removed: 0 });
+});

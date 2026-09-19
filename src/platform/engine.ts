@@ -87,8 +87,13 @@ async function pickNode(region?: string) {
   const free = rows
     .filter((r) => nodeIsOnline(r.node) && (r.node.maxWorkloads === 0 || r.used < r.node.maxWorkloads))
     .sort((a, b) => a.used - b.used);
-  if (!free.length) throw new PlatformError(region ? "No server is available in this region right now" : "No server is available right now");
-  return free[0].node;
+  if (free.length) return free[0].node;
+  // Automatic mode: a server is created at the cloud provider and the workload waits on it;
+  // its jobs are picked up as soon as the new machine's agent comes online.
+  const { autoscaleNode } = await import("@/lib/cloud");
+  const fresh = await autoscaleNode(region).catch(() => null);
+  if (fresh) return fresh;
+  throw new PlatformError(region ? "No server is available in this region right now" : "No server is available right now");
 }
 
 // ─── Specs & jobs ────────────────────────────────────────────────────────────
