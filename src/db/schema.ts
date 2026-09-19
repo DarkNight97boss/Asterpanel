@@ -438,6 +438,10 @@ export const nodes = pgTable("nodes", {
   providerServerId: text("provider_server_id").notNull().default(""),
   providerRegion: text("provider_region").notNull().default(""),
   providerSize: text("provider_size").notNull().default(""),
+  /** Created by the panel on its own when capacity ran out. */
+  autoscaled: boolean("autoscaled").notNull().default(false),
+  /** Since when the node has had no workloads; drives automatic removal. */
+  emptySince: timestamp("empty_since", { withTimezone: true }),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
