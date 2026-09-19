@@ -391,7 +391,7 @@ export async function deleteBackup(workloadId: string, backupId: string, actorId
 export async function createStaging(liveId: string, actorId: string | null = null): Promise<string> {
   const live = await load(liveId);
   if (live.type !== "wordpress" || live.environment !== "live") throw new PlatformError("Staging is available for live WordPress sites");
-  if ((await stagingOf(live.id)).length) throw new PlatformError("This site already has a staging environment");
+  if ((await stagingOf(live.id)).some((s) => s.environment === "staging")) throw new PlatformError("This site already has a staging environment");
 
   const db = await getDb();
   const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, live.nodeId));
@@ -444,6 +444,71 @@ export async function deployWorkload(workloadId: string, trigger: "manual" | "pu
   const keepImages = (await rollbackCandidates(w.id)).slice(0, ROLLBACK_DEPTH - 1).map((d) => d.id);
   await enqueue(w, "workload.deploy", { spec: await buildSpec(w.id), deploymentId, keepImages }, { deploymentId, actorId });
   return deploymentId;
+}
+
+// ─── Preview environments ────────────────────────────────────────────────────
+
+export const MAX_PREVIEWS = 3;
+const BRANCH = /^(?!-)[\w./-]{1,200}$/;
+
+/** What a Git provider told us about a push. GitHub and GitLab both send `ref`; a deleted branch has an all-zero `after`. */
+export function parsePush(body: unknown): { branch: string; deleted: boolean } | null {
+  const b = (body ?? {}) as { ref?: unknown; deleted?: unknown; after?: unknown };
+  const ref = typeof b.ref === "string" ? /^refs\/heads\/(.+)$/.exec(b.ref)?.[1] : undefined;
+  if (!ref || !BRANCH.test(ref) || ref.includes("..")) return null;
+  return { branch: ref, deleted: b.deleted === true || (typeof b.after === "string" && /^0+$/.test(b.after)) };
+}
+
+export const previewsOf = async (liveId: string) => (await stagingOf(liveId)).filter((w) => w.environment === "preview");
+
+/**
+ * Reacts to a push. The app's own branch deploys it; any other branch gets (or
+ * refreshes) a preview when previews are on, and loses it when it is deleted.
+ * A push without branch information (a plain POST) deploys, as it always did.
+ */
+export async function handlePush(workloadId: string, push: { branch: string; deleted: boolean } | null): Promise<{ action: "deployed" | "preview" | "preview_removed" | "ignored"; id?: string }> {
+  const live = await load(workloadId);
+  if (live.type !== "app" && live.type !== "static") throw new PlatformError("This workload is not deployed from Git");
+  if (live.environment !== "live") throw new PlatformError("Previews are built from the live app");
+  if (!push || push.branch === (live.config.branch ?? "main")) return push?.deleted ? { action: "ignored" } : { action: "deployed", id: await deployWorkload(live.id, "push") };
+  if (!live.config.previews) return { action: "ignored" };
+
+  const previews = await previewsOf(live.id);
+  const existing = previews.find((p) => p.config.branch === push.branch);
+  if (push.deleted) {
+    if (existing) await deleteWorkload(existing.id);
+    return { action: existing ? "preview_removed" : "ignored" };
+  }
+  if (existing) return existing.status === "running" || existing.status === "error" ? { action: "preview", id: await deployWorkload(existing.id, "push") } : { action: "ignored" };
+  if (live.status === "suspended") throw new PlatformError("This service is suspended");
+  if (previews.length >= MAX_PREVIEWS) throw new PlatformError(`An app can have up to ${MAX_PREVIEWS} previews: delete a branch or a preview first`);
+
+  // Same node, same settings and secrets as the app; only the branch differs. No deploy hook of its own.
+  const db = await getDb();
+  const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, live.nodeId));
+  const slug = `pr-${slugify(push.branch).slice(0, 18).replace(/-+$/, "") || "branch"}-${randomBytes(3).toString("hex")}`;
+  const previewId = await db.transaction(async (tx) => {
+    const [w] = await tx
+      .insert(schema.workloads)
+      .values({ clientId: live.clientId, companyId: live.companyId, nodeId: live.nodeId, serviceId: live.serviceId, parentId: live.id, type: live.type, environment: "preview", name: `${live.name} (${push.branch.slice(0, 40)})`, slug, config: { ...live.config, branch: push.branch, previews: false, redirects: [] }, secrets: live.secrets })
+      .returning({ id: schema.workloads.id });
+    if (node.baseDomain) await tx.insert(schema.domains).values({ workloadId: w.id, hostname: `${slug}.${node.baseDomain}`, isPrimary: true, isSystem: true });
+    return w.id;
+  });
+  const deploymentId = await newDeployment(previewId, "create");
+  await enqueue({ id: previewId, nodeId: live.nodeId }, "workload.create", { spec: await buildSpec(previewId) }, { deploymentId });
+  await audit(null, "preview.create", "workload", live.id, { branch: push.branch, previewId });
+  return { action: "preview", id: previewId };
+}
+
+export async function setPreviews(workloadId: string, enabled: boolean, actorId: string | null = null) {
+  const w = await load(workloadId);
+  if ((w.type !== "app" && w.type !== "static") || w.environment !== "live") throw new PlatformError("Previews are available for apps and static sites");
+  const db = await getDb();
+  await db.update(schema.workloads).set({ config: { ...w.config, previews: enabled } }).where(eq(schema.workloads.id, w.id));
+  // Switching previews off removes the ones that exist: nothing keeps running unseen.
+  if (!enabled) for (const p of await previewsOf(w.id)) await deleteWorkload(p.id, actorId);
+  await audit(actorId, enabled ? "preview.enabled" : "preview.disabled", "workload", w.id);
 }
 
 /** How many past images a node keeps per app, and therefore how far back a rollback can go. */

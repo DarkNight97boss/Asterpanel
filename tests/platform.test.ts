@@ -627,3 +627,47 @@ test("rollback: a kept build goes live again without rebuilding; an unhealthy re
   assert.equal(failed.status, "failed");
   assert.equal((await workload(id)).status, "running", "the previous version keeps serving");
 });
+
+test("previews: other branches get their own environment, refreshed on push and removed with the branch", async () => {
+  const push = (ref: string, extra: Record<string, unknown> = {}) => engine.parsePush({ ref, ...extra });
+  assert.deepEqual(push("refs/heads/feature/login"), { branch: "feature/login", deleted: false });
+  assert.deepEqual(push("refs/heads/old", { after: "0000000000000000000000000000000000000000" }), { branch: "old", deleted: true });
+  assert.deepEqual(push("refs/heads/old", { deleted: true }), { branch: "old", deleted: true });
+  for (const bad of ["refs/tags/v1", "refs/heads/../../etc", "refs/heads/-rf", "main", 42]) assert.equal(engine.parsePush({ ref: bad }), null, String(bad));
+  assert.equal(engine.parsePush(null), null);
+
+  const id = await engine.createWorkload({ clientId, type: "app", name: "Previewed", config: { repoUrl: "https://github.com/acme/previewed.git", branch: "main", port: 3000 }, env: { API_KEY: "k" } });
+  await drain();
+  assert.equal((await engine.handlePush(id, null)).action, "deployed", "a plain POST still deploys");
+  assert.equal((await engine.handlePush(id, push("refs/heads/main"))).action, "deployed");
+  assert.equal((await engine.handlePush(id, push("refs/heads/feature/login"))).action, "ignored", "previews are opt-in");
+  await drain();
+
+  await engine.setPreviews(id, true);
+  const created = await engine.handlePush(id, push("refs/heads/feature/login"));
+  assert.equal(created.action, "preview");
+  await drain();
+  const [preview] = await engine.previewsOf(id);
+  const pw = await workload(preview.id);
+  assert.deepEqual([pw.environment, pw.parentId, pw.config.branch, pw.config.previews, pw.status, pw.deployHookToken], ["preview", id, "feature/login", false, "running", ""]);
+  assert.match(pw.domains[0].hostname, /^pr-feature-login-[0-9a-f]{6}\./);
+  assert.equal((await engine.buildSpec(preview.id)).env?.API_KEY, "k", "same environment as the app");
+
+  const again = await engine.handlePush(id, push("refs/heads/feature/login"));
+  assert.deepEqual([again.action, (await engine.previewsOf(id)).length], ["preview", 1], "a second push redeploys the same preview");
+  await drain();
+  await assert.rejects(engine.handlePush(preview.id, push("refs/heads/x")), /built from the live app/);
+
+  await engine.handlePush(id, push("refs/heads/b2"));
+  await engine.handlePush(id, push("refs/heads/b3"));
+  await assert.rejects(engine.handlePush(id, push("refs/heads/b4")), /up to 3 previews/);
+  await drain();
+
+  assert.equal((await engine.handlePush(id, push("refs/heads/feature/login", { deleted: true }))).action, "preview_removed");
+  await drain();
+  assert.deepEqual((await engine.previewsOf(id)).map((p) => p.config.branch).sort(), ["b2", "b3"]);
+  await engine.setPreviews(id, false);
+  await drain();
+  assert.equal((await engine.previewsOf(id)).length, 0, "switching previews off removes them");
+  assert.equal((await workload(id)).status, "running");
+});

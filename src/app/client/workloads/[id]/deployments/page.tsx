@@ -6,8 +6,9 @@ import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { baseUrl } from "@/lib/url";
 import { requireWorkload } from "@/platform/access";
-import { rollbackCandidates } from "@/platform/engine";
-import { deploy, rollback } from "../../../platform-actions";
+import Link from "next/link";
+import { MAX_PREVIEWS, previewsOf, rollbackCandidates } from "@/platform/engine";
+import { deploy, removePreview, rollback, togglePreviews } from "../../../platform-actions";
 
 export default async function Deployments({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -19,6 +20,7 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
     db.select().from(schema.deployments).where(eq(schema.deployments.workloadId, w.id)).orderBy(desc(schema.deployments.createdAt)).limit(30),
     db.select({ deploymentId: schema.jobs.deploymentId, log: schema.jobs.log, error: schema.jobs.error, status: schema.jobs.status }).from(schema.jobs).where(eq(schema.jobs.workloadId, w.id)).orderBy(desc(schema.jobs.createdAt)).limit(60),
   ]);
+  const previews = w.environment === "live" ? await previewsOf(w.id) : [];
   const TRIGGER: Record<string, string> = { manual: "Manual", push: "Git push", create: "First deploy", rollback: "Rollback" };
   // The newest kept build is what is live now: rolling back to it would change nothing.
   const canRollBack = new Set(w.type === "app" ? (await rollbackCandidates(w.id)).slice(1).map((d) => d.id) : []);
@@ -41,6 +43,40 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
           <code className="block overflow-x-auto rounded-theme border border-border bg-subtle p-3 font-mono text-xs select-all">{origin}/api/hooks/deploy/{w.id}/{w.deployHookToken}</code>
         </div>
       </Card>
+
+      {w.environment === "live" && (
+        <Card>
+          <CardHeader
+            title={t("Preview environments")}
+            description={t("Every other branch you push gets its own copy of the app at its own address, rebuilt on each push and removed when the branch is deleted. Up to {n} at a time. Needs the webhook above with the push event.", { n: MAX_PREVIEWS })}
+            action={
+              <ActionForm action={togglePreviews} className="">
+                <input type="hidden" name="id" value={w.id} />
+                <input type="hidden" name="enabled" value={w.config.previews ? "0" : "1"} />
+                <SubmitButton variant="secondary">{w.config.previews ? t("Turn off") : t("Turn on")}</SubmitButton>
+              </ActionForm>
+            }
+          />
+          {w.config.previews && <p className="px-5 pb-4 text-xs text-muted">{t("Previews run with the same environment variables as the app, database credentials included. Turn them on only for repositories where every branch is trusted.")}</p>}
+          {previews.length > 0 && (
+            <ul className="divide-y divide-border border-t border-border">
+              {previews.map((p) => (
+                <li key={p.id} className="flex flex-wrap items-center gap-3 px-5 py-3 text-sm">
+                  <StatusBadge status={p.status} label={t(p.status)} />
+                  <code className="font-mono text-xs">{p.config.branch}</code>
+                  <Link href={`/client/workloads/${p.id}/deployments`} className="text-link">{t("Deployments")}</Link>
+                  <span className="ml-auto" />
+                  <ActionForm action={removePreview} className="">
+                    <input type="hidden" name="id" value={w.id} />
+                    <input type="hidden" name="previewId" value={p.id} />
+                    <SubmitButton size="sm" variant="ghost">{t("Remove")}</SubmitButton>
+                  </ActionForm>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      )}
 
       <Card>
         {deployments.length ? (

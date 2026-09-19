@@ -1536,6 +1536,13 @@ const it: Record<string, string> = {
   "Only active services can change plan": "Solo i servizi attivi possono cambiare piano",
   "This plan is not available for this service": "Questo piano non è disponibile per questo servizio",
   "A plan change is already waiting for payment": "Un cambio piano è già in attesa di pagamento",
+  "Preview environments": "Ambienti di anteprima",
+  "Every other branch you push gets its own copy of the app at its own address, rebuilt on each push and removed when the branch is deleted. Up to {n} at a time. Needs the webhook above with the push event.": "Ogni altro branch che invii riceve una propria copia dell'app a un proprio indirizzo, ricostruita a ogni push e rimossa quando il branch viene eliminato. Fino a {n} alla volta. Richiede il webhook qui sopra con l'evento push.",
+  "Previews run with the same environment variables as the app, database credentials included. Turn them on only for repositories where every branch is trusted.": "Le anteprime girano con le stesse variabili d'ambiente dell'app, credenziali del database comprese. Attivale solo per repository in cui ogni branch è fidato.",
+  "Preview not found": "Anteprima non trovata",
+  "Only owners and administrators can change this": "Solo proprietari e amministratori possono modificarlo",
+  "Previews are built from the live app": "Le anteprime si costruiscono dall'app live",
+  "Previews are available for apps and static sites": "Le anteprime sono disponibili per app e siti statici",
 };
 
 export default it;
