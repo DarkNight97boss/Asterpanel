@@ -1,6 +1,7 @@
 import { runAutomation } from "@/lib/billing";
 import { safeEqual } from "@/lib/crypto";
 import { flushNotifications } from "@/lib/notify";
+import { syncDueDomains } from "@/lib/domains";
 import { runScheduledBackups } from "@/platform/engine";
 import { runUptimeChecks } from "@/platform/uptime";
 
@@ -21,9 +22,10 @@ async function handle(request: Request) {
   }
   const report = await runAutomation();
   const backups = await runScheduledBackups();
+  const domains = await syncDueDomains().catch(() => 0);
   const uptime = await runUptimeChecks();
   await flushNotifications();
-  return Response.json({ ...report, backups, uptime });
+  return Response.json({ ...report, backups, domains, uptime });
 }
 
 export { handle as GET, handle as POST };

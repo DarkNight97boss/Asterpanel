@@ -47,6 +47,8 @@ export async function placeOrder(input: {
   cycle: BillingCycle;
   domain: string;
   ip?: string;
+  /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
+  pricing?: { first: number; recurring: number; label: string };
   /** Module-specific order options, stored as `service.moduleData.request`. */
   request?: Record<string, unknown>;
 }): Promise<{ orderId: string; invoiceId: string; serviceId: string }> {
@@ -55,12 +57,13 @@ export async function placeOrder(input: {
   const t = makeT((await getSettings("general")).locale);
 
   const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
-  if (!product || product.hidden) throw new BillingError("Product not available");
-  const price = product.pricing[input.cycle];
+  // Hidden products are system entries, only orderable with a price from the caller.
+  if (!product || (product.hidden && !input.pricing)) throw new BillingError("Product not available");
+  const price = input.pricing?.first ?? product.pricing[input.cycle];
   if (typeof price !== "number") throw new BillingError("Billing cycle not available for this product");
   if (product.requiresDomain && !input.domain) throw new BillingError("A domain is required");
 
-  const setup = product.pricing.setup ?? 0;
+  const setup = input.pricing ? 0 : (product.pricing.setup ?? 0);
   const subtotal = price + setup;
   const tax = taxOn(subtotal, billing.taxRate);
   const total = subtotal + tax;
@@ -80,7 +83,7 @@ export async function placeOrder(input: {
         serverId: product.serverId,
         domain: input.domain.toLowerCase(),
         billingCycle: input.cycle,
-        amount: price,
+        amount: input.pricing?.recurring ?? price,
         moduleData: input.request ? { request: input.request } : {},
       })
       .returning();
@@ -100,7 +103,7 @@ export async function placeOrder(input: {
       .returning();
 
     // Invoice lines are a legal record: written once, in the site language.
-    const label = `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
+    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t("1 year")})` : `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
     await tx.insert(schema.invoiceItems).values([
       { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: label, amount: price },
       ...(setup > 0
@@ -206,6 +209,11 @@ async function fulfilInvoice(invoiceId: string) {
       if (service.status === "suspended" && service.suspendReason === OVERDUE) {
         await unsuspendService(service.id).catch(() => {});
       }
+      // Same rule as activation: a failing module never un-pays the invoice.
+      const ctx = await contextFor(service.id);
+      await getProvisioningModule(ctx.product.module)
+        .renew?.(ctx)
+        .catch((err: unknown) => audit(null, "service.renew.failed", "service", service.id, { error: err instanceof Error ? err.message : String(err) }));
     }
   }
 }

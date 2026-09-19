@@ -38,7 +38,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
         {
           title: t("Catalog"),
           items: [
-            ...(can("billing") ? [{ href: "/admin/products", label: t("Products"), icon: "❖" }] : []),
+            ...(can("billing") ? [{ href: "/admin/products", label: t("Products"), icon: "❖" }, { href: "/admin/domains", label: t("Domains"), icon: "◍" }] : []),
             ...(admin ? [{ href: "/admin/servers", label: t("External servers"), icon: "▤" }] : []),
           ],
         },
@@ -59,6 +59,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   { href: "/admin/settings/billing", label: t("Billing"), icon: "¤" },
                   { href: "/admin/settings/gateways", label: t("Payment gateways"), icon: "▭" },
                   { href: "/admin/settings/mail", label: t("Email"), icon: "@" },
+                  { href: "/admin/settings/registrars", label: t("Domain registrars"), icon: "◍" },
                   { href: "/admin/settings/backups", label: t("Backups"), icon: "⛁" },
                   { href: "/admin/staff", label: t("Staff"), icon: "⚇" },
                 ]
