@@ -1,7 +1,8 @@
 import { eq } from "drizzle-orm";
 import { Alert, Badge, Button, Card, CardHeader, EmptyState, PageHeader, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
-import { getT } from "@/i18n";
+import { getLocale, getT } from "@/i18n";
+import { formatMoney } from "@/lib/format";
 import { requireAccount } from "@/lib/account";
 import { listPaymentMethods } from "@/lib/payment-methods";
 import { getSettings } from "@/lib/settings";
@@ -11,7 +12,7 @@ export const metadata = { title: "Payment methods" };
 
 export default async function PaymentMethods() {
   const { account } = await requireAccount("billing");
-  const [t, gw, cards, [co]] = await Promise.all([getT(), getSettings("gateways"), listPaymentMethods(account.id), (await getDb()).select().from(schema.companies).where(eq(schema.companies.id, account.id))]);
+  const [t, locale, billing, gw, cards, [co]] = await Promise.all([getT(), getLocale(), getSettings("billing"), getSettings("gateways"), listPaymentMethods(account.id), (await getDb()).select().from(schema.companies).where(eq(schema.companies.id, account.id))]);
   const available = gw.stripe.enabled && gw.stripe.saveCards;
 
   return (
@@ -19,6 +20,11 @@ export default async function PaymentMethods() {
       <PageHeader title={t("Payment methods")} description={t("Cards saved for {account}. Card numbers are kept by our payment provider, never on our servers.", { account: account.name })} />
       <div className="space-y-6">
         {!available && <Alert tone="info">{t("Saved cards are not available at the moment. Invoices can be paid one by one from their page.")}</Alert>}
+        {co.creditBalance > 0 && (
+          <Card>
+            <CardHeader title={t("Credit")} description={t("Spent automatically on your next invoices, before any card is charged.")} action={<span className="text-2xl">{formatMoney(co.creditBalance, billing.currency, locale)}</span>} />
+          </Card>
+        )}
         <Card>
           <CardHeader
             title={t("Automatic payments")}

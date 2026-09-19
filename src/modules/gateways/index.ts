@@ -2,6 +2,7 @@ import "server-only";
 import { createHmac } from "node:crypto";
 import type { schema } from "@/db";
 import { safeEqual } from "@/lib/crypto";
+import { invoiceDue } from "@/lib/billing";
 import { stripeCustomer } from "@/lib/payment-methods";
 import { getSettings, type Settings } from "@/lib/settings";
 import { paypalAmount, paypalCall, type PayPalOrder } from "./paypal";
@@ -43,6 +44,8 @@ const stripe: PaymentGateway = {
   async start({ invoice, email, returnUrl, label }) {
     const { stripe: cfg } = await getSettings("gateways");
     // With saved cards on, the payment is tied to the company's customer and the card is kept for renewals.
+    // Credit or an earlier partial payment may already cover part of the invoice.
+    const due = await invoiceDue(invoice.id);
     const customer = cfg.saveCards && invoice.companyId ? await stripeCustomer(invoice.companyId, email) : "";
     const session = await stripeCall<{ url?: string }>(
       "POST",
@@ -57,11 +60,11 @@ const stripe: PaymentGateway = {
         "payment_intent_data[metadata][invoice_id]": invoice.id,
         "line_items[0][quantity]": "1",
         "line_items[0][price_data][currency]": invoice.currency.toLowerCase(),
-        "line_items[0][price_data][unit_amount]": String(invoice.total),
+        "line_items[0][price_data][unit_amount]": String(due),
         "line_items[0][price_data][product_data][name]": label,
       },
       // A double click must not open two checkout sessions for one invoice state.
-      `checkout-${invoice.id}-${invoice.total}-${Math.floor(Date.now() / 60_000)}`,
+      `checkout-${invoice.id}-${due}-${Math.floor(Date.now() / 60_000)}`,
     );
     if (!session.url) throw new Error("Stripe checkout failed");
     return { kind: "redirect", url: session.url };
@@ -74,15 +77,16 @@ const paypal: PaymentGateway = {
   enabled: (c) => c.paypal.enabled && !!c.paypal.clientId && !!c.paypal.secret,
   async start({ invoice, returnUrl, label }) {
     const origin = new URL(returnUrl).origin;
+    const due = await invoiceDue(invoice.id);
     const order = await paypalCall<PayPalOrder>(
       "POST",
       "/v2/checkout/orders",
       {
         intent: "CAPTURE",
-        purchase_units: [{ reference_id: invoice.id, custom_id: invoice.id, description: label.slice(0, 127), amount: { currency_code: invoice.currency, value: paypalAmount(invoice.total) } }],
+        purchase_units: [{ reference_id: invoice.id, custom_id: invoice.id, description: label.slice(0, 127), amount: { currency_code: invoice.currency, value: paypalAmount(due) } }],
         payment_source: { paypal: { experience_context: { user_action: "PAY_NOW", shipping_preference: "NO_SHIPPING", return_url: `${origin}/api/paypal/return`, cancel_url: returnUrl } } },
       },
-      `order-${invoice.id}-${invoice.total}-${Math.floor(Date.now() / 60_000)}`,
+      `order-${invoice.id}-${due}-${Math.floor(Date.now() / 60_000)}`,
     );
     const approve = order.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href;
     if (!approve) throw new Error("PayPal checkout failed");

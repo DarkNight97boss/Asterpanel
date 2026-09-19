@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
-import { Alert, ButtonLink, Card, PageHeader, StatusBadge, STATUS_LABEL } from "@/components/ui";
+import { ActionForm, SubmitButton } from "@/components/action-form";
+import { Alert, ButtonLink, Card, CardHeader, PageHeader, StatusBadge, STATUS_LABEL } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
 import { CYCLE_LABEL, formatDate, formatMoney } from "@/lib/format";
+import { planOptions, remainingFraction } from "@/lib/billing";
 import { getSettings } from "@/lib/settings";
+import { switchPlan } from "@/app/client/actions";
 import { getProvisioningModule } from "@/modules/provisioning";
 
 export default async function ClientService({ params }: { params: Promise<{ id: string }> }) {
@@ -31,6 +34,9 @@ export default async function ClientService({ params }: { params: Promise<{ id: 
         })
       : null;
 
+  const options = service.status === "active" ? await planOptions(service.id) : [];
+  const fraction = service.nextDueDate ? remainingFraction(service.nextDueDate, service.billingCycle) : 0;
+  const money = (c: number) => formatMoney(c, billing.currency, locale);
   const rows: [string, React.ReactNode][] = [
     [t("Status"), <StatusBadge key="s" status={service.status} label={t(STATUS_LABEL[service.status])} />],
     [t("Domain"), service.domain || "—"],
@@ -59,6 +65,31 @@ export default async function ClientService({ params }: { params: Promise<{ id: 
           ))}
         </dl>
       </Card>
+
+      {options.length > 0 && service.nextDueDate && (
+        <Card className="mt-6">
+          <CardHeader title={t("Change plan")} description={t("Upgrades start as soon as the pro-rated difference is paid. Downgrades start at once, and the unused part goes to your credit for the next invoices.")} />
+          <ul className="divide-y divide-border">
+            {options.map((p) => {
+              const price = p.pricing[service.billingCycle]!;
+              const prorated = Math.round((price - service.amount) * fraction);
+              return (
+                <li key={p.id} className="flex flex-wrap items-center justify-between gap-4 px-5 py-4 text-sm">
+                  <div>
+                    <p className="font-medium">{p.name} <span className="ml-2 font-normal text-muted">{money(price)} · {t(CYCLE_LABEL[service.billingCycle])}</span></p>
+                    <p className="text-xs text-muted">{prorated > 0 ? t("Pay {amount} now (plus tax) for the rest of this period", { amount: money(prorated) }) : prorated < 0 ? t("{amount} goes to your credit", { amount: money(-prorated) }) : t("No charge for the rest of this period")}</p>
+                  </div>
+                  <ActionForm action={switchPlan} className="">
+                    <input type="hidden" name="serviceId" value={service.id} />
+                    <input type="hidden" name="productId" value={p.id} />
+                    <SubmitButton size="sm" variant="secondary">{price > service.amount ? t("Upgrade") : t("Switch")}</SubmitButton>
+                  </ActionForm>
+                </li>
+              );
+            })}
+          </ul>
+        </Card>
+      )}
     </>
   );
 }

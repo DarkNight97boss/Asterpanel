@@ -130,6 +130,8 @@ export const companies = pgTable("companies", {
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
   /** Charge renewal invoices on the default saved card. */
   autoPay: boolean("auto_pay").notNull().default(true),
+  /** Prepaid balance in cents, spent on new invoices before any card is charged. */
+  creditBalance: integer("credit_balance").notNull().default(0),
   createdAt: createdAt(),
 });
 
@@ -375,7 +377,7 @@ export const invoices = pgTable(
   (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_status_idx").on(t.status), uniqueIndex("invoices_year_number_idx").on(t.fiscalYear, t.number)],
 );
 
-export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom" | "discount";
+export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom" | "discount" | "upgrade";
 
 export const invoiceItems = pgTable(
   "invoice_items",
@@ -782,6 +784,24 @@ export const webhooks = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("webhooks_company_idx").on(t.companyId)],
+);
+
+/** Every movement of a company's prepaid balance: the balance is always the sum of these rows. */
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    /** Positive = added, negative = spent. */
+    amount: integer("amount").notNull(),
+    reason: text("reason").notNull().default(""),
+    invoiceId: uuid("invoice_id"),
+    actorId: uuid("actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("credit_ledger_company_idx").on(t.companyId)],
 );
 
 /** A card kept at the gateway; we only hold its reference and what is printed on it. */

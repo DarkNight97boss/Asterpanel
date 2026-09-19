@@ -1,6 +1,6 @@
 import { WORKLOAD_TYPES, type WorkloadConfig, type WorkloadType } from "@/db/schema";
 import { decryptJson, encryptJson } from "@/lib/crypto";
-import { createWorkload, deleteWorkload, suspendWorkload, unsuspendWorkload } from "@/platform/engine";
+import { createWorkload, deleteWorkload, suspendWorkload, unsuspendWorkload, updateWorkloadConfig } from "@/platform/engine";
 import { ModuleError, type ProvisionContext, type ProvisioningModule } from "./types";
 
 /**
@@ -59,6 +59,12 @@ export const platform: ProvisioningModule = {
     } catch (err) {
       throw new ModuleError(err instanceof Error ? err.message : "Provisioning failed", err);
     }
+  },
+
+  async changePlan(ctx) {
+    const id = workloadId(ctx);
+    const limit = (key: string, fallback: number) => Number(ctx.product.moduleConfig[key]) || fallback;
+    if (id) await updateWorkloadConfig(id, { memoryMb: limit("memoryMb", 512), cpus: limit("cpus", 1), diskGb: limit("diskGb", 10) });
   },
 
   async suspend(ctx, reason) {

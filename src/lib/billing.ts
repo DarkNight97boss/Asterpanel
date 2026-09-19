@@ -7,7 +7,7 @@ import { getProvisioningModule, type ProvisionContext } from "@/modules/provisio
 import { audit } from "./audit";
 import { emitEvent } from "./webhooks";
 import { decryptJson } from "./crypto";
-import { addCycle, CYCLE_LABEL, invoiceLabel } from "./format";
+import { addCycle, CYCLE_LABEL, CYCLE_MONTHS, invoiceLabel } from "./format";
 import { mailConfigured } from "./mail/transport";
 import { notify } from "./notify";
 import { getSettings } from "./settings";
@@ -128,7 +128,10 @@ export async function placeOrder(input: {
 
   await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total });
   if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
-  else notify.invoiceCreated(result.invoiceId);
+  else {
+    await applyCredit(result.invoiceId);
+    notify.invoiceCreated(result.invoiceId);
+  }
   emitEvent(input.companyId, "invoice.created", { invoiceId: result.invoiceId, total, currency: billing.currency });
   return result;
 }
@@ -222,6 +225,126 @@ export async function issueCreditNote(invoiceId: string, reason: string, actorId
   return creditId;
 }
 
+// ─── Plan changes ────────────────────────────────────────────────────────────
+
+/** Share of the current billing period that is still ahead, between 0 and 1. */
+export function remainingFraction(nextDue: Date, cycle: BillingCycle, now = new Date()): number {
+  const months = CYCLE_MONTHS[cycle];
+  if (!months) return 0;
+  const start = new Date(nextDue);
+  start.setUTCMonth(start.getUTCMonth() - months);
+  const total = nextDue.getTime() - start.getTime();
+  return total <= 0 ? 0 : Math.min(1, Math.max(0, (nextDue.getTime() - now.getTime()) / total));
+}
+
+/** Products a service can move to: same group and module, same kind of workload, priced for the same cycle. */
+export async function planOptions(serviceId: string) {
+  const db = await getDb();
+  const svc = await db.query.services.findFirst({ where: eq(schema.services.id, serviceId), with: { product: true } });
+  if (!svc) return [];
+  const siblings = await db.select().from(schema.products).where(and(eq(schema.products.groupId, svc.product.groupId), eq(schema.products.module, svc.product.module), eq(schema.products.hidden, false)));
+  return siblings.filter((p) => p.id !== svc.productId && typeof p.pricing[svc.billingCycle] === "number" && (p.moduleConfig.type ?? "") === (svc.product.moduleConfig.type ?? ""));
+}
+
+async function applyPlan(serviceId: string, productId: string, amount: number, actorId: string | null) {
+  const db = await getDb();
+  const [svc] = await db.select({ moduleData: schema.services.moduleData }).from(schema.services).where(eq(schema.services.id, serviceId));
+  const { pendingPlan: _done, ...moduleData } = (svc?.moduleData ?? {}) as Record<string, unknown>;
+  void _done;
+  await db.update(schema.services).set({ productId, amount, moduleData }).where(eq(schema.services.id, serviceId));
+  const ctx = await contextFor(serviceId);
+  // The customer already has (and paid for) the new plan: a module error is logged for staff, not thrown.
+  await getProvisioningModule(ctx.product.module)
+    .changePlan?.(ctx)
+    .catch((err: unknown) => audit(null, "service.plan_change.failed", "service", serviceId, { error: err instanceof Error ? err.message : String(err) }));
+  await audit(actorId, "service.plan_changed", "service", serviceId, { productId, amount });
+}
+
+/**
+ * Moves a service to another plan, pro-rated on the time left in the period.
+ * Upgrade: an invoice for the difference, and the new plan starts when it is
+ * paid. Downgrade: immediate, the difference goes to the company's credit.
+ */
+export async function changePlan(serviceId: string, productId: string, actorId: string | null = null, now = new Date()): Promise<{ invoiceId: string | null; credited: number }> {
+  const db = await getDb();
+  const svc = await db.query.services.findFirst({ where: eq(schema.services.id, serviceId), with: { product: true } });
+  if (!svc || svc.status !== "active" || !svc.nextDueDate) throw new BillingError("Only active services can change plan");
+  const target = (await planOptions(serviceId)).find((p) => p.id === productId);
+  if (!target) throw new BillingError("This plan is not available for this service");
+  const pending = (svc.moduleData as { pendingPlan?: { invoiceId: string } }).pendingPlan;
+  if (pending) {
+    // A cancelled upgrade invoice frees the service for another change.
+    const [open] = await db.select({ status: schema.invoices.status }).from(schema.invoices).where(eq(schema.invoices.id, pending.invoiceId));
+    if (open?.status === "unpaid") throw new BillingError("A plan change is already waiting for payment");
+  }
+
+  const price = target.pricing[svc.billingCycle]!;
+  const prorated = Math.round((price - svc.amount) * remainingFraction(svc.nextDueDate, svc.billingCycle, now));
+  if (prorated <= 0) {
+    await applyPlan(svc.id, target.id, price, actorId);
+    if (prorated < 0 && svc.companyId) await adjustCredit(svc.companyId, -prorated, `Downgrade to ${target.name}`, actorId);
+    return { invoiceId: null, credited: svc.companyId ? -prorated : 0 };
+  }
+
+  const billing = await getSettings("billing");
+  const t = makeT((await getSettings("general")).locale);
+  const tax = taxOn(prorated, billing.taxRate);
+  const invoiceId = await db.transaction(async (tx) => {
+    const [invoice] = await tx.insert(schema.invoices).values({ ...(await nextInvoiceNumber(tx)), clientId: svc.clientId, companyId: svc.companyId, currency: billing.currency, subtotal: prorated, taxRate: billing.taxRate, tax, total: prorated + tax, dueDate: now }).returning({ id: schema.invoices.id });
+    await tx.insert(schema.invoiceItems).values({ invoiceId: invoice.id, serviceId: svc.id, kind: "upgrade", description: `${t("Upgrade")}: ${svc.product.name} → ${target.name}`, amount: prorated });
+    await tx.update(schema.services).set({ moduleData: { ...svc.moduleData, pendingPlan: { productId: target.id, amount: price, invoiceId: invoice.id } } }).where(eq(schema.services.id, svc.id));
+    return invoice.id;
+  });
+  await audit(actorId, "service.upgrade_ordered", "service", svc.id, { productId: target.id, prorated });
+  await applyCredit(invoiceId);
+  if ((await invoiceDue(invoiceId)) > 0) notify.invoiceCreated(invoiceId);
+  return { invoiceId, credited: 0 };
+}
+
+// ─── Prepaid credit ──────────────────────────────────────────────────────────
+
+/** What is still to pay on an invoice, after partial payments and credit. */
+export async function invoiceDue(invoiceId: string): Promise<number> {
+  const db = await getDb();
+  const [inv] = await db.select({ total: schema.invoices.total, status: schema.invoices.status }).from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
+  if (!inv || inv.status !== "unpaid") return 0;
+  const [{ paid }] = await db.select({ paid: sql<number>`coalesce(sum(${schema.transactions.amount}), 0)::int` }).from(schema.transactions).where(eq(schema.transactions.invoiceId, invoiceId));
+  return Math.max(0, inv.total - paid);
+}
+
+/** Adds (or, with a negative amount, removes) prepaid credit. The balance can never go below zero. */
+export async function adjustCredit(companyId: string, amount: number, reason: string, actorId: string | null = null, invoiceId: string | null = null): Promise<number> {
+  if (!Number.isInteger(amount) || amount === 0) throw new BillingError("Enter an amount");
+  const db = await getDb();
+  const balance = await db.transaction(async (tx) => {
+    const [co] = await tx.update(schema.companies).set({ creditBalance: sql`${schema.companies.creditBalance} + ${amount}` }).where(and(eq(schema.companies.id, companyId), sql`${schema.companies.creditBalance} + ${amount} >= 0`)).returning({ balance: schema.companies.creditBalance });
+    if (!co) throw new BillingError("The company does not have that much credit");
+    await tx.insert(schema.creditLedger).values({ companyId, amount, reason: reason.slice(0, 200), actorId, invoiceId });
+    return co.balance;
+  });
+  await audit(actorId, "credit.adjusted", "company", companyId, { amount, reason: reason.slice(0, 100) });
+  return balance;
+}
+
+/** Spends the company's credit on an unpaid invoice. Safe to call more than once. */
+export async function applyCredit(invoiceId: string): Promise<number> {
+  const db = await getDb();
+  const [inv] = await db.select().from(schema.invoices).where(eq(schema.invoices.id, invoiceId));
+  if (!inv?.companyId || inv.status !== "unpaid" || inv.kind !== "invoice") return 0;
+  const due = await invoiceDue(invoiceId);
+  const [co] = await db.select({ balance: schema.companies.creditBalance }).from(schema.companies).where(eq(schema.companies.id, inv.companyId));
+  const spend = Math.min(due, co?.balance ?? 0);
+  if (spend <= 0) return 0;
+  try {
+    await adjustCredit(inv.companyId, -spend, "Applied to invoice", null, inv.id);
+  } catch {
+    return 0; // spent meanwhile by a concurrent invoice
+  }
+  // One credit payment per ledger movement: the id makes a retry harmless.
+  await recordPayment({ invoiceId, gateway: "credit", externalId: `credit-${invoiceId}-${Date.now()}`, amount: spend });
+  return spend;
+}
+
 /** The coupon behind a code if it can be used right now; throws a message for the customer otherwise. */
 export async function usableCoupon(code: string) {
   const db = await getDb();
@@ -255,6 +378,9 @@ async function fulfilInvoice(invoiceId: string) {
       // A provisioning failure must not un-pay the invoice: the service stays
       // pending and shows up in the admin queue for a retry.
       await activateService(service.id).catch(() => {});
+    } else if (item.kind === "upgrade") {
+      const pending = (service.moduleData as { pendingPlan?: { productId: string; amount: number; invoiceId: string } }).pendingPlan;
+      if (pending?.invoiceId === invoiceId) await applyPlan(service.id, pending.productId, pending.amount, null);
     } else if (item.kind === "renewal" && service.nextDueDate) {
       await db
         .update(schema.services)
@@ -402,6 +528,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
         }
         return invoice.id;
       });
+      await applyCredit(invoiceId);
       notify.invoiceCreated(invoiceId);
       emitEvent(list[0].companyId, "invoice.created", { invoiceId, renewal: true });
       report.invoiced++;
