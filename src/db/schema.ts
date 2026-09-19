@@ -461,6 +461,8 @@ export type WorkloadConfig = {
   buildCommand?: string;
   outputDir?: string;
   port?: number;
+  /** Build a preview environment for every other branch that is pushed. */
+  previews?: boolean;
   // edge rules (web workloads)
   redirects?: { from: string; to: string; code: 301 | 302 }[];
   denyIps?: string[];
@@ -511,7 +513,8 @@ export const workloads = pgTable(
     /** Staging environments point at their live workload. */
     parentId: uuid("parent_id"),
     type: text("type").$type<WorkloadType>().notNull(),
-    environment: text("environment").$type<"live" | "staging">().notNull().default("live"),
+    /** `preview`: a short-lived copy of an app built from another branch. */
+    environment: text("environment").$type<"live" | "staging" | "preview">().notNull().default("live"),
     name: text("name").notNull(),
     /** DNS-safe unique id: container names and the default hostname derive from it. */
     slug: text("slug").notNull(),

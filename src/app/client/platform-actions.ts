@@ -194,6 +194,31 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function togglePreviews(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
+  if (!canManage) return { error: "Only owners and administrators can change this" };
+  try {
+    await engine.setPreviews(workload.id, form.get("enabled") === "1", user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved" };
+}
+
+export async function removePreview(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  const preview = (await engine.previewsOf(workload.id)).find((p) => p.id === form.get("previewId"));
+  if (!preview) return { error: "Preview not found" };
+  try {
+    await engine.deleteWorkload(preview.id, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Removed" };
+}
+
 export async function rollback(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   try {

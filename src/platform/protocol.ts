@@ -26,7 +26,7 @@ export type WorkloadSpec = {
   kind: WorkloadKind;
   /** Owner id. Workloads of one tenant share a private network; tenants never do. */
   tenant: string;
-  environment: "live" | "staging";
+  environment: "live" | "staging" | "preview";
   /** Hostnames routed to this workload; the first one is primary. */
   domains: string[];
   resources: { memoryMb: number; cpus: number; diskGb: number };
