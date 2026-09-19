@@ -109,11 +109,11 @@ export class SimulatedDriver implements Driver {
     return {};
   }
 
-  async clone(spec: WorkloadSpec, from: WorkloadSpec, log: Log) {
+  async clone(spec: WorkloadSpec, from: WorkloadSpec, log: Log, scope: "all" | "files" | "database" = "all") {
     this.must(from);
-    await this.step(log, `[sim] copying files ${from.slug} → ${spec.slug}`);
-    await this.step(log, `[sim] copying database ${from.slug} → ${spec.slug}`);
-    await this.step(log, `[sim] wp search-replace ${from.domains[0]} ${spec.domains[0]}`);
+    if (scope !== "database") await this.step(log, `[sim] copying files ${from.slug} → ${spec.slug}`);
+    if (scope !== "files") await this.step(log, `[sim] copying database ${from.slug} → ${spec.slug}`);
+    if (scope !== "files") await this.step(log, `[sim] wp search-replace ${from.domains[0]} ${spec.domains[0]}`);
     this.write((s) => (s.workloads[spec.slug] = { kind: spec.kind, running: true, domains: spec.domains }));
     return this.runtime(spec);
   }

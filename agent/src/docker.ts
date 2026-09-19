@@ -517,7 +517,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return {};
   }
 
-  async clone(spec: WorkloadSpec, from: WorkloadSpec, log: Log): Promise<JobResult> {
+  async clone(spec: WorkloadSpec, from: WorkloadSpec, log: Log, scope: "all" | "files" | "database" = "all"): Promise<JobResult> {
     if (spec.kind !== "wordpress" || from.kind !== "wordpress") throw new Error("Only WordPress sites can be cloned");
     const target = this.check(spec);
     const source = this.check(from);
@@ -525,18 +525,21 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     await this.ensureProxy(log);
     await this.runWordPressDb(spec, log);
 
-    log(`copying files ${from.slug} → ${spec.slug}`);
-    await this.rmContainer(target.name);
-    await this.docker(["run", "--rm", "-v", `${source.name}-files:/from:ro`, "-v", `${target.name}-files:/to`, "alpine:3", "sh", "-c", "find /to -mindepth 1 -delete && cp -a /from/. /to/"], log);
+    if (scope !== "database") {
+      log(`copying files ${from.slug} → ${spec.slug}`);
+      await this.rmContainer(target.name);
+      await this.docker(["run", "--rm", "-v", `${source.name}-files:/from:ro`, "-v", `${target.name}-files:/to`, "alpine:3", "sh", "-c", "find /to -mindepth 1 -delete && cp -a /from/. /to/"], log);
+    }
     await this.runWordPress(spec, log); // entrypoint rewrites wp-config from the target's env
     await this.waitForWpDb(spec, log);
 
-    log("copying database");
-    const dump = await this.docker(["exec", "-e", "MYSQL_PWD", `${source.name}-db`, "mariadb-dump", "-uwordpress", "--single-transaction", "wordpress"], undefined, { env: { MYSQL_PWD: from.wordpress!.dbPassword }, quiet: true });
-    await this.docker(["exec", "-i", "-e", "MYSQL_PWD", `${target.name}-db`, "mariadb", "-uwordpress", "wordpress"], undefined, { env: { MYSQL_PWD: spec.wordpress!.dbPassword }, input: dump, quiet: true });
-
-    log(`rewriting URLs ${from.domains[0]} → ${spec.domains[0]}`);
-    await this.wp(spec, ["search-replace", `https://${from.domains[0]}`, `https://${spec.domains[0]}`, "--all-tables", "--skip-columns=guid"], log);
+    if (scope !== "files") {
+      log("copying database");
+      const dump = await this.docker(["exec", "-e", "MYSQL_PWD", `${source.name}-db`, "mariadb-dump", "-uwordpress", "--single-transaction", "wordpress"], undefined, { env: { MYSQL_PWD: from.wordpress!.dbPassword }, quiet: true });
+      await this.docker(["exec", "-i", "-e", "MYSQL_PWD", `${target.name}-db`, "mariadb", "-uwordpress", "wordpress"], undefined, { env: { MYSQL_PWD: spec.wordpress!.dbPassword }, input: dump, quiet: true });
+      log(`rewriting URLs ${from.domains[0]} → ${spec.domains[0]}`);
+      await this.wp(spec, ["search-replace", `https://${from.domains[0]}`, `https://${spec.domains[0]}`, "--all-tables", "--skip-columns=guid"], log);
+    }
     await this.wp(spec, ["cache", "flush"]).catch(() => {});
     return { runtime: { internalHost: target.name, dbName: "wordpress", dbUser: "wordpress" } };
   }

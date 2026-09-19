@@ -109,9 +109,8 @@ test("backups: create, restore (with automatic safety backup), delete", async ()
   assert.equal((await workload(siteId)).backups.length, 1);
 });
 
-test("staging: one per site, cloned on the same node, push back to live, removed with the site", async () => {
+test("staging: cloned on the same node, push back to live, removed with the site", async () => {
   const stagingId = await engine.createStaging(siteId);
-  await assert.rejects(engine.createStaging(siteId), /already has a staging/);
   await drain();
   const staging = await workload(stagingId);
   assert.equal(staging.status, "running");
@@ -904,4 +903,30 @@ test("apps: shared variable groups, deploys from a ready-made image, custom heal
   await engine.attachEnvGroups(id, []);
   await engine.deleteEnvGroup(companyId, g1);
   await drain();
+});
+
+test("staging: up to three per site, each at its own address, and a push can be limited to files or database", async () => {
+  const db = await dbm.getDb();
+  const live = await engine.createWorkload({ clientId, type: "wordpress", name: "Multi Stage" });
+  await drain();
+  const a = await engine.createStaging(live);
+  const b = await engine.createStaging(live, null, "redesign <script>");
+  const c = await engine.createStaging(live, null, "client review");
+  await assert.rejects(engine.createStaging(live), /up to 3 staging/);
+  await drain();
+  const [wa, wb, wc] = [await workload(a), await workload(b), await workload(c)];
+  assert.deepEqual([wa.name, wb.name, wc.name], ["Multi Stage (staging)", "Multi Stage (staging: redesign script)", "Multi Stage (staging: client review)"]);
+  assert.equal(new Set([wa, wb, wc].map((w) => w.domains[0].hostname)).size, 3);
+  assert.ok(wa.slug.startsWith("stg-") && wb.slug.startsWith("stg2-") && wc.slug.startsWith("stg3-"));
+
+  await engine.pushStagingToLive(b, null, "files");
+  await drain();
+  const push = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, live))).filter((j) => j.type === "workload.clone").at(-1)!;
+  assert.match(push.log, /copying files/);
+  assert.ok(!/copying database|search-replace/.test(push.log), "content on live is untouched by a files-only push");
+  await engine.pushStagingToLive(c, null, "database");
+  await drain();
+  const dbPush = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, live))).filter((j) => j.type === "workload.clone").at(-1)!;
+  assert.ok(/copying database/.test(dbPush.log) && !/copying files/.test(dbPush.log));
+  assert.ok((await workload(live)).backups.filter((bk) => bk.note === "Before push from staging").length >= 2);
 });
