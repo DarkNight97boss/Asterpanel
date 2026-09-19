@@ -443,6 +443,8 @@ export const nodes = pgTable("nodes", {
   providerServerId: text("provider_server_id").notNull().default(""),
   providerRegion: text("provider_region").notNull().default(""),
   providerSize: text("provider_size").notNull().default(""),
+  /** Problems staff was already told about ("offline", "disk", "memory"), so each is announced once. */
+  alerts: jsonb("alerts").$type<string[]>().notNull().default([]),
   /** Created by the panel on its own when capacity ran out. */
   autoscaled: boolean("autoscaled").notNull().default(false),
   /** Since when the node has had no workloads; drives automatic removal. */

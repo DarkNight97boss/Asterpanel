@@ -296,3 +296,14 @@ export async function saveGithub(_: ActionState, form: FormData): Promise<Action
   revalidatePath("/admin/settings/github");
   return { ok: "Saved" };
 }
+
+/** New bearer token for the Prometheus endpoint (shown once), or switch the endpoint off. */
+export async function rotateMetricsToken(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("platform");
+  const token = form.get("off") ? "" : randomToken(32);
+  await updateSettings("platform", { ...current, metricsToken: token });
+  await audit(admin.id, "settings.updated", "settings", "platform.metrics");
+  revalidatePath("/admin/settings/cloud");
+  return { ok: token ? `Scrape ${await baseUrl()}/api/metrics with this bearer token (shown only now):\n${token}` : "Metrics endpoint switched off" };
+}

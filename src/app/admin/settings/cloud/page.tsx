@@ -4,13 +4,13 @@ import { getT } from "@/i18n";
 import { requireAdmin } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 import { cloudProviders } from "@/modules/cloud";
-import { saveCloudProvider, saveInfrastructureMode, testCloud } from "../../platform-actions";
+import { rotateMetricsToken, saveCloudProvider, saveInfrastructureMode, testCloud } from "../../platform-actions";
 
 export const metadata = { title: "Infrastructure" };
 
 export default async function CloudSettings() {
   await requireAdmin();
-  const [t, s, general] = await Promise.all([getT(), getSettings("cloud"), getSettings("general")]);
+  const [t, s, general, platform] = await Promise.all([getT(), getSettings("cloud"), getSettings("general"), getSettings("platform")]);
   const a = s.autoscale;
   return (
     <>
@@ -42,6 +42,14 @@ export default async function CloudSettings() {
             </div>
             <SubmitButton>{t("Save")}</SubmitButton>
           </ActionForm>
+        </div>
+      </Card>
+      <Card className="mb-6">
+        <CardHeader title={t("Monitoring")} description={t("Staff gets an email when a server goes offline, its disk passes 90% or its memory 95%, and again when it recovers. For your own dashboards there is a Prometheus endpoint with servers, services, jobs and unpaid invoices.")} />
+        <div className="flex flex-wrap items-center gap-3 p-5">
+          <span className="text-sm text-muted">{platform.metricsToken ? t("The metrics endpoint is on.") : t("The metrics endpoint is off.")}</span>
+          <ActionForm action={rotateMetricsToken} className=""><SubmitButton size="sm" variant="secondary">{platform.metricsToken ? t("New token") : t("Turn on")}</SubmitButton></ActionForm>
+          {platform.metricsToken && <ActionForm action={rotateMetricsToken} className=""><input type="hidden" name="off" value="1" /><SubmitButton size="sm" variant="ghost">{t("Turn off")}</SubmitButton></ActionForm>}
         </div>
       </Card>
       <div className="grid items-start gap-6 xl:grid-cols-2">

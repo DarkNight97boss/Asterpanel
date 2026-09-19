@@ -245,6 +245,15 @@ export const notify = {
       });
     }),
 
+  nodeAlert: (node: string, problem: string) =>
+    dispatch(async () => {
+      const ctx = await context();
+      if (!ctx) return;
+      const to = (await getSettings("mail")).staffEmail || ctx.general.supportEmail;
+      if (!to) return;
+      await ctx.send({ id: "node.alert", to, vars: { node, problem }, structure: { cta: { label: ctx.t("Open the servers page"), url: `${ctx.origin}/admin/nodes` } } });
+    }),
+
   ticketOpened: (ticketId: string, body: string) => dispatch(() => ticketMail(ticketId, "ticket.opened", body)),
   ticketClientReply: (ticketId: string, body: string) => dispatch(() => ticketMail(ticketId, "ticket.client_reply", body)),
   ticketStaffReply: (ticketId: string, body: string) => dispatch(() => ticketMail(ticketId, "ticket.staff_reply", body)),
