@@ -29,6 +29,7 @@ export async function order(_: ActionState, form: FormData): Promise<ActionState
       domain: String(f.domain ?? ""),
       action: f.action === "transfer" ? "transfer" : "register",
       authCode: String(f.authCode ?? ""),
+      years: Number(f.years) || 1,
       contact: f,
       ip: (await requestMeta()).ip,
     }));

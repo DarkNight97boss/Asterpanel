@@ -1765,6 +1765,19 @@ const it: Record<string, string> = {
   "Files and database": "File e database",
   "Files only (themes, plugins, uploads)": "Solo file (temi, plugin, upload)",
   "Database only (content and settings)": "Solo database (contenuti e impostazioni)",
+  "Register for": "Registra per",
+  "{n} years": "{n} anni",
+  "2 years": "2 anni",
+  "3 years": "3 anni",
+  "4 years": "4 anni",
+  "5 years": "5 anni",
+  "promo": "promo",
+  "Promo first year": "Promo primo anno",
+  "Empty = none": "Vuoto = nessuna",
+  "Promo until": "Promo fino al",
+  "Email check": "Controllo email",
+  "Reads the public DNS of {domain} the way a receiving mail server does: MX, SPF and DMARC.": "Legge il DNS pubblico di {domain} come farebbe un server di posta che riceve: MX, SPF e DMARC.",
+  "Check now": "Controlla ora",
 };
 
 export default it;

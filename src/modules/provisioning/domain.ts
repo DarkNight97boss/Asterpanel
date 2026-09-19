@@ -14,7 +14,7 @@ export const domain: ProvisioningModule = {
   productFields: [],
   async create(ctx) {
     const { provisionDomain } = await import("@/lib/domains");
-    const request = (ctx.service.moduleData.request ?? {}) as { action?: string; authCode?: string };
+    const request = (ctx.service.moduleData.request ?? {}) as { action?: string; authCode?: string; years?: number };
     await provisionDomain(ctx.service.id, request);
     // The transfer code has served its purpose: only the action is kept.
     return { moduleData: { request: { action: request.action } } };

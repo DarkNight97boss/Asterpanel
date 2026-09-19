@@ -59,7 +59,12 @@ export async function saveTld(_: ActionState, form: FormData): Promise<ActionSta
   const prices = [parseMoney(String(f.registerPrice ?? "")), parseMoney(String(f.renewPrice ?? "")), parseMoney(String(f.transferPrice ?? ""))];
   if (prices.some((p) => p === null)) return { error: "Enter prices such as 12.90" };
   const [registerPrice, renewPrice, transferPrice] = prices as number[];
-  const row = { tld, registrar: String(f.registrar), registerPrice, renewPrice, transferPrice, enabled: form.has("enabled"), sort: z.coerce.number().int().min(0).max(9999).catch(0).parse(f.sort) };
+  const promoRaw = String(f.promoPrice ?? "").trim();
+  const promoPrice = promoRaw ? parseMoney(promoRaw) : null;
+  if (promoRaw && promoPrice === null) return { error: "Enter prices such as 12.90" };
+  const until = String(f.promoUntil ?? "");
+  const promoUntil = promoPrice != null && /^\d{4}-\d{2}-\d{2}$/.test(until) ? new Date(`${until}T23:59:59Z`) : null;
+  const row = { tld, registrar: String(f.registrar), registerPrice, renewPrice, transferPrice, promoPrice, promoUntil, enabled: form.has("enabled"), sort: z.coerce.number().int().min(0).max(9999).catch(0).parse(f.sort) };
   const db = await getDb();
   await db.insert(schema.domainTlds).values(row).onConflictDoUpdate({ target: schema.domainTlds.tld, set: row });
   await audit(admin.id, "tld.saved", "tld", tld, row);

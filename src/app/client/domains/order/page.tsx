@@ -6,7 +6,7 @@ import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
 import { countryOptions, guessCountry } from "@/lib/countries";
-import { splitDomain } from "@/lib/domains";
+import { firstYearPrice, MAX_YEARS, splitDomain } from "@/lib/domains";
 import { formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { order } from "../actions";
@@ -22,7 +22,7 @@ export default async function OrderDomain({ searchParams }: { searchParams: Prom
   if (!parts) redirect("/client/domains/new");
   const tld = tlds.find((x) => x.tld === parts.tld)!;
   const transfer = sp.action === "transfer";
-  const price = transfer ? tld.transferPrice : tld.registerPrice;
+  const price = transfer ? tld.transferPrice : firstYearPrice(tld);
   const money = (c: number) => formatMoney(c, billing.currency, locale);
   const isCompany = co?.orgType === "company";
 
@@ -40,6 +40,13 @@ export default async function OrderDomain({ searchParams }: { searchParams: Prom
                 <Alert tone="info">{t("Before you start: unlock the domain at your current registrar and ask them for the transfer (EPP / auth) code. A transfer usually takes 5 to 7 days and adds one year to the expiry date.")}</Alert>
                 <Field label={t("Transfer code")}><Input name="authCode" required autoComplete="off" maxLength={100} /></Field>
               </>
+            )}
+            {!transfer && (
+              <Field label={t("Register for")} className="max-w-xs">
+                <Select name="years" defaultValue="1">
+                  {Array.from({ length: MAX_YEARS }, (_, i) => i + 1).map((y) => <option key={y} value={y}>{y === 1 ? t("1 year") : t("{n} years", { n: y })} — {money(price + (y - 1) * tld.renewPrice)}</option>)}
+                </Select>
+              </Field>
             )}
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t("First name")}><Input name="firstName" required defaultValue={user.firstName} /></Field>
@@ -59,7 +66,7 @@ export default async function OrderDomain({ searchParams }: { searchParams: Prom
                 </Select>
               </Field>
             </div>
-            <SubmitButton>{t("Continue to payment")} — {money(price)}</SubmitButton>
+            <SubmitButton>{t("Continue to payment")}</SubmitButton>
           </ActionForm>
         </div>
       </Card>

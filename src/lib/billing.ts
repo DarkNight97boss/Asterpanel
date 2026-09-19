@@ -52,7 +52,7 @@ export async function placeOrder(input: {
   /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
   coupon?: string;
   /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
-  pricing?: { first: number; recurring: number; label: string };
+  pricing?: { first: number; recurring: number; label: string; /** Shown instead of "1 year". */ period?: string };
   /** Module-specific order options, stored as `service.moduleData.request`. */
   request?: Record<string, unknown>;
 }): Promise<{ orderId: string; invoiceId: string; serviceId: string }> {
@@ -117,7 +117,7 @@ export async function placeOrder(input: {
       .returning();
 
     // Invoice lines are a legal record: written once, in the site language.
-    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t("1 year")})` : `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
+    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t(input.pricing.period ?? "1 year")})` : `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
     await tx.insert(schema.invoiceItems).values([
       { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: label, amount: price },
       ...(setup > 0

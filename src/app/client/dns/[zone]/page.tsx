@@ -11,7 +11,7 @@ import { formatDateTime } from "@/lib/format";
 import { DNS_TEMPLATES } from "@/platform/dns-tools";
 import { requireAccount } from "@/lib/account";
 import { getSettings } from "@/lib/settings";
-import { addRecord, applyTemplate, deleteRecord, deleteZone, importZoneFile, restoreSnapshot } from "../actions";
+import { addRecord, applyTemplate, checkEmailSetup, deleteRecord, deleteZone, importZoneFile, restoreSnapshot } from "../actions";
 
 const ttlLabel = (s: number) => (s % 86400 === 0 ? `${s / 86400} d` : s % 3600 === 0 ? `${s / 3600} h` : s % 60 === 0 ? `${s / 60} min` : `${s} s`);
 
@@ -107,6 +107,10 @@ export default async function DnsZone({ params }: { params: Promise<{ zone: stri
             </div>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader title={t("Email check")} description={t("Reads the public DNS of {domain} the way a receiving mail server does: MX, SPF and DMARC.", { domain: zone.name })} action={<ActionForm action={checkEmailSetup} className=""><input type="hidden" name="zoneId" value={zone.id} /><SubmitButton variant="secondary">{t("Check now")}</SubmitButton></ActionForm>} />
+        </Card>
 
         {snapshots.length > 0 && (
           <Card>
