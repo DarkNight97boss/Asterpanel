@@ -82,6 +82,17 @@ export async function transferOwnership(form: FormData) {
   revalidatePath("/client", "layout");
 }
 
+export async function setRequire2fa(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, account } = await requireAccount("manage");
+  const on = form.get("require2fa") === "1";
+  // Whoever switches it on must already comply, or they would lock themselves out of undoing it.
+  if (on && !user.totpEnabledAt) return { error: "Turn on two-factor authentication for your own account first (Profile)" };
+  await (await getDb()).update(schema.companies).set({ require2fa: on }).where(eq(schema.companies.id, account.id));
+  await audit(user.id, on ? "company.2fa_required" : "company.2fa_optional", "company", account.id);
+  revalidatePath("/client/team");
+  return { ok: "Saved" };
+}
+
 export async function endImpersonation() {
   await stopImpersonation();
   redirect("/admin/clients");

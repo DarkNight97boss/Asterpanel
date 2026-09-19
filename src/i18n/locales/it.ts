@@ -1720,6 +1720,20 @@ const it: Record<string, string> = {
   "new": "nuovi",
   "Collected per month": "Incassato per mese",
   "Payments received, credit excluded. Click a month to download its invoices as CSV.": "Pagamenti ricevuti, credito escluso. Clicca un mese per scaricare le sue fatture in CSV.",
+  "This company requires two-factor authentication. Set it up below to continue.": "Questa azienda richiede l'autenticazione a due fattori. Configurala qui sotto per continuare.",
+  "Two-factor authentication for everyone": "Autenticazione a due fattori per tutti",
+  "Required: members without it can only open their profile until they set it up.": "Obbligatoria: i membri che non l'hanno possono aprire solo il proprio profilo finché non la configurano.",
+  "Optional: each member decides for their own account.": "Facoltativa: ogni membro decide per il proprio account.",
+  "Make it optional": "Rendila facoltativa",
+  "Require it": "Rendila obbligatoria",
+  "Turn on two-factor authentication for your own account first (Profile)": "Attiva prima l'autenticazione a due fattori sul tuo account (Profilo)",
+  "Send as": "Invia come",
+  "Signed JSON (for programs)": "JSON firmato (per programmi)",
+  "Slack: an incoming-webhook URL. Discord: a channel webhook URL. Telegram: https://api.telegram.org/bot<token>/sendMessage": "Slack: l'URL di un incoming webhook. Discord: l'URL del webhook di un canale. Telegram: https://api.telegram.org/bot<token>/sendMessage",
+  "Telegram chat id": "ID chat Telegram",
+  "Added. Press “Send test” to see a message arrive.": "Aggiunto. Premi «Invia test» per veder arrivare un messaggio.",
+  "This address does not belong to the chosen chat service": "Questo indirizzo non appartiene al servizio di chat scelto",
+  "Telegram needs https://api.telegram.org/bot<token>/sendMessage and a chat id": "Telegram richiede https://api.telegram.org/bot<token>/sendMessage e un ID chat",
 };
 
 export default it;

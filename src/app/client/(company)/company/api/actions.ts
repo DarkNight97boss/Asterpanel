@@ -30,7 +30,13 @@ export async function removeApiKey(form: FormData) {
 export async function newWebhook(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, account } = await requireAccount("manage");
   try {
-    const { secret } = await createWebhook(account.id, { url: String(form.get("url") ?? ""), events: form.getAll("events").map(String) });
+    const format = z.enum(["json", "slack", "discord", "telegram"]).catch("json").parse(form.get("format"));
+    const { secret } = await createWebhook(account.id, { url: String(form.get("url") ?? ""), events: form.getAll("events").map(String), format, chatId: String(form.get("chatId") ?? "") });
+    if (format !== "json") {
+      await audit(user.id, "webhook.created", "company", account.id, { format });
+      revalidatePath(PATH);
+      return { ok: "Added. Press “Send test” to see a message arrive." };
+    }
     await audit(user.id, "webhook.created", "company", account.id);
     revalidatePath(PATH);
     return { ok: `Signing secret, shown only now:\n${secret}` };

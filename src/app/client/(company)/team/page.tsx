@@ -6,7 +6,7 @@ import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount, ROLE_LABEL } from "@/lib/account";
 import { displayName, formatDate } from "@/lib/format";
-import { changeRole, invite, leaveTeam, removeMember, setMemberSites, transferOwnership } from "./actions";
+import { changeRole, invite, leaveTeam, removeMember, setMemberSites, setRequire2fa, transferOwnership } from "./actions";
 
 const ROLE_HELP: Record<string, string> = {
   admin: "Everything: services, billing and the team.",
@@ -92,6 +92,16 @@ export default async function Team() {
             ))}
           </Table>
         </Card>
+
+        {manage && (
+          <Card>
+            <CardHeader
+              title={t("Two-factor authentication for everyone")}
+              description={account.require2fa ? t("Required: members without it can only open their profile until they set it up.") : t("Optional: each member decides for their own account.")}
+              action={<ActionForm action={setRequire2fa} className=""><input type="hidden" name="require2fa" value={account.require2fa ? "0" : "1"} /><SubmitButton variant="secondary">{account.require2fa ? t("Make it optional") : t("Require it")}</SubmitButton></ActionForm>}
+            />
+          </Card>
+        )}
 
         {manage && (
           <Card>
