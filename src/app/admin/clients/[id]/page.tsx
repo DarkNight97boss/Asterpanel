@@ -3,13 +3,13 @@ import { notFound } from "next/navigation";
 import { and, desc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ProfileFields } from "@/components/profile-fields";
-import { Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, StatusBadge, STATUS_LABEL, Table, Td, Textarea } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, StatusBadge, STATUS_LABEL, Table, Td, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { displayName, requireArea } from "@/lib/auth";
 import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { saveClient } from "../../actions";
+import { saveClient, signInAsClient } from "../../actions";
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireArea("clients");
@@ -29,7 +29,11 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
 
   return (
     <>
-      <PageHeader title={displayName(client)} description={`${client.email} · ${t("Registered")} ${formatDate(client.createdAt, locale)}`} />
+      <PageHeader
+        title={displayName(client)}
+        description={`${client.email} · ${t("Registered")} ${formatDate(client.createdAt, locale)}`}
+        action={client.role === "client" && client.status === "active" && <form action={signInAsClient}><input type="hidden" name="clientId" value={client.id} /><Button variant="secondary">{t("Sign in as this client")}</Button></form>}
+      />
       <div className="grid gap-6 xl:grid-cols-2">
         <Card className="xl:row-span-2">
           <CardHeader title={t("Profile")} />

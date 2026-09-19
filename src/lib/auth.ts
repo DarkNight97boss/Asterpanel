@@ -2,10 +2,13 @@ import "server-only";
 import { cache } from "react";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq, gt, lt } from "drizzle-orm";
+import { and, eq, gt, isNotNull, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { randomToken, sha256 } from "./crypto";
+import { getImpersonator } from "./impersonation";
 import { requestMeta } from "./request";
+
+export { getImpersonator };
 import { AREA_HOME, staffAreas, staffCan, type StaffArea } from "./staff";
 
 const COOKIE = "aster_session";
@@ -39,6 +42,46 @@ export async function destroySession() {
     await db.delete(schema.sessions).where(eq(schema.sessions.id, sha256(token)));
   }
   jar.delete(COOKIE);
+}
+
+// ─── Sign in as client ───────────────────────────────────────────────────────
+
+const RETURN_COOKIE = "aster_return";
+const cookieOpts = (expires: Date) => ({ httpOnly: true, sameSite: "lax" as const, secure: process.env.NODE_ENV === "production", path: "/", expires });
+
+/**
+ * Opens a one-hour session as `clientId` for a staff member and parks the
+ * staff session in a second cookie. Only client accounts can be impersonated:
+ * acting as a colleague would be a way around staff roles.
+ */
+export async function startImpersonation(staff: SessionUser, clientId: string): Promise<boolean> {
+  const jar = await cookies();
+  const own = jar.get(COOKIE)?.value;
+  const db = await getDb();
+  const [target] = await db.select({ id: schema.users.id, role: schema.users.role, status: schema.users.status }).from(schema.users).where(eq(schema.users.id, clientId));
+  if (!own || !target || target.role !== "client" || target.status !== "active" || !staffCan(staff, "clients")) return false;
+  const token = randomToken();
+  const expiresAt = new Date(Date.now() + 60 * 60_000);
+  await db.insert(schema.sessions).values({ id: sha256(token), userId: target.id, expiresAt, impersonatorId: staff.id, ...(await requestMeta()) });
+  jar.set(RETURN_COOKIE, own, cookieOpts(expiresAt));
+  jar.set(COOKIE, token, cookieOpts(expiresAt));
+  return true;
+}
+
+/** Ends the impersonated session and puts the staff session back. */
+export async function stopImpersonation() {
+  const jar = await cookies();
+  const current = jar.get(COOKIE)?.value;
+  const back = jar.get(RETURN_COOKIE)?.value;
+  const db = await getDb();
+  if (current) await db.delete(schema.sessions).where(and(eq(schema.sessions.id, sha256(current)), isNotNull(schema.sessions.impersonatorId)));
+  jar.delete(RETURN_COOKIE);
+  if (back) jar.set(COOKIE, back, cookieOpts(new Date(Date.now() + SESSION_DAYS * DAY)));
+}
+
+/** Account-security changes are the account holder's alone, never available to someone acting as them. */
+export async function forbidWhileImpersonating(): Promise<string | null> {
+  return (await getImpersonator()) ? "Not available while acting as a client" : null;
 }
 
 /** Public handle of a session row: the stored id is itself a secret-derived hash, so pages get a hash of it. */

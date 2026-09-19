@@ -1,0 +1,1 @@
+ALTER TABLE "sessions" ADD COLUMN "impersonator_id" uuid;

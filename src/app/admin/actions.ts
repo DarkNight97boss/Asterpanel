@@ -9,7 +9,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type Pricing } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { requireAdmin, requireArea } from "@/lib/auth";
+import { requireAdmin, requireArea, startImpersonation } from "@/lib/auth";
 import { activateService, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
@@ -149,6 +149,14 @@ export async function cancelInvoice(form: FormData) {
   await db.update(schema.invoices).set({ status: "cancelled" }).where(sql`${schema.invoices.id} = ${id} and ${schema.invoices.status} = 'unpaid'`);
   await audit(staff.id, "invoice.cancelled", "invoice", id);
   revalidatePath(`/admin/invoices/${id}`);
+}
+
+export async function signInAsClient(form: FormData) {
+  const staff = await requireArea("clients");
+  const clientId = uuid.parse(form.get("clientId"));
+  if (!(await startImpersonation(staff, clientId))) redirect(`/admin/clients/${clientId}`);
+  await audit(staff.id, "client.impersonated", "user", clientId);
+  redirect("/client");
 }
 
 export async function creditInvoice(_: ActionState, form: FormData): Promise<ActionState> {

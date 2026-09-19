@@ -134,6 +134,13 @@
       "when": 1789825575265,
       "tag": "0018_coupons_canned_incidents",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1789825965053,
+      "tag": "0019_impersonation",
+      "breakpoints": true
     }
   ]
 }
