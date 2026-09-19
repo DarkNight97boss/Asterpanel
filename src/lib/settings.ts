@@ -118,6 +118,12 @@ export const settingsSchemas = {
     /** `paid`: send as soon as an invoice is paid. `manual`: staff presses the button. */
     autoSend: z.enum(["manual", "paid"]).default("manual"),
   }),
+  /** Encrypted: credentials of the cloud providers the administrator switched on. Physical servers need none. */
+  cloud: z.object({
+    accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+    /** Let's Encrypt contact given to nodes created from here. */
+    acmeEmail: z.string().default(""),
+  }),
   registrars: z.object({
     /** Credentials per registrar module id. */
     accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),
@@ -143,7 +149,7 @@ export const settingsSchemas = {
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

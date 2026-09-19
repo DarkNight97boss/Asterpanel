@@ -12,6 +12,8 @@ import { randomToken, sha256 } from "@/lib/crypto";
 import { baseUrl } from "@/lib/url";
 import { getSettings, updateSettings } from "@/lib/settings";
 import { getSdiProvider } from "@/modules/sdi";
+import { CloudNodeError, createCloudNode, destroyCloudServer, testCloudProvider } from "@/lib/cloud";
+import { getCloudProvider } from "@/modules/cloud";
 import { PlatformError, signingKeys, syncDns, testOffsite } from "@/platform/engine";
 
 const nodeFields = z.object({
@@ -73,10 +75,14 @@ export async function deleteNode(_: ActionState, form: FormData): Promise<Action
   const admin = await requireAdmin();
   const id = z.string().uuid().parse(form.get("id"));
   const db = await getDb();
+  const [busy] = await db.select({ id: schema.workloads.id }).from(schema.workloads).where(eq(schema.workloads.nodeId, id)).limit(1);
+  if (busy) return { error: "This node still has workloads. Delete or move them first." };
   try {
+    // A cloud machine is destroyed with its node: otherwise it would keep costing money unseen.
+    await destroyCloudServer(id, admin.id);
     await db.delete(schema.nodes).where(eq(schema.nodes.id, id));
-  } catch {
-    return { error: "This node still has workloads. Delete or move them first." };
+  } catch (err) {
+    return { error: err instanceof CloudNodeError ? err.message : "This node still has workloads. Delete or move them first." };
   }
   await audit(admin.id, "node.deleted", "node", id);
   redirect("/admin/nodes");
@@ -188,4 +194,51 @@ export async function saveSdi(_: ActionState, form: FormData): Promise<ActionSta
   await audit(admin.id, "settings.updated", "settings", `sdi.${provider.id}`);
   revalidatePath("/admin/settings/einvoice");
   return { ok: "Saved" };
+}
+
+// ─── Cloud providers ─────────────────────────────────────────────────────────
+
+export async function saveCloudProvider(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const provider = getCloudProvider(String(form.get("provider") ?? ""));
+  if (!provider) return { error: "Unknown provider" };
+  const current = await getSettings("cloud");
+  const previous = current.accounts[provider.id] ?? {};
+  const account: Record<string, string> = { enabled: form.has("enabled") ? "1" : "" };
+  // Secrets left empty keep their saved value: they are never sent back to the browser.
+  for (const f of provider.fields) account[f.name] = String(form.get(f.name) ?? "").trim().slice(0, 10_000) || (f.type === "text" ? "" : (previous[f.name] ?? ""));
+  if (account.enabled && provider.fields.some((f) => !f.optional && !account[f.name])) return { error: "Fill in the credentials before enabling this provider" };
+  const acmeEmail = String(form.get("acmeEmail") ?? current.acmeEmail).trim();
+  if (acmeEmail && !z.string().email().safeParse(acmeEmail).success) return { error: "Enter a valid email address" };
+  await updateSettings("cloud", { acmeEmail, accounts: { ...current.accounts, [provider.id]: account } });
+  await audit(admin.id, "settings.updated", "settings", `cloud.${provider.id}`);
+  revalidatePath("/admin/settings/cloud");
+  return { ok: "Saved" };
+}
+
+export async function testCloud(_: ActionState, form: FormData): Promise<ActionState> {
+  await requireAdmin();
+  try {
+    return { ok: await testCloudProvider(String(form.get("provider") ?? "")) };
+  } catch (err) {
+    return { error: err instanceof Error ? err.message.slice(0, 300) : "The cloud provider could not be reached" };
+  }
+}
+
+/** Creates a real, billed machine at the provider: only on an explicit confirmation. */
+export async function createCloudServer(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  if (!form.has("confirm")) return { error: "Tick the box to confirm: the provider starts billing this server right away" };
+  const parsed = z
+    .object({ provider: z.string(), name: z.string().trim(), region: z.string().trim(), size: z.string().trim(), baseDomain: nodeFields.shape.baseDomain, maxWorkloads: z.coerce.number().int().min(0).default(0) })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  try {
+    await createCloudNode({ ...parsed.data, origin: await baseUrl() }, admin.id);
+  } catch (err) {
+    if (err instanceof CloudNodeError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath("/admin/nodes");
+  return { ok: "The server is being created. It installs the agent by itself and comes online in about five minutes." };
 }

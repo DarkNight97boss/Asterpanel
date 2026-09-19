@@ -431,6 +431,11 @@ export const nodes = pgTable("nodes", {
   agentVersion: text("agent_version").notNull().default(""),
   stats: jsonb("stats").$type<NodeStats>().notNull().default({}),
   maxWorkloads: integer("max_workloads").notNull().default(0),
+  /** Cloud provider that runs this node; empty for physical / self-installed servers. */
+  provider: text("provider").notNull().default(""),
+  providerServerId: text("provider_server_id").notNull().default(""),
+  providerRegion: text("provider_region").notNull().default(""),
+  providerSize: text("provider_size").notNull().default(""),
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
   createdAt: createdAt(),
 });
