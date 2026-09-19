@@ -778,3 +778,26 @@ test("a new site can start as a copy of another one: same company, same server, 
   await assert.rejects(engine.createWorkload({ clientId, companyId, type: "wordpress", name: "No room", cloneFrom: original }), /no room for a copy/);
   await db.update(dbm.schema.nodes).set({ maxWorkloads: 0 }).where(eq(dbm.schema.nodes.id, o.nodeId));
 });
+
+test("security scan: weekly, findings stored on the site and raised as an alert", async () => {
+  const db = await dbm.getDb();
+  const { accountAlerts } = await import("../src/lib/alerts");
+  const [{ id: companyId }] = await db.insert(dbm.schema.companies).values({ name: "Scanned Ltd" }).returning();
+  const clean = await engine.createWorkload({ clientId, companyId, type: "wordpress", name: "Clean Site" });
+  const dirty = await engine.createWorkload({ clientId, companyId, type: "wordpress", name: "Infected Shop" });
+  await drain();
+  assert.equal(await engine.latestScan(clean), null);
+
+  const now = new Date();
+  const started = await engine.runWpScans(now, 500);
+  assert.ok(started >= 2);
+  assert.equal(await engine.runWpScans(new Date(now.getTime() + 6 * 86_400_000), 500), 0, "once a week");
+  await drain();
+
+  assert.equal((await engine.latestScan(clean))?.findings, 0);
+  const bad = (await engine.latestScan(dirty))!;
+  assert.deepEqual([bad.findings, bad.scan.uploadsPhp, bad.scan.core.length], [3, ["wp-content/uploads/2026/09/x.php"], 1]);
+  assert.equal((await workload(dirty)).config.scanFindings, 3);
+  const alerts = await accountAlerts(companyId, "developer");
+  assert.deepEqual(alerts.filter((a) => a.text.startsWith("Security scan")).map((a) => [a.vars?.name, a.vars?.n, a.href]), [["Infected Shop", "3", `/client/workloads/${dirty}/security`]]);
+});

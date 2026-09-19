@@ -159,6 +159,12 @@ export class SimulatedDriver implements Driver {
       await this.step(log, "[sim] purging edge cache");
       return { output: "Cache cleared." };
     }
+    if (tool === "wp.scan") {
+      await this.step(log, "[sim] verifying core and plugin checksums, scanning files");
+      // A site named "infected…" stands in for a compromised one.
+      const hit = /infected/i.test(spec.slug);
+      return { output: JSON.stringify({ scan: { core: hit ? ["File doesn't verify against checksum: wp-includes/load.php"] : [], plugins: [], uploadsPhp: hit ? ["wp-content/uploads/2026/09/x.php"] : [], suspicious: hit ? ["wp-content/uploads/2026/09/x.php"] : [], truncated: false } }) };
+    }
     if (tool === "wp.login") {
       await this.step(log, "[sim] creating a one-time login link");
       return { output: JSON.stringify({ url: `https://${spec.domains[0]}/?aster_login=${randomBytes(32).toString("hex")}` }) };
