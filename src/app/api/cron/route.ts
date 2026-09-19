@@ -3,6 +3,7 @@ import { safeEqual } from "@/lib/crypto";
 import { flushNotifications } from "@/lib/notify";
 import { syncDueDomains } from "@/lib/domains";
 import { runAutoCharges } from "@/lib/payment-methods";
+import { pollSdi } from "@/lib/sdi";
 import { runScheduledBackups } from "@/platform/engine";
 import { runUptimeChecks } from "@/platform/uptime";
 
@@ -24,11 +25,12 @@ async function handle(request: Request) {
   const report = await runAutomation();
   // After the billing run, so renewals issued a moment ago are charged in the same pass.
   const charges = await runAutoCharges().catch(() => ({ paid: 0, failed: 0 }));
+  const sdi = await pollSdi().catch(() => 0);
   const backups = await runScheduledBackups();
   const domains = await syncDueDomains().catch(() => 0);
   const uptime = await runUptimeChecks();
   await flushNotifications();
-  return Response.json({ ...report, charges, backups, domains, uptime });
+  return Response.json({ ...report, charges, sdi, backups, domains, uptime });
 }
 
 export { handle as GET, handle as POST };

@@ -1,11 +1,14 @@
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { InvoiceView } from "@/components/invoice-view";
-import { Button, buttonClass, Card, Field, Input } from "@/components/ui";
+import { Button, buttonClass, Card, Field, Input, StatusBadge } from "@/components/ui";
 import { getT } from "@/i18n";
 import { centsToInput } from "@/lib/format";
 import { loadInvoice } from "@/lib/invoices";
-import { addPayment, cancelInvoice, creditInvoice, resendInvoiceEmail } from "../../actions";
+import { addPayment, cancelInvoice, creditInvoice, resendInvoiceEmail, sendInvoiceToSdi } from "../../actions";
+
+const SDI_LABEL: Record<string, string> = { sent: "Sent, outcome pending", delivered: "Delivered", not_delivered: "Not delivered (available in the tax drawer)", rejected: "Rejected by the SDI", error: "Sending failed" };
+const SDI_TONE: Record<string, string> = { sent: "creating", delivered: "active", not_delivered: "creating", rejected: "error", error: "error" };
 import { requireArea } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
 
@@ -13,7 +16,7 @@ export default async function AdminInvoice({ params }: { params: Promise<{ id: s
   await requireArea("billing");
   const invoice = await loadInvoice((await params).id);
   if (!invoice) notFound();
-  const [t, einvoice] = await Promise.all([getT(), getSettings("einvoice")]);
+  const [t, einvoice, sdi] = await Promise.all([getT(), getSettings("einvoice"), getSettings("sdi")]);
   const balance = invoice.total - invoice.transactions.reduce((sum, tx) => sum + tx.amount, 0);
 
   return (
@@ -28,6 +31,17 @@ export default async function AdminInvoice({ params }: { params: Promise<{ id: s
             <a href={`/api/invoices/${invoice.id}/xml`} className={buttonClass("secondary", "md", "w-full")}>
               {t("Download XML (FatturaPA)")}
             </a>
+          )}
+          {einvoice.enabled && sdi.provider && invoice.status !== "unpaid" && invoice.status !== "draft" && invoice.status !== "cancelled" && (
+            <div className="rounded-theme border border-border p-3 text-sm">
+              <p className="mb-2 flex items-center justify-between gap-2 font-medium">SDI <StatusBadge status={SDI_TONE[invoice.sdiStatus] ?? "stopped"} label={t(SDI_LABEL[invoice.sdiStatus] ?? "Not sent")} /></p>
+              {invoice.sdiMessage && <p className="mb-2 text-xs break-words text-muted">{invoice.sdiMessage}</p>}
+              <ActionForm action={sendInvoiceToSdi}>
+                <input type="hidden" name="invoiceId" value={invoice.id} />
+                {invoice.sdiStatus === "sent" || invoice.sdiStatus === "delivered" || invoice.sdiStatus === "not_delivered" ? <input type="hidden" name="refresh" value="1" /> : null}
+                <SubmitButton variant="secondary" className="w-full">{invoice.sdiStatus === "" ? t("Send to the SDI") : invoice.sdiStatus === "rejected" || invoice.sdiStatus === "error" ? t("Send again") : t("Check the outcome")}</SubmitButton>
+              </ActionForm>
+            </div>
           )}
           <ActionForm action={resendInvoiceEmail}>
             <input type="hidden" name="invoiceId" value={invoice.id} />

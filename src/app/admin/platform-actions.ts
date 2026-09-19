@@ -11,6 +11,7 @@ import { requireAdmin } from "@/lib/auth";
 import { randomToken, sha256 } from "@/lib/crypto";
 import { baseUrl } from "@/lib/url";
 import { getSettings, updateSettings } from "@/lib/settings";
+import { getSdiProvider } from "@/modules/sdi";
 import { PlatformError, signingKeys, syncDns, testOffsite } from "@/platform/engine";
 
 const nodeFields = z.object({
@@ -164,6 +165,27 @@ export async function saveEinvoice(_: ActionState, form: FormData): Promise<Acti
   if (enabled && (!d.name || !d.vatNumber || !d.address || !d.zip || !d.city)) return { error: "Name, VAT number and full address are required" };
   await updateSettings("einvoice", { ...d, enabled, vatCountry: "IT" });
   await audit(admin.id, "settings.updated", "settings", "einvoice");
+  revalidatePath("/admin/settings/einvoice");
+  return { ok: "Saved" };
+}
+
+// ─── SDI intermediaries ──────────────────────────────────────────────────────
+
+export async function saveSdi(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("sdi");
+  const provider = getSdiProvider(String(form.get("provider") ?? ""));
+  const autoSend = form.get("autoSend") === "paid" ? ("paid" as const) : ("manual" as const);
+  if (!provider) {
+    await updateSettings("sdi", { ...current, provider: "", autoSend });
+    return { ok: "Saved" };
+  }
+  const previous = current.accounts[provider.id] ?? {};
+  const account: Record<string, string> = { sandbox: form.has("sandbox") ? "1" : "" };
+  for (const f of provider.fields) account[f.name] = String(form.get(`${provider.id}.${f.name}`) ?? "").trim().slice(0, 2000) || (f.type === "password" ? (previous[f.name] ?? "") : "");
+  if (provider.fields.some((f) => !account[f.name])) return { error: "Fill in every field of the chosen intermediary" };
+  await updateSettings("sdi", { provider: provider.id, autoSend, accounts: { ...current.accounts, [provider.id]: account } });
+  await audit(admin.id, "settings.updated", "settings", `sdi.${provider.id}`);
   revalidatePath("/admin/settings/einvoice");
   return { ok: "Saved" };
 }
