@@ -219,7 +219,7 @@ test("address pools: new servers lease by themselves, freed addresses are reused
   await settings.updateSettings("cloud", { ...s, autoscale: { ...s.autoscale, enabled: false }, accounts: { ...s.accounts, hetzner: { enabled: "1", token: "hz-token" }, gcp: { enabled: "1", serviceAccountJson } } });
 
   await assert.rejects(pools.createIpPool({ name: "x", provider: "aws", region: "eu-south-1", mode: "reserved", cidr: "", autoLease: true }), /cannot reserve/);
-  await assert.rejects(pools.createIpPool({ name: "x", provider: "hetzner", region: "fsn1", mode: "block", cidr: "203.0.113.0/28", autoLease: true }), /cannot host your own block/);
+  await assert.rejects(pools.createIpPool({ name: "x", provider: "hetzner", region: "fsn1", mode: "block", cidr: "203.0.113.0/28", autoLease: true }), /does not announce/);
   await assert.rejects(pools.createIpPool({ name: "x", provider: "gcp", region: "europe-west8", mode: "block", cidr: "10.0.0.0/24", autoLease: true }), /public IPv4 block/);
   const hz = await pools.createIpPool({ name: "Falkenstein", provider: "hetzner", region: "fsn1", mode: "reserved", cidr: "", autoLease: true });
   await pools.createIpPool({ name: "Milan BYOIP", provider: "gcp", region: "europe-west8", mode: "block", cidr: "203.0.113.0/29", autoLease: true });

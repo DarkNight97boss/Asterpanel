@@ -63,6 +63,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   { href: "/admin/settings/github", label: "GitHub", icon: "⑂" },
                   { href: "/admin/settings/cloud", label: t("Infrastructure"), icon: "☁" },
                   { href: "/admin/settings/ip-pools", label: t("IP address pools"), icon: "⌗" },
+                  { href: "/admin/settings/ipxo", label: t("IP leasing (IPXO)"), icon: "⇄" },
                   { href: "/admin/settings/registrars", label: t("Domain registrars"), icon: "◍" },
                   { href: "/admin/settings/backups", label: t("Backups"), icon: "⛁" },
                   { href: "/admin/staff", label: t("Staff"), icon: "⚇" },

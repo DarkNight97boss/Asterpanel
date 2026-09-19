@@ -6,6 +6,7 @@ import { runAutoCharges } from "@/lib/payment-methods";
 import { checkNodes } from "@/lib/node-health";
 import { pollSdi } from "@/lib/sdi";
 import { maintainCapacity, syncCloudNodes } from "@/lib/cloud";
+import { syncIpxoBlocks } from "@/lib/ipxo";
 import { runScheduledBackups, runWpAutoUpdates, runWpScans } from "@/platform/engine";
 import { runUptimeChecks } from "@/platform/uptime";
 
@@ -32,6 +33,8 @@ async function handle(request: Request) {
   const nodes = await checkNodes().catch(() => ({ raised: 0, cleared: 0 }));
   const sdi = await pollSdi().catch(() => 0);
   await syncCloudNodes().catch(() => 0);
+  // Before capacity: a lease that ended must stop handing out addresses to the servers created next.
+  await syncIpxoBlocks().catch(() => null);
   const capacity = await maintainCapacity().catch(() => ({ created: 0, removed: 0 }));
   const backups = await runScheduledBackups();
   const wpUpdates = await runWpAutoUpdates().catch(() => 0);
