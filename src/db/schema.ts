@@ -121,6 +121,9 @@ export const companies = pgTable("companies", {
   zip: text("zip").notNull().default(""),
   state: text("state").notNull().default(""),
   country: text("country").notNull().default(""),
+  /** Italian e-invoicing: 7-character recipient code and/or certified email. */
+  sdiCode: text("sdi_code").notNull().default(""),
+  pec: text("pec").notNull().default(""),
   createdAt: createdAt(),
 });
 

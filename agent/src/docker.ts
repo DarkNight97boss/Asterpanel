@@ -1,9 +1,10 @@
 import { execFile } from "node:child_process";
-import { createReadStream } from "node:fs";
+import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
 import type { ApmReport, JobPayloads, JobResult, MigrationSource, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
+import { detectBuildpack } from "./buildpack";
 import type { Driver, Log } from "./driver";
 
 /**
@@ -515,7 +516,15 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       log(`publishing ./${src.outputDir || ""}`);
       await this.docker(["run", "--rm", "-v", `${dir}:/src:ro`, "-v", `${name}-site:/site`, "-e", "OUT", "alpine:3", "sh", "-c", '[ -d "/src/$OUT" ] || { echo "output directory not found" >&2; exit 1; }; find /site -mindepth 1 -delete; cp -a "/src/$OUT/." /site/'], log, { env: { OUT: src.outputDir ?? "" } });
     } else {
-      if (!(await stat(path.join(dir, "Dockerfile")).then(() => true, () => false))) throw new Error("No Dockerfile found in the repository root");
+      if (!(await stat(path.join(dir, "Dockerfile")).then(() => true, () => false))) {
+        // No Dockerfile: recognise the stack and write one (see buildpack.ts).
+        const read = (f: string) => (existsSync(path.join(dir, f)) ? readFileSync(path.join(dir, f), "utf8").slice(0, 200_000) : undefined);
+        const pack = detectBuildpack({ has: (f) => existsSync(path.join(dir, f)), read }, src.port ?? 3000);
+        if (!pack) throw new Error("No Dockerfile found, and the stack was not recognised (Node.js, Python, Go, PHP, Ruby or static files). Add a Dockerfile or a start command.");
+        log(`no Dockerfile: using the ${pack.name} buildpack`);
+        await writeFile(path.join(dir, "Dockerfile"), pack.dockerfile);
+        if (!existsSync(path.join(dir, ".dockerignore"))) await writeFile(path.join(dir, ".dockerignore"), ".git\nnode_modules\n.env\n.env.*\n__pycache__\n.venv\n");
+      }
       log("building image");
       await this.docker(["build", "--memory", "2g", "-t", `${name}:build`, dir], log, { timeoutMs: 30 * 60_000 });
       await this.docker(["tag", `${name}:build`, `${name}:current`]);

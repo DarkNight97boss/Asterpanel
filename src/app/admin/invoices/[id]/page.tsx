@@ -7,12 +7,13 @@ import { centsToInput } from "@/lib/format";
 import { loadInvoice } from "@/lib/invoices";
 import { addPayment, cancelInvoice, resendInvoiceEmail } from "../../actions";
 import { requireArea } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
 
 export default async function AdminInvoice({ params }: { params: Promise<{ id: string }> }) {
   await requireArea("billing");
   const invoice = await loadInvoice((await params).id);
   if (!invoice) notFound();
-  const t = await getT();
+  const [t, einvoice] = await Promise.all([getT(), getSettings("einvoice")]);
   const balance = invoice.total - invoice.transactions.reduce((sum, tx) => sum + tx.amount, 0);
 
   return (
@@ -23,6 +24,11 @@ export default async function AdminInvoice({ params }: { params: Promise<{ id: s
           <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noopener" className={buttonClass("secondary", "md", "w-full")}>
             {t("Download PDF")}
           </a>
+          {einvoice.enabled && (
+            <a href={`/api/invoices/${invoice.id}/xml`} className={buttonClass("secondary", "md", "w-full")}>
+              {t("Download XML (FatturaPA)")}
+            </a>
+          )}
           <ActionForm action={resendInvoiceEmail}>
             <input type="hidden" name="invoiceId" value={invoice.id} />
             <SubmitButton variant="secondary" className="w-full">{t("Email to client")}</SubmitButton>

@@ -38,6 +38,8 @@ export default async function CompanyDetails() {
               {f("address1", "Address line 1")}
               {f("address2", "Address line 2")}
               {f("vatId", "VAT number")}
+              {f("sdiCode", "SDI recipient code", { maxLength: 7, placeholder: "0000000" })}
+              {f("pec", "Certified email (PEC)", { type: "email" })}
             </div>
             <SubmitButton>{t("Save")}</SubmitButton>
           </ActionForm>
