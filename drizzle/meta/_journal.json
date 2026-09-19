@@ -183,6 +183,13 @@
       "when": 1789846892632,
       "tag": "0025_github_app",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1789850357504,
+      "tag": "0026_dns_snapshots",
+      "breakpoints": true
     }
   ]
 }

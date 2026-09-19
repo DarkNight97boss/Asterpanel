@@ -726,6 +726,22 @@ export const counters = pgTable("counters", {
   value: integer("value").notNull().default(0),
 });
 
+/** What a zone looked like before a change, so a mistake can be undone. */
+export const dnsSnapshots = pgTable(
+  "dns_snapshots",
+  {
+    id: id(),
+    zoneId: uuid("zone_id")
+      .notNull()
+      .references(() => dnsZones.id, { onDelete: "cascade" }),
+    reason: text("reason").notNull().default(""),
+    records: jsonb("records").$type<{ name: string; type: string; value: string; ttl: number; priority: number }[]>().notNull().default([]),
+    actorId: uuid("actor_id"),
+    createdAt: createdAt(),
+  },
+  (t) => [index("dns_snapshots_zone_idx").on(t.zoneId)],
+);
+
 // ─── Domain names ────────────────────────────────────────────────────────────
 
 /** A TLD on sale: which registrar serves it and what a year costs (cents). */

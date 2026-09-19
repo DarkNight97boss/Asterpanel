@@ -972,6 +972,66 @@ export async function createZone(clientId: string, domain: string, actorId: stri
   return zone.id;
 }
 
+const SNAPSHOTS_KEPT = 20;
+
+/** Remembers the zone as it is now. Call before changing it. */
+export async function snapshotZone(zoneId: string, reason: string, actorId: string | null = null) {
+  const db = await getDb();
+  const records = await db.select().from(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zoneId));
+  await db.insert(schema.dnsSnapshots).values({ zoneId, reason: reason.slice(0, 120), actorId, records: records.map(({ name, type, value, ttl, priority }) => ({ name, type, value, ttl, priority })) });
+  const old = await db.select({ id: schema.dnsSnapshots.id }).from(schema.dnsSnapshots).where(eq(schema.dnsSnapshots.zoneId, zoneId)).orderBy(desc(schema.dnsSnapshots.createdAt)).offset(SNAPSHOTS_KEPT);
+  if (old.length) await db.delete(schema.dnsSnapshots).where(inArray(schema.dnsSnapshots.id, old.map((o) => o.id)));
+}
+
+/**
+ * Adds many records at once (a template, an imported zone file). Each one goes
+ * through the same validation as a record typed by hand; duplicates and records
+ * that would clash with a CNAME are left out and reported.
+ */
+export async function addDnsRecords(zoneId: string, input: { name: string; type: string; value: string; ttl: number; priority: number }[], reason: string, actorId: string | null = null): Promise<{ added: number; skipped: string[] }> {
+  const db = await getDb();
+  const existing = await db.select().from(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zoneId));
+  const have = existing.map(({ name, type, value }) => ({ name, type, value }));
+  const accepted: ReturnType<typeof cleanDnsRecord>[] = [];
+  const skipped: string[] = [];
+  for (const raw of input.slice(0, 500)) {
+    const label = `${raw.name} ${raw.type} ${raw.value}`.slice(0, 100);
+    try {
+      const r = cleanDnsRecord(raw);
+      const sameName = have.filter((h) => h.name === r.name);
+      if (sameName.some((h) => h.type === r.type && h.value === r.value)) skipped.push(`${label} — already there`);
+      else if (sameName.some((h) => (h.type === "CNAME") !== (r.type === "CNAME")) || (r.type === "CNAME" && sameName.length)) skipped.push(`${label} — clashes with a CNAME of the same name`);
+      else {
+        accepted.push(r);
+        have.push(r);
+      }
+    } catch (err) {
+      skipped.push(`${label} — ${err instanceof Error ? err.message : "invalid"}`);
+    }
+  }
+  if (accepted.length) {
+    await snapshotZone(zoneId, reason, actorId);
+    await db.insert(schema.dnsRecords).values(accepted.map((r) => ({ zoneId, ...r })));
+    await audit(actorId, "dns.records_added", "dns_zone", zoneId, { reason, count: accepted.length });
+    await touchZone(zoneId);
+  }
+  return { added: accepted.length, skipped };
+}
+
+/** Puts the zone back to a snapshot (the current state is snapshotted first, so this too can be undone). */
+export async function restoreZoneSnapshot(zoneId: string, snapshotId: string, actorId: string | null = null) {
+  const db = await getDb();
+  const [snap] = await db.select().from(schema.dnsSnapshots).where(and(eq(schema.dnsSnapshots.id, snapshotId), eq(schema.dnsSnapshots.zoneId, zoneId)));
+  if (!snap) throw new PlatformError("Snapshot not found");
+  await snapshotZone(zoneId, "Before restoring an earlier version", actorId);
+  await db.transaction(async (tx) => {
+    await tx.delete(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zoneId));
+    if (snap.records.length) await tx.insert(schema.dnsRecords).values(snap.records.map((r) => ({ zoneId, ...r, type: r.type as schema.DnsType })));
+  });
+  await audit(actorId, "dns.restored", "dns_zone", zoneId, { snapshot: snap.id });
+  await touchZone(zoneId);
+}
+
 /** Call after any change inside a zone: bumps the serial and pushes to the name servers. */
 export async function touchZone(zoneId: string) {
   const db = await getDb();
