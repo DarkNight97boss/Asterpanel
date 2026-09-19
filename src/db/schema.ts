@@ -96,27 +96,66 @@ export const passwordResets = pgTable(
 );
 
 export type TeamRole = "admin" | "developer" | "billing";
+export type CompanyRole = "owner" | TeamRole;
 
-/** Access to someone else's account. `memberId` is set when the invite is accepted. */
-export const teamMembers = pgTable(
-  "team_members",
+/**
+ * The customer. Sites, plans, invoices, tickets and DNS zones belong to a
+ * company, never to a person; people get in through `company_members`. A user
+ * can belong to many companies and create new ones.
+ */
+export const companies = pgTable("companies", {
+  id: id(),
+  name: text("name").notNull(),
+  orgType: text("org_type").$type<"individual" | "company">().notNull().default("company"),
+  /** Name printed on invoices when it differs from `name`. */
+  billingName: text("billing_name").notNull().default(""),
+  /** National company / tax code (e.g. codice fiscale). */
+  taxCode: text("tax_code").notNull().default(""),
+  vatId: text("vat_id").notNull().default(""),
+  address1: text("address1").notNull().default(""),
+  address2: text("address2").notNull().default(""),
+  city: text("city").notNull().default(""),
+  zip: text("zip").notNull().default(""),
+  state: text("state").notNull().default(""),
+  country: text("country").notNull().default(""),
+  createdAt: createdAt(),
+});
+
+/** Membership or pending invitation. `userId` is set when the invite is accepted. */
+export const companyMembers = pgTable(
+  "company_members",
   {
     id: id(),
-    ownerId: uuid("owner_id")
+    companyId: uuid("company_id")
       .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    memberId: uuid("member_id").references(() => users.id, { onDelete: "cascade" }),
+      .references(() => companies.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
     email: text("email").notNull(),
-    role: text("role").$type<TeamRole>().notNull(),
-    /** Restricts a member to these services (and their staging). Null = every service. */
+    role: text("role").$type<CompanyRole>().notNull(),
+    /** Restricts a developer to these services (and their staging). Null = every service. */
     workloadIds: jsonb("workload_ids").$type<string[] | null>(),
     /** SHA-256 of the emailed invite token; cleared once accepted. */
     inviteTokenHash: text("invite_token_hash").notNull().default(""),
     invitedAt: createdAt(),
     acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   },
-  (t) => [uniqueIndex("team_owner_email_idx").on(t.ownerId, t.email), index("team_member_idx").on(t.memberId)],
+  (t) => [uniqueIndex("company_member_email_idx").on(t.companyId, t.email), index("company_member_user_idx").on(t.userId)],
 );
+
+/** Legacy (pre-companies) memberships. Superseded by `company_members`; kept so old installs migrate without a destructive step. */
+export const teamMembers = pgTable("team_members", {
+  id: id(),
+  ownerId: uuid("owner_id")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  memberId: uuid("member_id").references(() => users.id, { onDelete: "cascade" }),
+  email: text("email").notNull(),
+  role: text("role").$type<TeamRole>().notNull(),
+  workloadIds: jsonb("workload_ids").$type<string[] | null>(),
+  inviteTokenHash: text("invite_token_hash").notNull().default(""),
+  invitedAt: createdAt(),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+}, (t) => [uniqueIndex("team_owner_email_idx").on(t.ownerId, t.email), index("team_member_idx").on(t.memberId)]);
 
 // ─── Settings & CMS ──────────────────────────────────────────────────────────
 
@@ -234,6 +273,7 @@ export const orders = pgTable(
   {
     id: id(),
     number: serial("number").notNull(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -252,6 +292,7 @@ export const services = pgTable(
   "services",
   {
     id: id(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -288,6 +329,7 @@ export const invoices = pgTable(
     number: serial("number").notNull(),
     /** 0 = issued before yearly numbering existed. */
     fiscalYear: integer("fiscal_year").notNull().default(0),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -426,6 +468,7 @@ export const workloads = pgTable(
   "workloads",
   {
     id: id(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -516,6 +559,7 @@ export const dnsZones = pgTable(
   "dns_zones",
   {
     id: id(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "cascade" }),
@@ -626,6 +670,7 @@ export const tickets = pgTable(
   {
     id: id(),
     number: serial("number").notNull(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),

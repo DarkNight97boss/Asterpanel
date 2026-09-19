@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNotNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
@@ -33,12 +33,16 @@ export async function invite(_: ActionState, form: FormData): Promise<ActionStat
   }
 }
 
+const M = schema.companyMembers;
+/** A member row of the active company that is not its owner. */
+const memberOf = (companyId: string, id: string) => and(eq(M.id, id), eq(M.companyId, companyId), ne(M.role, "owner"));
+
 export async function changeRole(form: FormData) {
   const { user, account } = await requireAccount("manage");
   const parsed = z.object({ id: z.string().uuid(), role }).parse(Object.fromEntries(form));
   const db = await getDb();
-  await db.update(schema.teamMembers).set({ role: parsed.role }).where(and(eq(schema.teamMembers.id, parsed.id), eq(schema.teamMembers.ownerId, account.id)));
-  await audit(user.id, "team.role_changed", "user", account.id, parsed);
+  await db.update(M).set({ role: parsed.role }).where(memberOf(account.id, parsed.id));
+  await audit(user.id, "team.role_changed", "company", account.id, parsed);
   revalidatePath("/client/team");
 }
 
@@ -46,18 +50,36 @@ export async function removeMember(form: FormData) {
   const { user, account } = await requireAccount("manage");
   const id = z.string().uuid().parse(form.get("id"));
   const db = await getDb();
-  await db.delete(schema.teamMembers).where(and(eq(schema.teamMembers.id, id), eq(schema.teamMembers.ownerId, account.id)));
-  await audit(user.id, "team.removed", "user", account.id, { id });
+  const [gone] = await db.delete(M).where(memberOf(account.id, id)).returning({ email: M.email });
+  if (gone) await audit(user.id, "team.removed", "company", account.id, { email: gone.email });
   revalidatePath("/client/team");
 }
 
-/** Leave a team you were invited to. */
+/** Leave a company you were invited to. Owners hand the company over first. */
 export async function leaveTeam(form: FormData) {
   const user = await requireUser();
+  const companyId = z.string().uuid().parse(form.get("companyId"));
   const db = await getDb();
-  await db.delete(schema.teamMembers).where(and(eq(schema.teamMembers.ownerId, z.string().uuid().parse(form.get("ownerId"))), eq(schema.teamMembers.memberId, user.id)));
+  const [gone] = await db.delete(M).where(and(eq(M.companyId, companyId), eq(M.userId, user.id), ne(M.role, "owner"))).returning({ email: M.email });
+  if (gone) await audit(user.id, "team.left", "company", companyId, { email: gone.email });
   (await cookies()).delete(ACCOUNT_COOKIE);
   redirect("/client");
+}
+
+/** Only the owner can hand the company to another active member; the old owner stays as administrator. */
+export async function transferOwnership(form: FormData) {
+  const { user, account } = await requireAccount("manage");
+  if (account.role !== "owner") redirect("/client/team");
+  const id = z.string().uuid().parse(form.get("id"));
+  const db = await getDb();
+  await db.transaction(async (tx) => {
+    const [next] = await tx.select().from(M).where(and(memberOf(account.id, id), isNotNull(M.acceptedAt)));
+    if (!next) return;
+    await tx.update(M).set({ role: "admin" }).where(and(eq(M.companyId, account.id), eq(M.role, "owner")));
+    await tx.update(M).set({ role: "owner", workloadIds: null }).where(eq(M.id, next.id));
+    await tx.insert(schema.auditLog).values({ actorId: user.id, action: "team.ownership_transferred", entity: "company", entityId: account.id, meta: { email: next.email } });
+  });
+  revalidatePath("/client", "layout");
 }
 
 export async function switchAccount(form: FormData) {
@@ -77,9 +99,9 @@ export async function setMemberSites(form: FormData) {
   const wanted = form.getAll("workloadId").map(String).filter((v) => /^[0-9a-f-]{36}$/i.test(v));
   const db = await getDb();
   // Only services of this very account can be granted.
-  const mine = new Set((await db.select({ id: schema.workloads.id }).from(schema.workloads).where(eq(schema.workloads.clientId, account.id))).map((w) => w.id));
+  const mine = new Set((await db.select({ id: schema.workloads.id }).from(schema.workloads).where(eq(schema.workloads.companyId, account.id))).map((w) => w.id));
   const workloadIds = wanted.filter((w) => mine.has(w));
-  await db.update(schema.teamMembers).set({ workloadIds: workloadIds.length ? workloadIds : null }).where(and(eq(schema.teamMembers.id, id), eq(schema.teamMembers.ownerId, account.id)));
-  await audit(user.id, "team.sites_changed", "user", account.id, { id, count: workloadIds.length });
+  await db.update(M).set({ workloadIds: workloadIds.length ? workloadIds : null }).where(memberOf(account.id, id));
+  await audit(user.id, "team.sites_changed", "company", account.id, { id, count: workloadIds.length });
   revalidatePath("/client/team");
 }

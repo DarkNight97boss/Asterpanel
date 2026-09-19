@@ -19,11 +19,11 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
   const [workloads, zones, invoices, tickets] = q.length < 2 ? [[], [], [], []] : await Promise.all([
     can("hosting")
       ? db.selectDistinct({ w: schema.workloads }).from(schema.workloads).leftJoin(schema.domains, eq(schema.domains.workloadId, schema.workloads.id))
-          .where(and(eq(schema.workloads.clientId, account.id), ne(schema.workloads.status, "deleted"), or(ilike(schema.workloads.name, like), ilike(schema.workloads.slug, like), ilike(schema.domains.hostname, like)))).limit(15)
+          .where(and(eq(schema.workloads.companyId, account.id), ne(schema.workloads.status, "deleted"), or(ilike(schema.workloads.name, like), ilike(schema.workloads.slug, like), ilike(schema.domains.hostname, like)))).limit(15)
       : [],
-    can("hosting") && !account.only ? db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.clientId, account.id), ilike(schema.dnsZones.name, like))).limit(10) : [],
-    can("billing") ? db.select().from(schema.invoices).where(and(eq(schema.invoices.clientId, account.id), eq(schema.invoices.number, number))).limit(5) : [],
-    db.select().from(schema.tickets).where(and(eq(schema.tickets.clientId, account.id), or(ilike(schema.tickets.subject, like), sql`${schema.tickets.number} = ${number}`))).limit(10),
+    can("hosting") && !account.only ? db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.companyId, account.id), ilike(schema.dnsZones.name, like))).limit(10) : [],
+    can("billing") ? db.select().from(schema.invoices).where(and(eq(schema.invoices.companyId, account.id), eq(schema.invoices.number, number))).limit(5) : [],
+    db.select().from(schema.tickets).where(and(eq(schema.tickets.companyId, account.id), or(ilike(schema.tickets.subject, like), sql`${schema.tickets.number} = ${number}`))).limit(10),
   ]);
   const total = workloads.length + zones.length + invoices.length + tickets.length;
   const Row = ({ href, title, meta, right }: { href: string; title: string; meta: string; right?: React.ReactNode }) => (

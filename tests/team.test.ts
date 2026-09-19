@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Transporter } from "nodemailer";
 
 process.env.PGLITE_DIR = "memory://";
@@ -13,6 +13,7 @@ let team: typeof import("../src/lib/team");
 let account: typeof import("../src/lib/roles");
 type User = import("../src/lib/auth").SessionUser;
 let owner: User, dev: User, stranger: User;
+let co: string;
 
 before(async () => {
   dbm = await import("../src/db");
@@ -25,38 +26,46 @@ before(async () => {
   owner = await mk("owner@example.test", "Rossi Web Agency");
   dev = await mk("dev@example.test");
   stranger = await mk("stranger@example.test");
+  // The first visit gives a user their own company, named after their profile.
+  const [first] = await account.listAccounts(owner);
+  assert.deepEqual([first.name, first.role, first.ownerUserId], ["Rossi Web Agency", "owner", owner.id]);
+  co = first.id;
 });
 
 test("an invite is bound to its email address and can be used once", async () => {
-  await assert.rejects(team.inviteMember(owner.id, owner, owner.email, "admin"), /already has full access/);
-  const { sent, path } = await team.inviteMember(owner.id, owner, dev.email, "billing");
+  await assert.rejects(team.inviteMember(co, owner, owner.email, "admin"), /already has full access/);
+  const { sent, path } = await team.inviteMember(co, owner, dev.email, "billing");
   assert.equal(sent.ok, true);
   assert.match(outbox[0].text, /Rossi Web Agency/);
   const token = decodeURIComponent(path.split("token=")[1]);
   assert.ok(outbox[0].text.includes(`https://panel.example.test${path}`));
 
   await assert.rejects(team.acceptInvite(token, stranger), /different email address/);
-  assert.equal(await team.acceptInvite(token, dev), owner.id);
+  assert.equal(await team.acceptInvite(token, dev), co);
   await assert.rejects(team.acceptInvite(token, dev), /invalid or has expired/);
-  await assert.rejects(team.inviteMember(owner.id, owner, dev.email, "admin"), /already a member/);
+  await assert.rejects(team.inviteMember(co, owner, dev.email, "admin"), /already a member/);
 });
 
 test("re-inviting before acceptance refreshes the link; old links die", async () => {
-  const first = await team.inviteMember(owner.id, owner, "later@example.test", "developer");
-  const second = await team.inviteMember(owner.id, owner, "later@example.test", "admin");
+  const first = await team.inviteMember(co, owner, "later@example.test", "developer");
+  const second = await team.inviteMember(co, owner, "later@example.test", "admin");
   const tok = (p: string) => decodeURIComponent(p.split("token=")[1]);
   assert.equal(await team.findInvite(tok(first.path)), null);
   assert.equal((await team.findInvite(tok(second.path)))?.invite.role, "admin");
 
   const db = await dbm.getDb();
-  await db.update(dbm.schema.teamMembers).set({ invitedAt: new Date(Date.now() - 8 * 86_400_000) }).where(eq(dbm.schema.teamMembers.email, "later@example.test"));
+  await db.update(dbm.schema.companyMembers).set({ invitedAt: new Date(Date.now() - 8 * 86_400_000) }).where(eq(dbm.schema.companyMembers.email, "later@example.test"));
   assert.equal(await team.findInvite(tok(second.path)), null, "expired after 7 days");
 });
 
-test("roles map to permissions; members see the owner's account", async () => {
-  const accounts = await account.listAccounts(dev);
-  assert.deepEqual(accounts.map((a) => [a.name, a.role]), [["dev", "owner"], ["Rossi Web Agency", "billing"]]);
-  assert.equal((await account.listAccounts(stranger)).length, 1);
+test("roles map to permissions; a user can belong to several companies", async () => {
+  // Invited people do not get a company of their own until they create one.
+  assert.deepEqual((await account.listAccounts(dev)).map((a) => [a.name, a.role, a.ownerUserId]), [["Rossi Web Agency", "billing", owner.id]]);
+  const mine = await account.createCompany(dev, "  Dev Studio  ");
+  const accounts = await account.listAccounts({ ...dev } as User);
+  assert.deepEqual(accounts.map((a) => [a.name, a.role]), [["Rossi Web Agency", "billing"], ["Dev Studio", "owner"]]);
+  assert.equal(accounts[1].id, mine);
+  assert.deepEqual((await account.listAccounts(stranger)).map((a) => [a.name, a.role]), [["stranger", "owner"]]);
 
   const can = account.roleCan;
   assert.deepEqual([can("billing", "billing"), can("billing", "hosting"), can("billing", "manage")], [true, false, false]);
@@ -67,16 +76,16 @@ test("roles map to permissions; members see the owner's account", async () => {
 test("a developer can be limited to specific services; staging follows its live site", async () => {
   const roles = await import("../src/lib/roles");
   const db = await dbm.getDb();
-  await db.update(dbm.schema.teamMembers).set({ role: "developer", workloadIds: ["site-a"] }).where(eq(dbm.schema.teamMembers.memberId, dev.id));
-  const [, asMember] = await roles.listAccounts({ ...dev, id: dev.id } as User);
+  await db.update(dbm.schema.companyMembers).set({ role: "developer", workloadIds: ["site-a"] }).where(and(eq(dbm.schema.companyMembers.userId, dev.id), eq(dbm.schema.companyMembers.companyId, co)));
+  const [asMember] = await roles.listAccounts({ ...dev, id: dev.id } as User);
   assert.deepEqual(asMember.only, ["site-a"]);
   assert.equal(roles.mayAccess(asMember, { id: "site-a" }), true);
   assert.equal(roles.mayAccess(asMember, { id: "stg", parentId: "site-a" }), true);
   assert.equal(roles.mayAccess(asMember, { id: "site-b" }), false);
   assert.equal(roles.mayAccess({ only: null }, { id: "anything" }), true);
 
-  await db.update(dbm.schema.teamMembers).set({ role: "billing" }).where(eq(dbm.schema.teamMembers.memberId, dev.id));
+  await db.update(dbm.schema.companyMembers).set({ role: "billing" }).where(and(eq(dbm.schema.companyMembers.userId, dev.id), eq(dbm.schema.companyMembers.companyId, co)));
   // listAccounts is request-cached by user object: a fresh object reads fresh data.
-  const [, asBilling] = await roles.listAccounts({ ...dev } as User);
+  const [asBilling] = await roles.listAccounts({ ...dev } as User);
   assert.equal(asBilling.only, null, "the restriction only applies to developers");
 });

@@ -127,6 +127,7 @@ export async function renderInvoicePdf(invoice: LoadedInvoice): Promise<{ filena
     [c.zip, c.city, c.state].filter(Boolean).join(" "),
     c.country,
     c.vatId && `${billing.taxName}: ${c.vatId}`,
+    c.taxCode && `${t("Tax code")}: ${c.taxCode}`,
     c.email,
   ];
   const dates: [string, string][] = [

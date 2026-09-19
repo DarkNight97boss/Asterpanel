@@ -13,7 +13,7 @@ export default async function ClientTickets() {
   const [t, locale, tickets] = await Promise.all([
     getT(),
     getLocale(),
-    db.select().from(schema.tickets).where(eq(schema.tickets.clientId, user.id)).orderBy(desc(schema.tickets.lastReplyAt)),
+    db.select().from(schema.tickets).where(eq(schema.tickets.companyId, user.id)).orderBy(desc(schema.tickets.lastReplyAt)),
   ]);
 
   return (

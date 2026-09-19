@@ -14,7 +14,7 @@ export default async function ClientService({ params }: { params: Promise<{ id: 
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
   const service = await db.query.services.findFirst({
-    where: and(eq(schema.services.id, id), eq(schema.services.clientId, user.id)),
+    where: and(eq(schema.services.id, id), eq(schema.services.companyId, user.id)),
     with: { product: true, server: true },
   });
   if (!service) notFound();

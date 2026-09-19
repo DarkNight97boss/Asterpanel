@@ -1,11 +1,12 @@
-import { and, asc, eq, ne } from "drizzle-orm";
+import { and, asc, eq, ne, sql } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { ConfirmButton } from "@/components/confirm-button";
 import { Badge, Button, Card, CardHeader, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount, ROLE_LABEL } from "@/lib/account";
 import { displayName, formatDate } from "@/lib/format";
-import { changeRole, invite, leaveTeam, removeMember, setMemberSites } from "./actions";
+import { changeRole, invite, leaveTeam, removeMember, setMemberSites, transferOwnership } from "./actions";
 
 const ROLE_HELP: Record<string, string> = {
   admin: "Everything: services, billing and the team.",
@@ -16,40 +17,33 @@ const ROLE_HELP: Record<string, string> = {
 export default async function Team() {
   const { user, account, can } = await requireAccount("support");
   const db = await getDb();
-  const [t, locale, [owner], members, sites] = await Promise.all([
+  const [t, locale, members, sites] = await Promise.all([
     getT(),
     getLocale(),
-    db.select().from(schema.users).where(eq(schema.users.id, account.id)),
     db
-      .select({ m: schema.teamMembers, u: { firstName: schema.users.firstName, lastName: schema.users.lastName, email: schema.users.email } })
-      .from(schema.teamMembers)
-      .leftJoin(schema.users, eq(schema.users.id, schema.teamMembers.memberId))
-      .where(eq(schema.teamMembers.ownerId, account.id))
-      .orderBy(asc(schema.teamMembers.invitedAt)),
-    db.select({ id: schema.workloads.id, name: schema.workloads.name }).from(schema.workloads).where(and(eq(schema.workloads.clientId, account.id), eq(schema.workloads.environment, "live"), ne(schema.workloads.status, "deleted"))).orderBy(asc(schema.workloads.name)),
+      .select({ m: schema.companyMembers, u: { firstName: schema.users.firstName, lastName: schema.users.lastName, email: schema.users.email, totpEnabledAt: schema.users.totpEnabledAt } })
+      .from(schema.companyMembers)
+      .leftJoin(schema.users, eq(schema.users.id, schema.companyMembers.userId))
+      .where(eq(schema.companyMembers.companyId, account.id))
+      // The owner first, then by seniority.
+      .orderBy(sql`${schema.companyMembers.role} <> 'owner'`, asc(schema.companyMembers.invitedAt)),
+    db.select({ id: schema.workloads.id, name: schema.workloads.name }).from(schema.workloads).where(and(eq(schema.workloads.companyId, account.id), eq(schema.workloads.environment, "live"), ne(schema.workloads.status, "deleted"))).orderBy(asc(schema.workloads.name)),
   ]);
   const manage = can("manage");
 
   return (
     <>
-      <PageHeader title={t("Team")} description={t("People who can work on {account}.", { account: account.name })} />
+      <PageHeader title={t("Users")} description={t("People who can work on {account}.", { account: account.name })} />
       <div className="space-y-6">
         <Card>
-          <Table head={[t("Name"), t("Email"), t("Role"), t("Access"), t("Status"), ""]}>
-            <tr>
-              <Td className="font-medium">{displayName(owner)}</Td>
-              <Td className="text-body">{owner.email}</Td>
-              <Td>{t(ROLE_LABEL.owner)}</Td>
-              <Td className="text-muted">{t("All services")}</Td>
-              <Td><Badge tone="success">{t("Active")}</Badge></Td>
-              <Td />
-            </tr>
+          <Table head={[t("Name"), t("Email"), "2FA", t("Role"), t("Access"), ""]}>
             {members.map(({ m, u }) => (
               <tr key={m.id}>
-                <Td className="font-medium">{u ? displayName(u) : "—"}</Td>
+                <Td className="font-medium">{u ? displayName(u) : "—"}{m.userId === user.id && <span className="ml-2 text-xs font-normal text-muted">{t("You")}</span>}</Td>
                 <Td className="text-body">{m.email}</Td>
+                <Td>{!m.acceptedAt ? <Badge tone="warning">{t("Invited {date}", { date: formatDate(m.invitedAt, locale) })}</Badge> : u?.totpEnabledAt ? <Badge tone="success">{t("Enabled")}</Badge> : <span className="text-muted">{t("Disabled")}</span>}</Td>
                 <Td>
-                  {manage ? (
+                  {manage && m.role !== "owner" ? (
                     <form action={changeRole} className="flex items-center gap-2">
                       <input type="hidden" name="id" value={m.id} />
                       <Select name="role" defaultValue={m.role} className="!min-h-8 w-40 py-1">
@@ -78,13 +72,20 @@ export default async function Team() {
                     </details>
                   ) : m.workloadIds?.length ? t("{n} services", { n: m.workloadIds.length }) : t("All services")}
                 </Td>
-                <Td>{m.acceptedAt ? <Badge tone="success">{t("Active")}</Badge> : <Badge tone="warning">{t("Invited {date}", { date: formatDate(m.invitedAt, locale) })}</Badge>}</Td>
                 <Td className="text-right">
-                  {manage && (
-                    <form action={removeMember}>
-                      <input type="hidden" name="id" value={m.id} />
-                      <Button size="sm" variant="ghost">{t("Remove")}</Button>
-                    </form>
+                  {manage && m.role !== "owner" && (
+                    <div className="flex justify-end gap-1">
+                      {account.role === "owner" && m.acceptedAt && (
+                        <form action={transferOwnership}>
+                          <input type="hidden" name="id" value={m.id} />
+                          <ConfirmButton size="sm" variant="ghost" message={t("Make this person the company owner? You will stay as administrator.")}>{t("Make owner")}</ConfirmButton>
+                        </form>
+                      )}
+                      <form action={removeMember}>
+                        <input type="hidden" name="id" value={m.id} />
+                        <Button size="sm" variant="ghost">{t("Remove")}</Button>
+                      </form>
+                    </div>
                   )}
                 </Td>
               </tr>
@@ -94,7 +95,7 @@ export default async function Team() {
 
         {manage && (
           <Card>
-            <CardHeader title={t("Invite a person")} description={t("They receive an email with a link valid for 7 days. They need an account with the same email address.")} />
+            <CardHeader title={t("Invite users")} description={t("They receive an email with a link valid for 7 days. They need an account with the same email address.")} />
             <div className="p-6 pt-4">
               <ActionForm action={invite}>
                 <div className="grid gap-4 md:grid-cols-[1fr_14rem]">
@@ -114,10 +115,10 @@ export default async function Team() {
           </Card>
         )}
 
-        {account.id !== user.id && (
+        {account.role !== "owner" && (
           <form action={leaveTeam}>
-            <input type="hidden" name="ownerId" value={account.id} />
-            <Button variant="ghost">{t("Leave this team")}</Button>
+            <input type="hidden" name="companyId" value={account.id} />
+            <Button variant="ghost">{t("Leave this company")}</Button>
           </form>
         )}
       </div>

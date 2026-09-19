@@ -14,7 +14,7 @@ export default async function ClientInvoices() {
     getT(),
     getLocale(),
     getSettings("billing"),
-    db.select().from(schema.invoices).where(eq(schema.invoices.clientId, user.id)).orderBy(desc(schema.invoices.createdAt)),
+    db.select().from(schema.invoices).where(eq(schema.invoices.companyId, user.id)).orderBy(desc(schema.invoices.createdAt)),
   ]);
 
   return (

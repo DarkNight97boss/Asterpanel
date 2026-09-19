@@ -23,10 +23,9 @@ export default async function ClientLayout({ children }: { children: React.React
         { items: [{ href: "/client", label: t("Dashboard"), icon: "◧", exact: true }] },
         ...(can("hosting") ? [{ title: t("Hosting"), items: [...Object.values(WORKLOAD_LABEL).map((l) => ({ href: l.path, label: t(l.many), icon: l.icon })), ...(account.only ? [] : [{ href: "/client/dns", label: t("DNS management"), icon: "⇄" }])] }] : []),
         {
-          title: t("Account"),
+          title: t("Company"),
           items: [
-            ...(can("billing") ? [{ href: "/client/services", label: t("Plans"), icon: "▤" }, { href: "/client/invoices", label: t("Invoices"), icon: "▦" }] : []),
-            { href: "/client/team", label: t("Team"), icon: "⚇" },
+            { href: can("billing") ? "/client/services" : "/client/team", label: t("Company settings"), icon: "⚙" },
             { href: "/client/tickets", label: t("Support"), icon: "✉" },
             { href: "/client/profile", label: t("Profile"), icon: "☺" },
           ],

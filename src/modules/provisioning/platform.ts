@@ -45,6 +45,7 @@ export const platform: ProvisioningModule = {
     try {
       const id = await createWorkload({
         clientId: ctx.client.id,
+        companyId: ctx.service.companyId,
         serviceId: ctx.service.id,
         type: planType(ctx.product.moduleConfig),
         name: request.name || ctx.product.name,

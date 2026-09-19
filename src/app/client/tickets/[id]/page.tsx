@@ -14,7 +14,7 @@ export default async function ClientTicket({ params }: { params: Promise<{ id: s
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
   const ticket = await db.query.tickets.findFirst({
-    where: and(eq(schema.tickets.id, id), eq(schema.tickets.clientId, user.id)),
+    where: and(eq(schema.tickets.id, id), eq(schema.tickets.companyId, user.id)),
     with: { messages: { with: { author: { columns: AUTHOR_COLUMNS } }, orderBy: asc(schema.ticketMessages.createdAt) } },
   });
   if (!ticket) notFound();

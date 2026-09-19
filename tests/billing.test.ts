@@ -114,3 +114,23 @@ test("invoice numbers are progressive per fiscal year and a failed order leaves 
   assert.equal(invoiceLabel("INV-", first[0]), `INV-${year + 1}/0001`);
   assert.equal(invoiceLabel("INV-", { number: 7, fiscalYear: 0 }), "INV-7", "legacy invoices keep their old label");
 });
+
+test("companies own what they order: service, invoice and renewal follow the company, and invoices print its billing details", async () => {
+  const db = await dbm.getDb();
+  const [co] = await db.insert(dbm.schema.companies).values({ name: "Rossi Web Agency", billingName: "Rossi Web Agency S.r.l.", taxCode: "RSSMRA80A01H501U", vatId: "IT01234567890", address1: "Via Roma 1", address2: "Scala B", city: "Milano", zip: "20100", country: "Italy" }).returning();
+  const { invoiceId } = await billing.placeOrder({ clientId, companyId: co.id, productId, cycle: "monthly", domain: "company.com" });
+  const [inv] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  const [svc] = (await db.select().from(dbm.schema.services)).filter((s) => s.domain === "company.com");
+  assert.deepEqual([inv.companyId, svc.companyId, inv.clientId], [co.id, co.id, clientId]);
+
+  const { loadInvoice } = await import("../src/lib/invoices");
+  const loaded = (await loadInvoice(invoiceId))!;
+  assert.deepEqual([loaded.client.company, loaded.client.address, loaded.client.vatId, loaded.client.taxCode], ["Rossi Web Agency S.r.l.", "Via Roma 1, Scala B", "IT01234567890", "RSSMRA80A01H501U"]);
+
+  // The renewal is billed to the same company, separately from the person's other services.
+  const due = new Date(Date.now() + 400 * 86_400_000);
+  await db.update(dbm.schema.services).set({ status: "active", nextDueDate: due, renewalInvoicedFor: null }).where(eq(dbm.schema.services.id, svc.id));
+  await billing.runAutomation(new Date(due.getTime() - 86_400_000));
+  const renewals = (await db.select().from(dbm.schema.invoices)).filter((i) => i.companyId === co.id && i.id !== invoiceId);
+  assert.equal(renewals.length, 1);
+});

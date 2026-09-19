@@ -19,7 +19,7 @@ export default async function DnsZone({ params }: { params: Promise<{ zone: stri
   const { zone: zoneId } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(zoneId)) notFound();
   const db = await getDb();
-  const [zone] = await db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.id, zoneId), eq(schema.dnsZones.clientId, account.id)));
+  const [zone] = await db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.id, zoneId), eq(schema.dnsZones.companyId, account.id)));
   if (!zone) notFound();
   const [t, dns, records] = await Promise.all([getT(), getSettings("dns"), db.select().from(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zone.id)).orderBy(asc(schema.dnsRecords.type), asc(schema.dnsRecords.name))]);
 

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { logout } from "@/app/(auth)/actions";
-import { switchAccount } from "@/app/client/team/actions";
+import { switchAccount } from "@/app/client/(company)/team/actions";
 import { getT } from "@/i18n";
 import { ROLE_LABEL, type Account } from "@/lib/account";
 import { displayName, type SessionUser } from "@/lib/auth";
@@ -48,7 +48,7 @@ export async function PanelShell({
           </div>
           <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-3 text-sm">
             <Link href={home} aria-label={t("Dashboard")} className="text-white/90 hover:text-white">⌂</Link>
-            {account && accounts.length > 1 ? (
+            {account ? (
               <details className="relative min-w-0">
                 <summary className="flex cursor-pointer list-none items-center gap-1.5 truncate">{account.name} <span aria-hidden className="text-xs">⌄</span></summary>
                 <form action={switchAccount} className="absolute left-0 z-10 mt-3 w-64 rounded-theme border border-border bg-surface p-1.5 text-fg shadow-xl">
@@ -58,10 +58,14 @@ export async function PanelShell({
                       <span className="shrink-0 text-xs text-muted">{a.id === account.id ? "✓" : t(ROLE_LABEL[a.role])}</span>
                     </button>
                   ))}
+                  <div className="mt-1.5 border-t border-border pt-1.5">
+                    <Link href="/client/company/details" className="block rounded-md px-3 py-2 hover:bg-subtle">{t("Company settings")}</Link>
+                    <Link href="/client/company/new" className="block rounded-md px-3 py-2 hover:bg-subtle">{t("Create new company")}</Link>
+                  </div>
                 </form>
               </details>
             ) : (
-              <span className="truncate">{account?.name || user.company || general.companyName || general.siteName}</span>
+              <span className="truncate">{general.companyName || general.siteName}</span>
             )}
             <span id="shell-crumbs" className="flex min-w-0 items-center gap-3 empty:hidden" />
           </nav>
