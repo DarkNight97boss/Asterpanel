@@ -1609,6 +1609,22 @@ const it: Record<string, string> = {
   "One job per line: schedule, then command": "Un job per riga: pianificazione, poi comando",
   "Five cron fields or @hourly, @daily, @weekly, @monthly. Up to 5 jobs.": "Cinque campi cron oppure @hourly, @daily, @weekly, @monthly. Fino a 5 job.",
   "Scheduled jobs are available for applications": "I job pianificati sono disponibili per le applicazioni",
+  "PHP and performance": "PHP e prestazioni",
+  "Limits of PHP for this site, and an in-memory object cache that spares the database. Saving restarts the site for a few seconds.": "Limiti di PHP per questo sito, e una object cache in memoria che alleggerisce il database. Salvando, il sito si riavvia per qualche secondo.",
+  "Memory limit (MB)": "Limite di memoria (MB)",
+  "At most half of the site's RAM.": "Al massimo metà della RAM del sito.",
+  "Largest upload (MB)": "Upload massimo (MB)",
+  "Longest request (seconds)": "Richiesta più lunga (secondi)",
+  "Redis object cache (installs and configures the Redis Object Cache plugin)": "Object cache Redis (installa e configura il plugin Redis Object Cache)",
+  "Saved. The site restarts with the new settings.": "Salvato. Il sito si riavvia con le nuove impostazioni.",
+  "PHP settings are available for WordPress sites": "Le impostazioni PHP sono disponibili per i siti WordPress",
+  "Start from": "Parti da",
+  "A copy has the files, database, users and passwords of the original, on the same server, at its own address.": "Una copia ha file, database, utenti e password dell'originale, sullo stesso server, a un proprio indirizzo.",
+  "A fresh WordPress": "Un WordPress nuovo",
+  "A copy of {site}": "Una copia di {site}",
+  "The site to copy was not found": "Il sito da copiare non è stato trovato",
+  "This site cannot be copied": "Questo sito non può essere copiato",
+  "The server of the original site has no room for a copy right now": "Il server del sito originale non ha spazio per una copia in questo momento",
 };
 
 export default it;
