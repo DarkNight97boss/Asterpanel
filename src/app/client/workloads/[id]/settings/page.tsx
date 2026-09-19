@@ -2,13 +2,15 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, CardHeader, Checkbox, Field, Input, Select, Textarea } from "@/components/ui";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
-import { PHP_LIMITS, readSecrets } from "@/platform/engine";
-import { destroy, saveCronJobs, savePhp, saveProtection, saveSettings } from "../../../platform-actions";
+import { DB_VERSIONS, PHP_LIMITS, readSecrets } from "@/platform/engine";
+import { dbAdmin, destroy, saveCronJobs, savePhp, saveProtection, saveSettings } from "../../../platform-actions";
 
 export default async function Settings({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
   const t = await getT();
   const c = w.config;
+  const versions: readonly string[] = w.type === "database" ? DB_VERSIONS[c.engine ?? "mysql"] : [];
+  const newer = versions.slice(versions.indexOf(c.version || versions.at(-1) || "") + 1);
   const php = c.php ?? { memoryLimitMb: 256, uploadMaxMb: 64, maxExecutionTime: 60, maxInputVars: 3000 };
   const env = Object.entries(readSecrets(w).env ?? {}).map(([k, v]) => `${k}=${v}`).join("\n");
   const git = w.type === "app" || w.type === "static";
@@ -50,6 +52,37 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
           </ActionForm>
         </div>
       </Card>
+
+      {w.type === "database" && (
+        <Card>
+          <CardHeader title={t("Administration")} description={t("Every operation that touches the data takes a backup first.")} />
+          <div className="grid gap-6 p-5 lg:grid-cols-3">
+            <ActionForm action={dbAdmin}>
+              <input type="hidden" name="id" value={w.id} />
+              <input type="hidden" name="action" value="rotate" />
+              <p className="text-sm font-medium">{t("New password")}</p>
+              <p className="text-xs text-muted">{t("The old one stops working at once. Update the environment variables of the apps that use this database.")}</p>
+              <SubmitButton variant="secondary" disabled={w.status !== "running"}>{t("Rotate password")}</SubmitButton>
+            </ActionForm>
+            {c.engine !== "redis" && (
+              <ActionForm action={dbAdmin}>
+                <input type="hidden" name="id" value={w.id} />
+                <input type="hidden" name="action" value="import" />
+                <Field label={t("Import a SQL dump")} hint={t("An https link to a .sql or .sql.gz file, up to 5 GB.")}><Input name="url" type="url" required placeholder="https://example.com/dump.sql.gz" /></Field>
+                <SubmitButton variant="secondary" disabled={w.status !== "running"}>{t("Import")}</SubmitButton>
+              </ActionForm>
+            )}
+            {newer.length > 0 && (
+              <ActionForm action={dbAdmin}>
+                <input type="hidden" name="id" value={w.id} />
+                <input type="hidden" name="action" value="upgrade" />
+                <Field label={t("Upgrade the engine")} hint={t("Data is exported, moved to the new version and loaded back. The database is offline meanwhile.")}><Select name="version">{newer.map((v) => <option key={v}>{v}</option>)}</Select></Field>
+                <SubmitButton variant="secondary" disabled={w.status !== "running"}>{t("Upgrade")}</SubmitButton>
+              </ActionForm>
+            )}
+          </div>
+        </Card>
+      )}
 
       {w.type !== "database" && (
         <Card>

@@ -276,6 +276,17 @@ export class SimulatedDriver implements Driver {
     return { output: JSON.stringify({ columns: ["ID", "post_title", "post_status", "post_date"], rows: [["1", "Hello world!", "publish", "2026-09-19 10:51:02"], ["2", "Sample Page", "publish", "2026-09-19 10:51:02"], ["3", "Privacy Policy", "draft", null]], truncated: false }) };
   }
 
+  async dbAdmin(spec: WorkloadSpec, action: "rotate" | "import" | "upgrade", args: { newPassword?: string; url?: string }, log: Log) {
+    this.must(spec);
+    if (action === "rotate") await this.step(log, `[sim] ALTER USER ${spec.database!.user} … new password set`);
+    if (action === "import") {
+      await this.step(log, `[sim] downloading ${new URL(args.url!).hostname} and importing`);
+      if (/broken/.test(args.url!)) throw new Error("ERROR 1064 (42000) at line 12: You have an error in your SQL syntax");
+    }
+    if (action === "upgrade") await this.step(log, `[sim] dump → new ${spec.database!.engine} ${spec.database!.version} volume → restore`);
+    return this.runtime(spec);
+  }
+
   async migrate(spec: WorkloadSpec, source: MigrationSource, newUrl: string, log: Log) {
     this.must(spec);
     const from = source.type === "archive" ? new URL(source.url).hostname : `${source.user}@${source.host}:${source.path}`;

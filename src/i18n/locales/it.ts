@@ -1664,6 +1664,23 @@ const it: Record<string, string> = {
   "The user name may contain letters, numbers, dots, dashes and @": "Il nome utente può contenere lettere, numeri, punti, trattini e @",
   "The password must be between 8 and 100 characters": "La password deve avere tra 8 e 100 caratteri",
   "Enter a password": "Inserisci una password",
+  "Administration": "Amministrazione",
+  "Every operation that touches the data takes a backup first.": "Ogni operazione che tocca i dati esegue prima un backup.",
+  "The old one stops working at once. Update the environment variables of the apps that use this database.": "Quella vecchia smette subito di funzionare. Aggiorna le variabili d'ambiente delle app che usano questo database.",
+  "Rotate password": "Rigenera password",
+  "Import a SQL dump": "Importa un dump SQL",
+  "An https link to a .sql or .sql.gz file, up to 5 GB.": "Un link https a un file .sql o .sql.gz, fino a 5 GB.",
+  "Import": "Importa",
+  "Upgrade the engine": "Aggiorna il motore",
+  "Data is exported, moved to the new version and loaded back. The database is offline meanwhile.": "I dati vengono esportati, spostati sulla nuova versione e ricaricati. Nel frattempo il database è offline.",
+  "Started. The new password appears on the Info page in a few seconds: update it in your apps.": "Avviato. La nuova password compare nella pagina Info tra pochi secondi: aggiornala nelle tue app.",
+  "Started. A backup is taken first.": "Avviato. Prima viene eseguito un backup.",
+  "Available for managed databases": "Disponibile per i database gestiti",
+  "The database must be running": "Il database deve essere attivo",
+  "Dumps can be imported into MySQL and PostgreSQL databases": "I dump si possono importare in database MySQL e PostgreSQL",
+  "Enter a public https:// link to the dump (.sql or .sql.gz)": "Inserisci un link https:// pubblico al dump (.sql o .sql.gz)",
+  "Redis has a single supported version": "Redis ha una sola versione supportata",
+  "Choose a newer version than the current one": "Scegli una versione più recente di quella attuale",
 };
 
 export default it;

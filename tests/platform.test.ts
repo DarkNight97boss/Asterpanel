@@ -829,3 +829,42 @@ test("site protection: HSTS, a password in front of the site (hashed for the pro
   assert.equal(engine.readSecrets(await workload(id)).sitePassword, undefined);
   await drain();
 });
+
+test("managed databases: password rotation lands only after the node did it; imports and upgrades take a backup first", async () => {
+  const db = await dbm.getDb();
+  const { decryptJson } = await import("../src/lib/crypto");
+  const id = await engine.createWorkload({ clientId, type: "database", name: "Admin PG", config: { engine: "postgres", version: "15" } });
+  await drain();
+  const before = engine.readSecrets(await workload(id)).dbPassword;
+  const jobId = await engine.rotateDbPassword(id);
+  assert.equal(engine.readSecrets(await workload(id)).dbPassword, before, "still the old one while the node works");
+  await drain();
+  const after = engine.readSecrets(await workload(id)).dbPassword;
+  assert.ok(after && after !== before);
+  const [job] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId));
+  assert.deepEqual(decryptJson(job.payload, {}), { action: "rotate" }, "the new password does not stay in the queue");
+
+  for (const bad of ["http://example.com/d.sql", "https://10.0.0.1/d.sql", "nope"]) await assert.rejects(engine.importDbDump(id, bad), /public https/);
+  await engine.importDbDump(id, "https://files.example.com/dump.sql.gz");
+  await drain();
+  assert.ok((await workload(id)).backups.some((b) => b.note === "Before import" && b.status === "ready"));
+  await engine.importDbDump(id, "https://files.example.com/broken.sql");
+  await drain();
+  const failed = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id))).filter((j) => j.type === "workload.dbadmin").at(-1)!;
+  assert.match(failed.error, /SQL syntax/);
+
+  await assert.rejects(engine.upgradeDbVersion(id, "15"), /newer version/);
+  await assert.rejects(engine.upgradeDbVersion(id, "99"), /newer version/);
+  await engine.upgradeDbVersion(id, "17");
+  assert.equal((await engine.buildSpec(id)).database?.version, "17");
+  await drain();
+  assert.ok((await workload(id)).backups.some((b) => b.note === "Before upgrade to 17"));
+
+  const redis = await engine.createWorkload({ clientId, type: "database", name: "Admin Redis", config: { engine: "redis" } });
+  await drain();
+  const old = engine.readSecrets(await workload(redis)).dbPassword;
+  await engine.rotateDbPassword(redis);
+  assert.notEqual(engine.readSecrets(await workload(redis)).dbPassword, old);
+  await assert.rejects(engine.importDbDump(redis, "https://files.example.com/d.sql"), /MySQL and PostgreSQL/);
+  await drain();
+});

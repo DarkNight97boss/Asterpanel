@@ -21,6 +21,7 @@ export interface Driver {
   db(spec: WorkloadSpec, action: "tables" | "query", sql: string, log: Log): Promise<JobResult>;
   apm(spec: WorkloadSpec, minutes: number): Promise<JobResult>;
   files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], path: string, content: string | undefined, log: Log, encoding?: "utf8" | "base64"): Promise<JobResult>;
+  dbAdmin(spec: WorkloadSpec, action: "rotate" | "import" | "upgrade", args: { newPassword?: string; url?: string }, log: Log): Promise<JobResult>;
   migrate(spec: WorkloadSpec, source: MigrationSource, newUrl: string, log: Log): Promise<JobResult>;
   dnsSync(data: JobPayloads["dns.sync"], log: Log): Promise<JobResult>;
   backupCreate(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget): Promise<JobResult>;
