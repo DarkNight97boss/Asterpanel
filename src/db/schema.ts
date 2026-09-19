@@ -465,6 +465,9 @@ export type WorkloadConfig = {
   buildCommand?: string;
   outputDir?: string;
   port?: number;
+  // wordpress: automatic updates
+  autoUpdate?: "off" | "minor" | "all";
+  autoUpdateLastAt?: string;
   /** Build a preview environment for every other branch that is pushed. */
   previews?: boolean;
   // edge rules (web workloads)

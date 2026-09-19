@@ -152,6 +152,17 @@ export class SimulatedDriver implements Driver {
       await this.step(log, "[sim] purging edge cache");
       return { output: "Cache cleared." };
     }
+    if (tool === "wp.login") {
+      await this.step(log, "[sim] creating a one-time login link");
+      return { output: JSON.stringify({ url: `https://${spec.domains[0]}/?aster_login=${randomBytes(32).toString("hex")}` }) };
+    }
+    if (tool === "wp.autoupdate") {
+      await this.step(log, `[sim] wp core/plugin/theme update (${args.scope === "all" ? "all" : "minor"})`);
+      // A site named "fragile…" stands in for an update that breaks the home page.
+      if (/fragile/i.test(spec.slug)) throw new Error("SITE_UNHEALTHY after the update: HTTP 500");
+      this.write((s) => (s.workloads[spec.slug].updated = ["akismet", "twentytwentyfive"]));
+      return { output: "Success: Updated 2 of 2 plugins." };
+    }
     if (tool === "wp.inventory") {
       const done = new Set(this.read().workloads[spec.slug].updated ?? []);
       const item = (name: string, title: string, status: string, version: string, update: string) => ({ name, title, status, version: done.has(name) ? update || version : version, update: done.has(name) ? "" : update });

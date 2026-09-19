@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash, randomBytes } from "node:crypto";
 import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
@@ -32,6 +33,25 @@ const BAD_BOTS = "(?i)(semrush|ahrefs|mj12bot|dotbot|petalbot|bytespider|blexbot
 const AI_BOTS = "(?i)(gptbot|chatgpt-user|oai-searchbot|claudebot|claude-web|anthropic-ai|ccbot|google-extended|perplexitybot|amazonbot|applebot-extended|bytespider|cohere-ai|diffbot|facebookbot|meta-externalagent|omgili|youbot)";
 const SLUG = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const ID = /^[0-9a-f-]{36}$/i;
+
+/** Must-use plugin behind the one-click login. Tokens are single-use, live 60 seconds and are stored hashed. */
+const LOGIN_PLUGIN = `<?php
+// Installed by the hosting panel. Do not edit: it is rewritten on every use.
+add_action('init', function () {
+  if (empty($_GET['aster_login']) || !is_string($_GET['aster_login'])) return;
+  $key = 'aster_login_' . hash('sha256', $_GET['aster_login']);
+  $uid = (int) get_transient($key);
+  delete_transient($key);
+  if ($uid > 0 && get_userdata($uid)) {
+    wp_set_current_user($uid);
+    wp_set_auth_cookie($uid, false, is_ssl());
+    wp_safe_redirect(admin_url());
+    exit;
+  }
+  wp_safe_redirect(wp_login_url());
+  exit;
+}, 1);
+`;
 const REL_PATH = /^(?!\/)(?!.*\.\.)[\w./-]*$/;
 
 /** One CSV record (RFC 4180 quoting) → cells. psql --csv never breaks a record across lines unless a value does. */
@@ -622,6 +642,28 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         if (args.name && !/^[\w.-]{1,100}$/.test(args.name)) throw new Error("Invalid name");
         return { output: await this.wp(spec, [kind, "update", args.name || "--all"], log) };
       }
+      case "wp.login": {
+        // A single-use, 60-second link into wp-admin. WordPress only ever sees the hash of the token.
+        const adminId = (await this.wp(spec, ["user", "list", "--role=administrator", "--field=ID", "--number=1", "--orderby=ID"])).trim().split("\n")[0];
+        if (!/^\d+$/.test(adminId)) throw new Error("This site has no administrator account");
+        await this.files(spec, "mkdir", "wp-content/mu-plugins", undefined, log);
+        await this.files(spec, "write", "wp-content/mu-plugins/aster-login.php", LOGIN_PLUGIN, log);
+        const token = randomBytes(32).toString("hex");
+        await this.wp(spec, ["transient", "set", `aster_login_${createHash("sha256").update(token).digest("hex")}`, adminId, "60"]);
+        return { output: JSON.stringify({ url: `https://${spec.domains[0]}/?aster_login=${token}` }) };
+      }
+      case "wp.autoupdate": {
+        const minor = args.scope !== "all";
+        const before = await this.siteHealth(spec);
+        const steps: string[][] = [["core", "update", ...(minor ? ["--minor"] : [])], ["plugin", "update", "--all", ...(minor ? ["--minor"] : [])], ["theme", "update", "--all", ...(minor ? ["--minor"] : [])]];
+        const outputs: string[] = [];
+        for (const step of steps) outputs.push(await this.wp(spec, step, log).catch((err: Error) => `${step[0]}: ${err.message}`));
+        await this.wp(spec, ["core", "update-db"], log).catch(() => {});
+        const after = await this.siteHealth(spec);
+        // Only blame the update for what it broke: a site that was already down is not rolled back for it.
+        if (before.ok && !after.ok) throw new Error(`SITE_UNHEALTHY after the update: ${after.reason}`);
+        return { output: outputs.join("\n").slice(-4000) };
+      }
       case "wp.search_replace":
         if (!args.search || !args.replace) throw new Error("Both search and replace are required");
         // "--" ends option parsing: user text can never be read as a WP-CLI flag.
@@ -629,6 +671,16 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       default:
         throw new Error(`Unknown tool ${String(tool)}`);
     }
+  }
+
+  /** Asks the site for its home page from inside its network: up means an answer below 500 without WordPress's fatal-error screen. */
+  private async siteHealth(spec: WorkloadSpec): Promise<{ ok: boolean; reason: string }> {
+    const { name, net } = this.check(spec);
+    const out = await this.docker(["run", "--rm", "--network", net, "curlimages/curl:latest", "-s", "-L", "--max-redirs", "3", "--max-time", "20", "-H", `Host: ${spec.domains[0] ?? name}`, "-H", "X-Forwarded-Proto: https", "-w", "\n%{http_code}", `http://${name}/`], undefined, { quiet: true, timeoutMs: 40_000 }).catch(() => "\n000");
+    const code = Number(out.trim().split("\n").at(-1));
+    if (!(code >= 200 && code < 500)) return { ok: false, reason: `HTTP ${code || "no answer"}` };
+    if (/critical error on (this|your) (web)?site|errore critico/i.test(out)) return { ok: false, reason: "WordPress reports a critical error" };
+    return { ok: true, reason: "" };
   }
 
   // ─── Driver: WordPress migration ─────────────────────────────────────────

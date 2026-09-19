@@ -60,7 +60,7 @@ export default async function Tools({ params }: { params: Promise<{ id: string }
               <li key={j.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                 <StatusBadge status={j.status} label={t(j.status)} />
                 <code className="font-mono text-xs">{decryptJson<{ tool?: string }>(j.payload, {}).tool}</code>
-                <span className="min-w-0 flex-1 truncate text-muted">{j.error || String(j.result.output ?? "").trim().split("\n").pop()}</span>
+                <span className="min-w-0 flex-1 truncate text-muted">{j.error || (String(j.result.output ?? "").includes("aster_login=") ? "" : String(j.result.output ?? "").trim().split("\n").pop())}</span>
                 <span className="text-xs text-muted">{formatDateTime(j.createdAt, locale)}</span>
               </li>
             ))}

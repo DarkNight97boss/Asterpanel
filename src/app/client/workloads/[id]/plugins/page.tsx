@@ -1,13 +1,13 @@
 import { and, desc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { AutoRefresh } from "@/components/auto-refresh";
-import { Badge, Card, CardHeader, EmptyState, PageHeader, Table, Td } from "@/components/ui";
+import { Badge, Card, CardHeader, EmptyState, Field, PageHeader, Select, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { requireWorkload } from "@/platform/access";
 import type { WpInventory } from "@/platform/protocol";
-import { runTool } from "../../../platform-actions";
+import { runTool, saveAutoUpdate } from "../../../platform-actions";
 
 function ToolButton({ id, disabled, tool, kind, name, children, variant = "secondary" }: { id: string; disabled: boolean; tool: string; kind?: string; name?: string; children: React.ReactNode; variant?: "primary" | "secondary" | "ghost" }) {
   return (
@@ -69,6 +69,24 @@ export default async function PluginsAndThemes({ params }: { params: Promise<{ i
         description={scannedAt ? t("WordPress {v} · last scan {date}", { v: inventory?.core ?? "", date: formatDateTime(scannedAt, locale) }) : undefined}
         action={<ToolButton {...common} tool="wp.inventory" variant="primary">{busy ? t("Working…") : inventory ? t("Scan again") : t("Scan site")}</ToolButton>}
       />
+      {w.environment === "live" && (
+        <Card className="mb-6">
+          <CardHeader title={t("Automatic updates")} description={t("Once a day: a backup first, then the updates, then a check that the home page still works. If it does not, the backup is put back by itself.")} />
+          <div className="p-5">
+            <ActionForm action={saveAutoUpdate}>
+              <input type="hidden" name="id" value={w.id} />
+              <Field label={t("What to update")} className="max-w-md">
+                <Select name="mode" defaultValue={w.config.autoUpdate ?? "off"}>
+                  <option value="off">{t("Nothing: I update by hand")}</option>
+                  <option value="minor">{t("Security and minor releases only")}</option>
+                  <option value="all">{t("Everything, major versions included")}</option>
+                </Select>
+              </Field>
+              <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+      )}
       {inventory ? (
         <div className="space-y-6">
           {section("plugin", t("Plugins"), inventory.plugins)}
