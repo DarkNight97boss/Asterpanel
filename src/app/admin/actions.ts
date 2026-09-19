@@ -151,6 +151,21 @@ export async function cancelInvoice(form: FormData) {
   revalidatePath(`/admin/invoices/${id}`);
 }
 
+export async function sendInvoiceToSdi(_: ActionState, form: FormData): Promise<ActionState> {
+  const staff = await requireArea("billing");
+  const id = uuid.parse(form.get("invoiceId"));
+  const { sendToSdi, refreshSdiStatus, SdiSendError } = await import("@/lib/sdi");
+  try {
+    if (form.get("refresh")) await refreshSdiStatus(id);
+    else await sendToSdi(id, staff.id);
+  } catch (err) {
+    revalidatePath(`/admin/invoices/${id}`);
+    return { error: err instanceof SdiSendError || err instanceof Error ? err.message.slice(0, 300) : "The intermediary could not be reached" };
+  }
+  revalidatePath(`/admin/invoices/${id}`);
+  return { ok: form.get("refresh") ? "Updated" : "Handed to the intermediary. The SDI outcome arrives within minutes or a few days." };
+}
+
 export async function signInAsClient(form: FormData) {
   const staff = await requireArea("clients");
   const clientId = uuid.parse(form.get("clientId"));

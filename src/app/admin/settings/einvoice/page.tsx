@@ -3,7 +3,8 @@ import { Alert, Card, CardHeader, Checkbox, Field, Input, PageHeader, Select } f
 import { getT } from "@/i18n";
 import { requireAdmin } from "@/lib/auth";
 import { getSettings } from "@/lib/settings";
-import { saveEinvoice } from "../../platform-actions";
+import { sdiProviders } from "@/modules/sdi";
+import { saveEinvoice, saveSdi } from "../../platform-actions";
 
 export const metadata = { title: "Electronic invoicing" };
 
@@ -12,7 +13,7 @@ const NATURES = ["N1", "N2.1", "N2.2", "N3.2", "N3.3", "N4", "N6.9", "N7"];
 
 export default async function EinvoiceSettings() {
   await requireAdmin();
-  const [t, s, billing] = await Promise.all([getT(), getSettings("einvoice"), getSettings("billing")]);
+  const [t, s, billing, sdi] = await Promise.all([getT(), getSettings("einvoice"), getSettings("billing"), getSettings("sdi")]);
   return (
     <>
       <PageHeader title={t("Electronic invoicing")} description={t("Italian FatturaPA: every invoice can be downloaded as the XML file the Sistema di Interscambio accepts.")} />
@@ -39,6 +40,42 @@ export default async function EinvoiceSettings() {
                 <Field label={t("0% VAT nature")}><Select name="zeroVatNature" defaultValue={s.zeroVatNature}>{NATURES.map((n) => <option key={n}>{n}</option>)}</Select></Field>
                 <Field label={t("Legal reference for 0% VAT")} hint={t("Used only when the tax rate is 0, for example for flat-rate sellers.")}><Input name="zeroVatNote" defaultValue={s.zeroVatNote} maxLength={100} placeholder="Operazione in franchigia da IVA ex art. 1 c. 54-89 L. 190/2014" /></Field>
               </div>
+              <SubmitButton>{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title={t("Sending to the SDI")} description={t("Choose the intermediary you have a contract with. Without one, invoices are only downloadable as XML.")} />
+          <div className="p-5">
+            <ActionForm action={saveSdi}>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t("Intermediary")}>
+                  <Select name="provider" defaultValue={sdi.provider}>
+                    <option value="">{t("None: download only")}</option>
+                    {sdiProviders.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                  </Select>
+                </Field>
+                <Field label={t("When")}>
+                  <Select name="autoSend" defaultValue={sdi.autoSend}>
+                    <option value="manual">{t("Staff sends each invoice from its page")}</option>
+                    <option value="paid">{t("Automatically, as soon as an invoice is paid")}</option>
+                  </Select>
+                </Field>
+              </div>
+              {sdiProviders.map((p) => (
+                <fieldset key={p.id} className="rounded-theme border border-border p-4">
+                  <legend className="px-2 text-sm font-medium">{p.name} {sdi.provider === p.id && <span className="ml-1 text-xs font-normal text-success">● {t("in use")}</span>}</legend>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {p.fields.map((f) => (
+                      <Field key={f.name} label={t(f.label)} hint={f.help && t(f.help)}>
+                        <Input name={`${p.id}.${f.name}`} type={f.type} autoComplete="off" defaultValue={f.type === "password" ? "" : sdi.accounts[p.id]?.[f.name]} placeholder={f.type === "password" && sdi.accounts[p.id]?.[f.name] ? "••••••••  (unchanged)" : ""} />
+                      </Field>
+                    ))}
+                  </div>
+                </fieldset>
+              ))}
+              <Checkbox name="sandbox" defaultChecked={sdi.accounts[sdi.provider]?.sandbox === "1"} label={t("Use the intermediary's test environment (nothing reaches the real SDI)")} />
+              <p className="text-xs text-muted">{t("Only the fields of the intermediary selected above are saved.")}</p>
               <SubmitButton>{t("Save")}</SubmitButton>
             </ActionForm>
           </div>

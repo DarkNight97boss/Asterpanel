@@ -363,6 +363,12 @@ export const invoices = pgTable(
     chargeAttempts: integer("charge_attempts").notNull().default(0),
     lastChargeAt: timestamp("last_charge_at", { withTimezone: true }),
     lastChargeError: text("last_charge_error").notNull().default(""),
+    /** Electronic invoice: which intermediary has it, under what id, and what the SDI answered. */
+    sdiProvider: text("sdi_provider").notNull().default(""),
+    sdiId: text("sdi_id").notNull().default(""),
+    sdiStatus: text("sdi_status").$type<"" | "sent" | "delivered" | "not_delivered" | "rejected" | "error">().notNull().default(""),
+    sdiMessage: text("sdi_message").notNull().default(""),
+    sdiSentAt: timestamp("sdi_sent_at", { withTimezone: true }),
     notes: text("notes").notNull().default(""),
     createdAt: createdAt(),
   },

@@ -2,13 +2,14 @@ import "server-only";
 import { eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { guessCountry } from "./countries";
-import { buildFatturaPa, fpaFilename, FpaError } from "./fatturapa";
+import type { SdiDocument } from "@/modules/sdi";
+import { buildFatturaPa, fpaFilename, FpaError, splitVat } from "./fatturapa";
 import { invoiceLabel } from "./format";
 import type { LoadedInvoice } from "./invoices";
 import { getSettings } from "./settings";
 
 /** The FatturaPA file of an invoice, from the saved seller details and the company's billing details. */
-export async function invoiceXml(invoice: LoadedInvoice): Promise<{ filename: string; xml: string }> {
+export async function invoiceXml(invoice: LoadedInvoice): Promise<SdiDocument> {
   const [seller, billing] = await Promise.all([getSettings("einvoice"), getSettings("billing")]);
   if (!seller.enabled) throw new FpaError("Electronic invoicing is switched off");
   if (invoice.status === "draft" || invoice.status === "cancelled") throw new FpaError("Only issued invoices can be exported");
@@ -49,5 +50,22 @@ export async function invoiceXml(invoice: LoadedInvoice): Promise<{ filename: st
       lines: invoice.items.map((i) => ({ description: i.description, amount: i.amount })),
     },
   );
-  return { filename: fpaFilename(seller, progressive), xml };
+  const vat = splitVat(c.vatId, guessCountry(c.country, "it") || "IT");
+  return {
+    filename: fpaFilename(seller, progressive),
+    xml,
+    data: {
+      number: invoiceLabel(billing.invoicePrefix, invoice),
+      date: invoice.createdAt.toISOString().slice(0, 10),
+      dueDate: invoice.dueDate.toISOString().slice(0, 10),
+      isCreditNote: invoice.kind === "credit_note",
+      currency: invoice.currency,
+      taxRatePercent: invoice.taxRate / 100,
+      subtotal: invoice.subtotal,
+      tax: invoice.tax,
+      total: invoice.total,
+      lines: invoice.items.map((i) => ({ description: i.description, amount: i.amount })),
+      buyer: { name: c.company || `${c.firstName} ${c.lastName}`.trim(), vatNumber: vat?.code ?? "", taxCode: c.taxCode, address: c.address, zip: c.zip, city: c.city, province: c.state, country: guessCountry(c.country, "it") || "IT", sdiCode: co?.sdiCode ?? "", pec: co?.pec ?? "" },
+    },
+  };
 }

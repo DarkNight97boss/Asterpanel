@@ -189,6 +189,8 @@ export async function recordPayment(input: {
     const [paid] = await db.select({ companyId: schema.invoices.companyId, total: schema.invoices.total, currency: schema.invoices.currency }).from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId));
     emitEvent(paid?.companyId, "invoice.paid", { invoiceId: input.invoiceId, total: paid?.total, currency: paid?.currency });
     await fulfilInvoice(input.invoiceId);
+    // Lazy import: e-invoicing loads the invoice through modules that import billing.
+    await (await import("./sdi")).autoSendToSdi(input.invoiceId);
   }
   return { paid: outcome.paid, duplicate: outcome.duplicate };
 }
