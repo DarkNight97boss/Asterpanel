@@ -81,6 +81,7 @@ export async function register(_: ActionState, form: FormData): Promise<ActionSt
       firstName: z.string().trim().min(1, "First name is required").max(100),
       lastName: z.string().trim().min(1, "Last name is required").max(100),
       company: z.string().trim().max(150).default(""),
+      referralCode: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{0,12}$/).catch("").default(""),
     })
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0].message };

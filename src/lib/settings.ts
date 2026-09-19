@@ -51,6 +51,9 @@ export const settingsSchemas = {
     overdueReminderDays: z.array(z.number().int().min(1).max(365)).max(10).default([3, 7, 14]),
     invoicePrefix: z.string().max(10).default("INV-"),
     bankTransferInstructions: z.string().default(""),
+    /** Referral programme: share of each paid invoice of a referred company credited to who referred it, for a number of months. */
+    referralPercent: z.number().int().min(0).max(50).default(0),
+    referralMonths: z.number().int().min(1).max(60).default(12),
   }),
   /** Encrypted at rest: holds gateway API keys. */
   gateways: z.object({
