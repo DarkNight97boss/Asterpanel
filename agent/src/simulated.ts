@@ -70,7 +70,7 @@ export class SimulatedDriver implements Driver {
     await this.step(log, spec.cache?.enabled ? `[sim] edge cache on: TTL ${spec.cache.ttlMinutes} min, ${spec.cache.bypass.length} excluded path(s)` : "[sim] edge cache off");
     if (spec.bots) await this.step(log, `[sim] bot protection: bad bots ${spec.bots.blockBad ? "blocked" : "allowed"}, AI crawlers ${spec.bots.blockAi ? "blocked" : "allowed"}, ${spec.bots.ratePerMinute || "no"} req/min per IP, login ${spec.bots.protectLogin ? "protected" : "open"}`);
     if (spec.cdn?.enabled) await this.step(log, `[sim] static assets cached ${spec.cdn.maxAgeDays} day(s), compression on`);
-    await this.step(log, spec.sftp?.enabled ? `[sim] SFTP enabled on port ${spec.sftp.port} for user ${spec.sftp.username}` : "[sim] SFTP disabled");
+    await this.step(log, spec.sftp?.enabled ? `[sim] SFTP enabled on port ${spec.sftp.port} for user ${spec.sftp.username}, ${spec.sftp.keys?.length ?? 0} SSH key(s)` : "[sim] SFTP disabled");
     if (spec.redirects?.length) await this.step(log, `[sim] ${spec.redirects.length} redirect rule(s): ${spec.redirects.map((r) => `${r.from} → ${r.to} (${r.code})`).join(", ")}`);
     if (spec.denyIps?.length) await this.step(log, `[sim] denying ${spec.denyIps.length} address(es): ${spec.denyIps.join(", ")}`);
     await this.step(log, `[sim] routing ${spec.domains.join(", ")}`);

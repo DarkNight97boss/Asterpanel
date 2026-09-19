@@ -313,11 +313,17 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     if (!sftp?.enabled) return;
     if (!Number.isInteger(sftp.port) || sftp.port < 1024 || sftp.port > 65535 || !/^[a-z0-9]{1,32}$/.test(sftp.username)) throw new Error("Invalid SFTP settings");
     log(`enabling SFTP on port ${sftp.port}`);
+    // Public keys: the image authorises every *.pub it finds in ~/.ssh/keys.
+    const keyDir = path.join(this.opts.dataDir, "sftp", spec.slug);
+    await rm(keyDir, { recursive: true, force: true });
+    await mkdir(keyDir, { recursive: true });
+    const keys = (sftp.keys ?? []).filter((k) => /^[a-z0-9@.-]+ [A-Za-z0-9+/=]+$/.test(k));
+    for (const [i, k] of keys.entries()) await writeFile(path.join(keyDir, `key${i}.pub`), `${k}\n`);
     // Credentials travel in the environment (SFTP_USERS), never on the command line.
     const env = { SFTP_USERS: `${sftp.username}:${sftp.password}:33:33` };
     await this.docker(
       ["run", "-d", "--name", `${name}-sftp`, "--restart", "unless-stopped", "--network", "none", "--memory", "128m", "--pids-limit", "64",
-        "-p", `${sftp.port}:22`, "-v", `${name}-files:/home/${sftp.username}/site`, "-e", "SFTP_USERS", "atmoz/sftp:alpine"],
+        "-p", `${sftp.port}:22`, "-v", `${name}-files:/home/${sftp.username}/site`, "-v", `${keyDir}:/home/${sftp.username}/.ssh/keys:ro`, "-e", "SFTP_USERS", "atmoz/sftp:alpine"],
       log,
       { env },
     );
@@ -429,6 +435,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     await rm(path.join(this.opts.dataDir, "backups", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "builds", spec.slug), { recursive: true, force: true });
     await rm(path.join(this.opts.dataDir, "cache", spec.slug), { recursive: true, force: true });
+    await rm(path.join(this.opts.dataDir, "sftp", spec.slug), { recursive: true, force: true });
     return {};
   }
 

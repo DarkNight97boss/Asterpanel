@@ -22,6 +22,7 @@ export async function PanelShell({
   user,
   account,
   accounts = [],
+  alerts,
   children,
 }: {
   home: string;
@@ -31,6 +32,8 @@ export async function PanelShell({
   /** Client area only: the active account and the ones the user can switch to. */
   account?: Account;
   accounts?: Account[];
+  /** Client area only: enables the search box and the bell with this many open items. */
+  alerts?: number;
   children: React.ReactNode;
 }) {
   const [t, general] = await Promise.all([getT(), getSettings("general")]);
@@ -63,6 +66,17 @@ export async function PanelShell({
             <span id="shell-crumbs" className="flex min-w-0 items-center gap-3 empty:hidden" />
           </nav>
           <div className="flex shrink-0 items-center gap-4 text-sm">
+            {alerts !== undefined && (
+              <>
+                <form action="/client/search" role="search" className="hidden md:block">
+                  <input name="q" type="search" placeholder={t("Search…")} aria-label={t("Search")} className="h-8 w-44 rounded-md border border-white/20 bg-white/10 px-3 text-sm text-white placeholder:text-white/50 focus:w-64 focus:border-white/50 focus:outline-none" />
+                </form>
+                <Link href="/client/notifications" aria-label={t("Notifications")} className="relative grid size-7 place-items-center rounded-full hover:bg-white/10">
+                  <svg viewBox="0 0 24 24" className="size-[1.1rem]" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M6 8a6 6 0 1 1 12 0c0 7 3 8 3 8H3s3-1 3-8" /><path d="M10 21a2 2 0 0 0 4 0" /></svg>
+                  {alerts > 0 && <span className="absolute -top-1 -right-1 grid h-4 min-w-4 place-items-center rounded-full bg-accent px-1 text-[10px] leading-none font-semibold text-white">{alerts > 9 ? "9+" : alerts}</span>}
+                </Link>
+              </>
+            )}
             <Link href="/" className="hidden text-white/80 hover:text-white md:inline">{t("View site")} ↗</Link>
             <Link href="/client/tickets" aria-label={t("Support")} className="grid size-6 place-items-center rounded-full border border-white/70 text-xs hover:bg-white/10">?</Link>
             <details className="relative">
