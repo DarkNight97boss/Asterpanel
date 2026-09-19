@@ -500,6 +500,8 @@ export const workloads = pgTable(
     runtime: jsonb("runtime").$type<WorkloadRuntime>().notNull().default({}),
     /** Secret in the push-to-deploy webhook URL. */
     deployHookToken: text("deploy_hook_token").notNull().default(""),
+    /** Free-form tags to group services ("client-acme", "to-migrate"). */
+    labels: jsonb("labels").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -714,6 +716,51 @@ export const domainNames = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("domain_names_company_idx").on(t.companyId)],
+);
+
+// ─── API keys & webhooks ─────────────────────────────────────────────────────
+
+/** A company's credential for the REST API. Only the hash of the token is stored. */
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    /** First characters of the token, to recognise it in lists. */
+    prefix: text("prefix").notNull(),
+    tokenHash: text("token_hash").notNull().unique(),
+    /** `read` may only GET. */
+    scope: text("scope").$type<"read" | "write">().notNull().default("read"),
+    createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("api_keys_company_idx").on(t.companyId)],
+);
+
+/** An endpoint of the customer's that receives signed event notifications. */
+export const webhooks = pgTable(
+  "webhooks",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    url: text("url").notNull(),
+    /** Encrypted signing secret. */
+    secret: text("secret").notNull(),
+    events: jsonb("events").$type<string[]>().notNull().default([]),
+    enabled: boolean("enabled").notNull().default(true),
+    lastStatus: text("last_status").notNull().default(""),
+    lastAt: timestamp("last_at", { withTimezone: true }),
+    failures: integer("failures").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("webhooks_company_idx").on(t.companyId)],
 );
 
 // ─── Support ─────────────────────────────────────────────────────────────────

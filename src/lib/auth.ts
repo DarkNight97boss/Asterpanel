@@ -41,6 +41,26 @@ export async function destroySession() {
   jar.delete(COOKIE);
 }
 
+/** Public handle of a session row: the stored id is itself a secret-derived hash, so pages get a hash of it. */
+export const sessionHandle = (id: string) => sha256(`handle:${id}`).slice(0, 24);
+
+/** The signed-in user's sessions, newest first, with the current one flagged. */
+export async function listSessions(userId: string) {
+  const current = (await cookies()).get(COOKIE)?.value;
+  const db = await getDb();
+  const rows = await db.select().from(schema.sessions).where(and(eq(schema.sessions.userId, userId), gt(schema.sessions.expiresAt, new Date())));
+  return rows
+    .map((s) => ({ handle: sessionHandle(s.id), ip: s.ip, userAgent: s.userAgent, createdAt: s.createdAt, current: !!current && s.id === sha256(current) }))
+    .sort((a, b) => Number(b.current) - Number(a.current) || b.createdAt.getTime() - a.createdAt.getTime());
+}
+
+export async function revokeSession(userId: string, handle: string) {
+  const db = await getDb();
+  const rows = await db.select({ id: schema.sessions.id }).from(schema.sessions).where(eq(schema.sessions.userId, userId));
+  const hit = rows.find((s) => sessionHandle(s.id) === handle);
+  if (hit) await db.delete(schema.sessions).where(eq(schema.sessions.id, hit.id));
+}
+
 /** Revoke every session of a user, e.g. after a password change. */
 export async function destroyAllSessions(userId: string) {
   const db = await getDb();

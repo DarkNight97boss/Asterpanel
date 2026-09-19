@@ -9,7 +9,7 @@ import { mayAccess, requireAccount } from "@/lib/account";
 import { formatDate } from "@/lib/format";
 import { WORKLOAD_LABEL } from "@/platform/ui";
 
-export async function WorkloadList({ type, filters = {} }: { type: WorkloadType; filters?: { q?: string; status?: string } }) {
+export async function WorkloadList({ type, filters = {} }: { type: WorkloadType; filters?: { q?: string; status?: string; label?: string } }) {
   const { account: user, can } = await requireAccount("hosting");
   const db = await getDb();
   const label = WORKLOAD_LABEL[type];
@@ -25,8 +25,9 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
   const q = (filters.q ?? "").trim().toLowerCase().slice(0, 80);
   const all = rows.filter((w) => w.environment === "live" && mayAccess(user, w));
   const live = all.filter(
-    (w) => (!filters.status || w.status === filters.status) && (!q || w.name.toLowerCase().includes(q) || w.domains.some((d) => d.hostname.includes(q))),
+    (w) => (!filters.status || w.status === filters.status) && (!filters.label || w.labels.includes(filters.label)) && (!q || w.name.toLowerCase().includes(q) || w.domains.some((d) => d.hostname.includes(q))),
   );
+  const labels = [...new Set(all.flatMap((w) => w.labels))].sort();
   const newHref = `/client/new/${label.path.split("/").pop()}`;
 
   return (
@@ -41,6 +42,12 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
               <option value="">{t("All statuses")}</option>
               {["running", "stopped", "suspended", "error", "creating"].map((st) => <option key={st} value={st}>{t(st)}</option>)}
             </Select>
+            {labels.length > 0 && (
+              <Select name="label" defaultValue={filters.label ?? ""} className="w-44">
+                <option value="">{t("All labels")}</option>
+                {labels.map((l) => <option key={l}>{l}</option>)}
+              </Select>
+            )}
             <Button variant="secondary">{t("Filter")}</Button>
             <span className="ml-auto text-xs font-medium text-muted">{t("{n} of {total}", { n: live.length, total: all.length })}</span>
           </form>
@@ -54,6 +61,7 @@ export async function WorkloadList({ type, filters = {} }: { type: WorkloadType;
                 <tr key={w.id}>
                   <Td>
                     <Link href={`/client/workloads/${w.id}`} className="font-medium hover:text-link">{w.name}</Link>
+                    {w.labels.map((l) => <Link key={l} href={`?label=${encodeURIComponent(l)}`} className="ml-2 rounded-full border border-border px-2 py-0.5 text-[10px] font-medium text-body hover:bg-subtle">{l}</Link>)}
                     {hasStaging && <span className="ml-2 rounded-full bg-subtle px-2 py-0.5 text-[10px] font-semibold text-muted uppercase">+ staging</span>}
                   </Td>
                   <Td className="text-muted">{type === "database" ? `${w.config.engine ?? ""} ${w.config.version ?? ""}` : (host ?? "—")}</Td>

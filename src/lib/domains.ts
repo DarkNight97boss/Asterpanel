@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getDb, schema } from "@/db";
 import { getRegistrar, RegistrarError, type DomainContact, type Http, type RegistrarCredentials, type RegistrarModule } from "@/modules/registrars";
 import { audit } from "./audit";
+import { emitEvent } from "./webhooks";
 import { decryptJson, encryptJson } from "./crypto";
 import { getSettings } from "./settings";
 
@@ -203,6 +204,7 @@ export async function provisionDomain(serviceId: string, request: { action?: str
     } else {
       await mod.register(creds, { domain: d.name, years: 1, contact, nameservers }, http);
       await db.update(schema.domainNames).set({ status: "active", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
+      emitEvent(d.companyId, "domain.registered", { domain: d.name });
     }
     await hostZone(d, nameservers).catch(() => {});
     await syncDomain(d.id).catch(() => {});

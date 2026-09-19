@@ -234,7 +234,8 @@ export async function saveSettings(_: ActionState, form: FormData): Promise<Acti
   try {
     const name = z.string().trim().min(2).max(60).parse(f.name);
     const db = await getDb();
-    await db.update(schema.workloads).set({ name }).where(eq(schema.workloads.id, workload.id));
+    const labels = [...new Set(String(f.labels ?? "").split(",").map((l) => l.trim().toLowerCase().replace(/[^\p{L}\p{N} ._-]/gu, "").slice(0, 30)).filter(Boolean))].slice(0, 10);
+    await db.update(schema.workloads).set({ name, labels }).where(eq(schema.workloads.id, workload.id));
 
     if (workload.type === "wordpress") {
       const phpVersion = z.enum(["8.1", "8.2", "8.3", "8.4"]).parse(f.phpVersion);

@@ -21,6 +21,7 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
             <input type="hidden" name="id" value={w.id} />
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t("Name")}><Input name="name" defaultValue={w.name} required minLength={2} maxLength={60} /></Field>
+              <Field label={t("Labels")} hint={t("Separated by commas. Use them to group and filter your services.")}><Input name="labels" defaultValue={w.labels.join(", ")} placeholder="client-acme, e-commerce" /></Field>
               {w.type === "wordpress" && (
                 <Field label={t("PHP version")} hint={t("The site restarts on the new version.")}>
                   <Select name="phpVersion" defaultValue={c.phpVersion ?? "8.3"}>{["8.4", "8.3", "8.2", "8.1"].map((v) => <option key={v}>{v}</option>)}</Select>

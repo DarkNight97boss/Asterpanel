@@ -4,6 +4,8 @@ import { and, asc, count, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm
 import { getDb, schema } from "@/db";
 import type { WorkloadConfig, WorkloadType } from "@/db/schema";
 import { audit } from "@/lib/audit";
+import { publicHttpsUrl } from "@/lib/net";
+import { emitEvent } from "@/lib/webhooks";
 import { decryptJson, encryptJson, randomToken } from "@/lib/crypto";
 import { DOMAIN_RE, slugify } from "@/lib/format";
 import { getSettings, updateSettings } from "@/lib/settings";
@@ -480,7 +482,6 @@ export async function runTool(workloadId: string, tool: ToolName, args: Record<s
 
 // ─── WordPress migration ─────────────────────────────────────────────────────
 
-const PRIVATE_HOST = /^(localhost|.*\.(local|internal|localhost|lan|home|test)|\[.*\]|127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/i;
 
 /**
  * Validates what the client typed. Everything that later reaches a shell on the
@@ -496,8 +497,8 @@ export function cleanMigrationSource(input: { type?: string; url?: string; host?
       throw new PlatformError("Enter the full link to the archive, starting with https://");
     }
     if (url.protocol !== "https:" || url.username || url.password) throw new PlatformError("The archive link must start with https:// and contain no credentials");
-    if (PRIVATE_HOST.test(url.hostname) || !url.hostname.includes(".")) throw new PlatformError("This address is not reachable from the internet");
     if (url.href.length > 2000) throw new PlatformError("This link is too long");
+    if (!publicHttpsUrl(url.href)) throw new PlatformError("This address is not reachable from the internet");
     return { source: { type: "archive", url: url.href }, label: url.hostname };
   }
   if (input.type === "ssh") {
@@ -506,7 +507,7 @@ export function cleanMigrationSource(input: { type?: string; url?: string; host?
     const path = String(input.path ?? "").trim().replace(/\/+$/, "") || ".";
     const port = Number(input.port || 22);
     const password = String(input.password ?? "");
-    if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]{1,63}$/.test(host) || PRIVATE_HOST.test(host)) throw new PlatformError("Enter the public host name or IP address of the old server");
+    if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]{1,63}$/.test(host) || !publicHttpsUrl(`https://${host}/`)) throw new PlatformError("Enter the public host name or IP address of the old server");
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new PlatformError("Invalid port");
     if (!/^[a-z_][\w.-]{0,63}$/i.test(user)) throw new PlatformError("Invalid user name");
     if (!/^[\w.~/-]{1,300}$/.test(path) || path.includes("..")) throw new PlatformError("The folder may contain letters, numbers, dots, dashes and slashes only");
@@ -942,6 +943,11 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
     else await db.update(backups).set({ status: "ready" }).where(eq(backups.id, job.backupId));
   }
   if (!w) return;
+
+  const site = { id: w.id, name: w.name, type: w.type };
+  if (job.type === "workload.deploy") emitEvent(w.companyId, ok ? "deploy.succeeded" : "deploy.failed", { site, deploymentId: job.deploymentId, commit: result.commitSha ?? "", error });
+  else if (job.type === "backup.create") emitEvent(w.companyId, ok ? "backup.completed" : "backup.failed", { site, backupId: job.backupId, sizeBytes: result.sizeBytes ?? 0, error });
+  else if (job.type === "workload.migrate") emitEvent(w.companyId, ok ? "migration.succeeded" : "migration.failed", { site, error });
 
   const runtime = result.runtime ? { ...w.runtime, ...result.runtime } : w.runtime;
   const set = (status: Workload["status"], statusMessage = "") => db.update(workloads).set({ status, statusMessage, runtime }).where(eq(workloads.id, w.id));
