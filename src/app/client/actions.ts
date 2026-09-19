@@ -9,7 +9,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAccount } from "@/lib/account";
-import { createSession, destroyAllSessions, requireUser, revokeSession } from "@/lib/auth";
+import { createSession, destroyAllSessions, forbidWhileImpersonating, requireUser, revokeSession } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
@@ -123,6 +123,8 @@ export async function updateProfile(_: ActionState, form: FormData): Promise<Act
 }
 
 export async function changePassword(_: ActionState, form: FormData): Promise<ActionState> {
+  const blocked = await forbidWhileImpersonating();
+  if (blocked) return { error: blocked };
   const user = await requireUser();
   const next = String(form.get("newPassword") ?? "");
   if (next.length < 10 || next.length > 200) return { error: "Password must be at least 10 characters" };
@@ -144,6 +146,7 @@ export async function changePassword(_: ActionState, form: FormData): Promise<Ac
 // ─── Two-factor authentication ───────────────────────────────────────────────
 
 export async function signOutSession(form: FormData) {
+  if (await forbidWhileImpersonating()) return;
   const user = await requireUser();
   await revokeSession(user.id, String(form.get("handle") ?? ""));
   await audit(user.id, "session.revoked", "user", user.id);
@@ -151,12 +154,15 @@ export async function signOutSession(form: FormData) {
 }
 
 export async function startTwoFactor() {
+  if (await forbidWhileImpersonating()) return;
   const user = await requireUser();
   await beginEnrolment(user.id);
   revalidatePath("/client/profile");
 }
 
 export async function confirmTwoFactor(_: ActionState, form: FormData): Promise<ActionState> {
+  const blocked = await forbidWhileImpersonating();
+  if (blocked) return { error: blocked };
   const user = await requireUser();
   const codes = await confirmEnrolment(user.id, String(form.get("code") ?? ""));
   if (!codes) return { error: "That code is not valid" };
@@ -166,6 +172,8 @@ export async function confirmTwoFactor(_: ActionState, form: FormData): Promise<
 }
 
 export async function disableTwoFactor(_: ActionState, form: FormData): Promise<ActionState> {
+  const blocked = await forbidWhileImpersonating();
+  if (blocked) return { error: blocked };
   const user = await requireUser();
   if (!(await verifySecondFactor(user.id, String(form.get("code") ?? "")))) return { error: "That code is not valid" };
   await disableTotp(user.id);

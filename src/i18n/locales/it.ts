@@ -1430,6 +1430,10 @@ const it: Record<string, string> = {
   "Major outage": "Interruzione grave",
   "Happening now": "In corso",
   "Past {n} days": "Ultimi {n} giorni",
+  "Sign in as this client": "Accedi come questo cliente",
+  "{staff} is acting as {client}. Everything done here is recorded.": "{staff} sta operando come {client}. Tutto ciò che viene fatto qui è registrato.",
+  "Return to the admin area": "Torna all'area admin",
+  "Not available while acting as a client": "Non disponibile mentre operi come cliente",
 };
 
 export default it;

@@ -9,7 +9,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { ACCOUNT_COOKIE, listAccounts, requireAccount } from "@/lib/account";
 import { audit } from "@/lib/audit";
-import { requireUser } from "@/lib/auth";
+import { requireUser, stopImpersonation } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { inviteMember, TeamError } from "@/lib/team";
 import { baseUrl } from "@/lib/url";
@@ -80,6 +80,11 @@ export async function transferOwnership(form: FormData) {
     await tx.insert(schema.auditLog).values({ actorId: user.id, action: "team.ownership_transferred", entity: "company", entityId: account.id, meta: { email: next.email } });
   });
   revalidatePath("/client", "layout");
+}
+
+export async function endImpersonation() {
+  await stopImpersonation();
+  redirect("/admin/clients");
 }
 
 export async function switchAccount(form: FormData) {

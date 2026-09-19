@@ -79,6 +79,8 @@ export const sessions = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
     ip: text("ip").notNull().default(""),
     userAgent: text("user_agent").notNull().default(""),
+    /** Set when a staff member is acting as this user ("sign in as client"). */
+    impersonatorId: uuid("impersonator_id"),
     createdAt: createdAt(),
   },
   (t) => [index("sessions_user_idx").on(t.userId)],
