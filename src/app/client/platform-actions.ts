@@ -79,7 +79,7 @@ export async function createFromPlan(_: ActionState, form: FormData): Promise<Ac
       config,
       sealed: sealRequestSecrets({ env: parseEnv(String(f.env ?? "")), accessToken: String(f.accessToken ?? "").trim() || undefined }),
     };
-    ({ serviceId, invoiceId } = await placeOrder({ clientId: account.ownerUserId, companyId: account.id, productId: product.id, cycle: base.data.cycle, domain: "", ip: (await requestMeta()).ip, request }));
+    ({ serviceId, invoiceId } = await placeOrder({ clientId: account.ownerUserId, companyId: account.id, productId: product.id, cycle: base.data.cycle, domain: "", ip: (await requestMeta()).ip, request, coupon: String(f.coupon ?? "").slice(0, 40) }));
   } catch (err) {
     return fail(err);
   }

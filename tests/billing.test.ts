@@ -156,3 +156,27 @@ test("credit notes: a paid invoice is reversed by a numbered document of its own
   await assert.rejects(billing.issueCreditNote(invoiceId, ""), /Only paid invoices/, "cannot be credited twice");
   await assert.rejects(billing.issueCreditNote(creditId, ""), /Invoice not found/, "a credit note cannot be credited");
 });
+
+test("coupons: discount the first invoice only, are claimed atomically and refuse the order when unusable", async () => {
+  const db = await dbm.getDb();
+  await db.insert(dbm.schema.coupons).values([{ code: "HALF", kind: "percent", value: 50, maxUses: 1 }, { code: "BIG", kind: "fixed", value: 9_999_999 }, { code: "OLD", kind: "percent", value: 10, expiresAt: new Date(Date.now() - 1000) }, { code: "OFF", kind: "percent", value: 10, enabled: false }]);
+  const [product] = await db.select().from(dbm.schema.products).where(eq(dbm.schema.products.id, productId));
+  const list = product.pricing.monthly! + (product.pricing.setup ?? 0);
+
+  const { invoiceId, serviceId } = await billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "coupon.com", coupon: " half " });
+  const [inv] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  assert.equal(inv.subtotal, list - Math.round(list / 2));
+  const items = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, invoiceId));
+  assert.deepEqual(items.filter((i) => i.kind === "discount").map((i) => [i.amount, i.serviceId, /HALF/.test(i.description)]), [[-Math.round(list / 2), null, true]]);
+  assert.equal(items.reduce((s, i) => s + i.amount, 0), inv.subtotal, "lines add up to the subtotal");
+  assert.equal((await db.select().from(dbm.schema.services).where(eq(dbm.schema.services.id, serviceId)))[0].amount, product.pricing.monthly, "renewals stay at list price");
+
+  await assert.rejects(billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "again.com", coupon: "HALF" }), /used up/);
+  for (const [code, why] of [["OLD", /expired/], ["OFF", /not valid/], ["NOPE", /not valid/]] as const) await assert.rejects(billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "x.com", coupon: code }), why);
+  assert.ok(!(await db.select().from(dbm.schema.services)).some((s) => s.domain === "again.com" || s.domain === "x.com"), "a refused code creates nothing");
+
+  // A discount larger than the order makes it free, never negative; free orders activate at once.
+  const free = await billing.placeOrder({ clientId, productId, cycle: "monthly", domain: "free.com", coupon: "BIG" });
+  const [zero] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, free.invoiceId));
+  assert.deepEqual([zero.total, zero.status], [0, "paid"]);
+});

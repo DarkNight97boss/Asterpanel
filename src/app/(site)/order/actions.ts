@@ -16,6 +16,7 @@ export async function submitOrder(_: ActionState, form: FormData): Promise<Actio
       productId: z.string().uuid(),
       cycle: z.enum(BILLING_CYCLES),
       domain: z.string().trim().toLowerCase().max(253).default(""),
+      coupon: z.string().trim().max(40).default(""),
     })
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: "Invalid order" };

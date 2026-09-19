@@ -23,7 +23,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           items: [
             ...(can("platform") ? [{ href: "/admin/workloads", label: t("Workloads"), icon: "▣" }] : []),
             ...(admin ? [{ href: "/admin/nodes", label: t("Nodes"), icon: "▥" }] : []),
-            ...(can("platform") ? [{ href: "/admin/jobs", label: t("Jobs"), icon: "⟳" }] : []),
+            ...(can("platform") ? [{ href: "/admin/jobs", label: t("Jobs"), icon: "⟳" }, { href: "/admin/status", label: t("Status page"), icon: "◉" }] : []),
             ...(admin ? [{ href: "/admin/dns", label: "DNS", icon: "⇄" }] : []),
           ],
         },
@@ -32,13 +32,13 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           items: [
             ...(can("clients") ? [{ href: "/admin/clients", label: t("Clients"), icon: "☺" }] : []),
             ...(can("billing") ? [{ href: "/admin/orders", label: t("Orders"), icon: "◈" }, { href: "/admin/services", label: t("Services"), icon: "▤" }, { href: "/admin/invoices", label: t("Invoices"), icon: "▦" }] : []),
-            ...(can("support") ? [{ href: "/admin/tickets", label: t("Tickets"), icon: "✉" }] : []),
+            ...(can("support") ? [{ href: "/admin/tickets", label: t("Tickets"), icon: "✉" }, { href: "/admin/canned-replies", label: t("Canned replies"), icon: "❝" }] : []),
           ],
         },
         {
           title: t("Catalog"),
           items: [
-            ...(can("billing") ? [{ href: "/admin/products", label: t("Products"), icon: "❖" }, { href: "/admin/domains", label: t("Domains"), icon: "◍" }] : []),
+            ...(can("billing") ? [{ href: "/admin/products", label: t("Products"), icon: "❖" }, { href: "/admin/domains", label: t("Domains"), icon: "◍" }, { href: "/admin/coupons", label: t("Discount codes"), icon: "%" }] : []),
             ...(admin ? [{ href: "/admin/servers", label: t("External servers"), icon: "▤" }] : []),
           ],
         },

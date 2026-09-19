@@ -359,7 +359,7 @@ export const invoices = pgTable(
   (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_status_idx").on(t.status), uniqueIndex("invoices_year_number_idx").on(t.fiscalYear, t.number)],
 );
 
-export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom";
+export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom" | "discount";
 
 export const invoiceItems = pgTable(
   "invoice_items",
@@ -762,6 +762,45 @@ export const webhooks = pgTable(
   },
   (t) => [index("webhooks_company_idx").on(t.companyId)],
 );
+
+// ─── Coupons, canned replies, incidents ──────────────────────────────────────
+
+/** A discount on the first invoice of an order. Renewals stay at list price. */
+export const coupons = pgTable("coupons", {
+  id: id(),
+  /** Upper case, unique. */
+  code: text("code").notNull().unique(),
+  kind: text("kind").$type<"percent" | "fixed">().notNull(),
+  /** Percent (1-100) or cents. */
+  value: integer("value").notNull(),
+  /** 0 = unlimited. */
+  maxUses: integer("max_uses").notNull().default(0),
+  used: integer("used").notNull().default(0),
+  expiresAt: timestamp("expires_at", { withTimezone: true }),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+});
+
+/** Ready-made answers staff can drop into a ticket reply. */
+export const cannedReplies = pgTable("canned_replies", {
+  id: id(),
+  title: text("title").notNull(),
+  body: text("body").notNull(),
+  createdAt: createdAt(),
+});
+
+export type IncidentStatus = "investigating" | "identified" | "monitoring" | "resolved";
+
+/** What the public status page shows. `updates` is the timeline, newest last. */
+export const incidents = pgTable("incidents", {
+  id: id(),
+  title: text("title").notNull(),
+  impact: text("impact").$type<"minor" | "major" | "maintenance">().notNull().default("minor"),
+  status: text("status").$type<IncidentStatus>().notNull().default("investigating"),
+  updates: jsonb("updates").$type<{ at: string; status: IncidentStatus; message: string }[]>().notNull().default([]),
+  startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
+  resolvedAt: timestamp("resolved_at", { withTimezone: true }),
+});
 
 // ─── Support ─────────────────────────────────────────────────────────────────
 
