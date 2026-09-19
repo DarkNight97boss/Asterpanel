@@ -43,6 +43,7 @@ export default async function PageEditor({ params }: { params: Promise<{ id: str
               </Field>
               <Field label={t("SEO title")}><Input name="seoTitle" defaultValue={page?.seoTitle} /></Field>
               <Field label={t("SEO description")}><Textarea name="seoDescription" defaultValue={page?.seoDescription} rows={3} /></Field>
+              <Field label={t("Excerpt")} hint={t("Shown in lists. For a blog, give posts a slug such as blog/my-post and add a “Page list” block with the prefix blog/ to the page /blog. Same idea for a help centre under help/.")}><Textarea name="excerpt" defaultValue={page?.excerpt} rows={2} maxLength={400} /></Field>
               <SubmitButton className="w-full">{t("Save")}</SubmitButton>
             </div>
           </Card>

@@ -401,6 +401,7 @@ export async function savePage(_: ActionState, form: FormData): Promise<ActionSt
       status: z.enum(["draft", "published"]),
       seoTitle: text(200),
       seoDescription: text(500),
+      excerpt: text(400),
       blocks: z.string().max(500_000),
     })
     .safeParse(fields(form));

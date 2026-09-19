@@ -3,7 +3,8 @@ import { and, asc, eq } from "drizzle-orm";
 import { ButtonLink, cn } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { CYCLE_SUFFIX, formatMoney, headlineCycle } from "@/lib/format";
+import { CYCLE_SUFFIX, formatDate, formatMoney, headlineCycle } from "@/lib/format";
+import { listPagesByPrefix } from "@/lib/pages";
 import { getSettings } from "@/lib/settings";
 import { items, safeHref, str, type Block } from "./blocks";
 import { Calculator } from "./calculator";
@@ -362,6 +363,34 @@ function Faq({ props: p }: { props: Block["props"] }) {
   );
 }
 
+async function PageList({ props: p }: { props: Block["props"] }) {
+  const [found, locale] = await Promise.all([listPagesByPrefix(str(p.prefix), Number(str(p.limit))), getLocale()]);
+  if (!found.length) return null;
+  const cards = p.layout !== "list";
+  return (
+    <Section>
+      <Heading title={str(p.title)} />
+      {cards ? (
+        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+          {found.map((pg) => (
+            <a key={pg.slug} href={`/${pg.slug}`} className="group flex flex-col rounded-card border border-border bg-surface p-6 transition hover:border-strong">
+              <span className="text-xs text-muted">{formatDate(pg.createdAt, locale)}</span>
+              <span className="mt-2 text-xl leading-snug group-hover:underline">{pg.title}</span>
+              {pg.excerpt && <span className="mt-3 text-sm leading-relaxed text-muted">{pg.excerpt}</span>}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <ul className="mx-auto max-w-3xl divide-y divide-border rounded-card border border-border bg-surface">
+          {found.map((pg) => (
+            <li key={pg.slug}><a href={`/${pg.slug}`} className="block px-6 py-4 hover:bg-subtle"><span className="font-medium">{pg.title}</span>{pg.excerpt && <span className="mt-1 block text-sm text-muted">{pg.excerpt}</span>}</a></li>
+          ))}
+        </ul>
+      )}
+    </Section>
+  );
+}
+
 function Comparison({ props: p }: { props: Block["props"] }) {
   const columns = str(p.columns).split(",").map((c) => c.trim()).filter(Boolean).slice(0, 6);
   const rows = items(p.rows);
@@ -473,6 +502,8 @@ export function RenderBlocks({ blocks }: { blocks: Block[] }) {
         return <Testimonials key={b.id} props={b.props} />;
       case "faq":
         return <Faq key={b.id} props={b.props} />;
+      case "pageList":
+        return <PageList key={b.id} props={b.props} />;
       case "comparison":
         return <Comparison key={b.id} props={b.props} />;
       case "calculator":

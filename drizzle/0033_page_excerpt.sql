@@ -1,0 +1,1 @@
+ALTER TABLE "pages" ADD COLUMN "excerpt" text DEFAULT '' NOT NULL;

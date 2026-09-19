@@ -197,6 +197,8 @@ export const pages = pgTable(
     blocks: jsonb("blocks").$type<Block[]>().notNull().default([]),
     seoTitle: text("seo_title").notNull().default(""),
     seoDescription: text("seo_description").notNull().default(""),
+    /** Shown where pages are listed (blog, help centre). */
+    excerpt: text("excerpt").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

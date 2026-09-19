@@ -1838,6 +1838,15 @@ const it: Record<string, string> = {
   "Close to what you searched for.": "Vicini a quello che hai cercato.",
   "The legal owner as known to the registry. Keep it current: an unreachable owner can lose the domain.": "Il titolare legale come risulta al registro. Tienilo aggiornato: un titolare irraggiungibile può perdere il dominio.",
   "Saved. The registry may email the old and the new address to confirm the change.": "Salvato. Il registro potrebbe scrivere al vecchio e al nuovo indirizzo per confermare la modifica.",
+  "Excerpt": "Estratto",
+  "Shown in lists. For a blog, give posts a slug such as blog/my-post and add a “Page list” block with the prefix blog/ to the page /blog. Same idea for a help centre under help/.": "Mostrato negli elenchi. Per un blog, dai ai post uno slug come blog/mio-post e aggiungi alla pagina /blog un blocco «Elenco pagine» con prefisso blog/. Stessa idea per un centro assistenza sotto help/.",
+  "Page list": "Elenco pagine",
+  "Lists published pages whose address starts with a prefix: a blog index, a help centre.": "Elenca le pagine pubblicate il cui indirizzo inizia con un prefisso: l'indice di un blog, un centro assistenza.",
+  "Address prefix": "Prefisso dell'indirizzo",
+  "Layout": "Layout",
+  "Cards with date (blog)": "Schede con data (blog)",
+  "Plain list (help centre)": "Elenco semplice (centro assistenza)",
+  "How many (newest first)": "Quante (dalla più recente)",
 };
 
 export default it;
