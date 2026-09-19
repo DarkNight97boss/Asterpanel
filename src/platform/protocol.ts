@@ -87,6 +87,12 @@ export type JobPayloads = {
   "dns.sync": { nameservers: string[]; hostmaster: string; zones: DnsZoneData[] };
   /** Database console: `tables` lists them with sizes, `query` runs one statement. */
   "workload.db": { spec: WorkloadSpec; action: "tables" | "query"; sql?: string };
+  /**
+   * Managed databases. `rotate`: the user gets `newPassword` (spec still carries the old one).
+   * `import`: load a SQL dump from an HTTPS link. `upgrade`: move the data to the engine
+   * version in `spec` by dumping, re-creating the volume and restoring.
+   */
+  "workload.dbadmin": { spec: WorkloadSpec; action: "rotate" | "import" | "upgrade"; newPassword?: string; url?: string };
   /** Replaces a WordPress site's files and database with a copy of another site, then rewrites its URLs to `newUrl`. */
   "workload.migrate": { spec: WorkloadSpec; source: MigrationSource; newUrl: string; label: string };
   /** With `offsite`, the archive is also copied to object storage (and fetched back from it when the local copy is gone). */

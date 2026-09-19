@@ -1060,6 +1060,59 @@ export async function runDbJob(workloadId: string, action: "tables" | "query", s
   return enqueue(w, "workload.db", { spec: await buildSpec(w.id), action, sql: statement }, { actorId });
 }
 
+// ─── Managed database administration ────────────────────────────────────────
+
+export const DB_VERSIONS = { mysql: ["10.11", "11"], postgres: ["15", "16", "17"], redis: ["7"] } as const;
+
+async function sqlDatabase(workloadId: string) {
+  const w = await load(workloadId);
+  if (w.type !== "database") throw new PlatformError("Available for managed databases");
+  if (w.status !== "running") throw new PlatformError("The database must be running");
+  return w;
+}
+
+/**
+ * New password for the database user. The node changes it first; only when
+ * that worked does the panel start showing (and using) the new one. Apps keep
+ * the old password in their own environment variables: they must be updated.
+ */
+export async function rotateDbPassword(workloadId: string, actorId: string | null = null): Promise<string> {
+  const w = await sqlDatabase(workloadId);
+  await audit(actorId, "db.password_rotated", "workload", w.id);
+  if (w.config.engine === "redis") {
+    // Redis reads its password at start: a new secret and a restart are the whole rotation.
+    await (await getDb()).update(schema.workloads).set({ secrets: encryptJson({ ...readSecrets(w), dbPassword: password() }) }).where(eq(schema.workloads.id, w.id));
+    await applyWorkload(w.id, actorId);
+    return "";
+  }
+  return enqueue(w, "workload.dbadmin", { spec: await buildSpec(w.id), action: "rotate", newPassword: password() }, { actorId });
+}
+
+/** Loads a SQL dump from an https link into the database, after a safety backup. */
+export async function importDbDump(workloadId: string, link: string, actorId: string | null = null): Promise<string> {
+  const w = await sqlDatabase(workloadId);
+  if (w.config.engine === "redis") throw new PlatformError("Dumps can be imported into MySQL and PostgreSQL databases");
+  const url = publicHttpsUrl(link);
+  if (!url) throw new PlatformError("Enter a public https:// link to the dump (.sql or .sql.gz)");
+  await createBackup(w.id, "Before import", "system", actorId);
+  await audit(actorId, "db.import", "workload", w.id, { from: url.hostname });
+  return enqueue(w, "workload.dbadmin", { spec: await buildSpec(w.id), action: "import", url: url.href }, { actorId });
+}
+
+/** Moves the data to a newer engine version (dump, new volume, restore), after a safety backup. Downgrades are refused. */
+export async function upgradeDbVersion(workloadId: string, version: string, actorId: string | null = null): Promise<string> {
+  const w = await sqlDatabase(workloadId);
+  const engineName = w.config.engine ?? "mysql";
+  if (engineName === "redis") throw new PlatformError("Redis has a single supported version");
+  const versions: readonly string[] = DB_VERSIONS[engineName];
+  const current = w.config.version || versions.at(-1)!;
+  if (!versions.includes(version) || versions.indexOf(version) <= versions.indexOf(current)) throw new PlatformError("Choose a newer version than the current one");
+  await createBackup(w.id, `Before upgrade to ${version}`, "system", actorId);
+  await (await getDb()).update(schema.workloads).set({ config: { ...w.config, version } }).where(eq(schema.workloads.id, w.id));
+  await audit(actorId, "db.upgrade", "workload", w.id, { from: current, to: version });
+  return enqueue(w, "workload.dbadmin", { spec: await buildSpec(w.id), action: "upgrade" }, { actorId });
+}
+
 // ─── Scheduled backups ───────────────────────────────────────────────────────
 
 const BACKUP_EVERY_MS = 24 * 60 * MINUTE;
@@ -1162,6 +1215,8 @@ export async function reportJob(nodeId: string, jobId: string, report: JobReport
   const scrubbed =
     job.type === "workload.files"
       ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), content: undefined, spec: undefined })
+      : job.type === "workload.dbadmin"
+        ? encryptJson({ action: decryptJson<{ action?: string }>(job.payload, {}).action })
       : job.type === "workload.migrate"
         ? encryptJson({ label: decryptJson<{ label?: string }>(job.payload, {}).label })
       : job.type.startsWith("backup.") || job.type === "offsite.test"
@@ -1196,6 +1251,10 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   }
   if (!w) return;
 
+  if (job.type === "workload.dbadmin" && ok) {
+    const { action, newPassword } = decryptJson<{ action?: string; newPassword?: string }>(job.payload, {});
+    if (action === "rotate" && newPassword) await db.update(workloads).set({ secrets: encryptJson({ ...readSecrets(w), dbPassword: newPassword }) }).where(eq(workloads.id, w.id));
+  }
   if (job.type === "workload.tool" && ok && String(result.output ?? "").startsWith('{"scan"')) {
     try {
       const { scan } = JSON.parse(String(result.output)) as { scan: WpScan };

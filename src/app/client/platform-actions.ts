@@ -203,6 +203,22 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function dbAdmin(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
+  if (!canManage) return { error: "Only owners and administrators can change this" };
+  const action = String(form.get("action"));
+  try {
+    if (action === "rotate") await engine.rotateDbPassword(workload.id, user.id);
+    else if (action === "import") await engine.importDbDump(workload.id, String(form.get("url") ?? ""), user.id);
+    else if (action === "upgrade") await engine.upgradeDbVersion(workload.id, String(form.get("version") ?? ""), user.id);
+    else return { error: "Invalid request" };
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: action === "rotate" ? "Started. The new password appears on the Info page in a few seconds: update it in your apps." : "Started. A backup is taken first." };
+}
+
 export async function saveProtection(_: ActionState, form: FormData): Promise<ActionState> {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   try {

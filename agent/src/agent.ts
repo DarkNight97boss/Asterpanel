@@ -162,6 +162,10 @@ export class Agent {
         return d.apm(p.spec, (envelope.payload as JobPayloads["workload.apm"]).minutes);
       case "workload.files":
         return d.files(p.spec, p.fileAction, p.path ?? "", p.content, log, (envelope.payload as JobPayloads["workload.files"]).encoding);
+      case "workload.dbadmin": {
+        const a = envelope.payload as JobPayloads["workload.dbadmin"];
+        return d.dbAdmin(a.spec, a.action, { newPassword: a.newPassword, url: a.url }, log);
+      }
       case "workload.migrate": {
         const m = envelope.payload as JobPayloads["workload.migrate"];
         return d.migrate(m.spec, m.source, m.newUrl, log);
