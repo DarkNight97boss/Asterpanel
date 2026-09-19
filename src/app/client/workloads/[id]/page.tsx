@@ -7,7 +7,7 @@ import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { requireWorkload } from "@/platform/access";
 import { readSecrets } from "@/platform/engine";
-import { power, staging } from "../../platform-actions";
+import { power, staging, wpLogin } from "../../platform-actions";
 
 const Secret = ({ value, reveal }: { value: string; reveal: string }) => (
   <details className="group inline">
@@ -82,9 +82,12 @@ export default async function Overview({ params }: { params: Promise<{ id: strin
         action={
           visit ? (
             <>
-              {w.type === "wordpress" && (
-                <a href={`https://${primary}/wp-admin/`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>{t("WordPress admin")} ↗</a>
-              )}
+              {w.type === "wordpress" &&
+                (w.status === "running" ? (
+                  <form action={wpLogin} target="_blank"><input type="hidden" name="id" value={w.id} /><button className={buttonClass("secondary")} title={t("Signs you in without a password, with a link that works once")}>{t("WordPress admin")} ↗</button></form>
+                ) : (
+                  <a href={`https://${primary}/wp-admin/`} target="_blank" rel="noopener noreferrer" className={buttonClass("secondary")}>{t("WordPress admin")} ↗</a>
+                ))}
               <a href={`https://${primary}`} target="_blank" rel="noopener noreferrer" className={buttonClass("primary")}>{t("Visit site")} ↗</a>
             </>
           ) : undefined

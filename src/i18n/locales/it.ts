@@ -1590,6 +1590,20 @@ const it: Record<string, string> = {
   "Disconnected": "Scollegato",
   "Connect the repository on GitHub: no webhook to set up, no access token to keep, and the deploy result next to each commit.": "Collega il repository su GitHub: nessun webhook da configurare, nessun token da conservare, e l'esito del deploy accanto a ogni commit.",
   "Connect GitHub": "Collega GitHub",
+  "Signs you in without a password, with a link that works once": "Ti fa accedere senza password, con un link che funziona una sola volta",
+  "Signing you in to WordPress…": "Accesso a WordPress in corso…",
+  "Your one-time link is ready. It works once and expires in a minute.": "Il tuo link monouso è pronto. Funziona una volta e scade in un minuto.",
+  "Open WordPress admin": "Apri l'admin di WordPress",
+  "The login link could not be created. Is the site running?": "Impossibile creare il link di accesso. Il sito è attivo?",
+  "This link was already used. Ask for a new one.": "Questo link è già stato usato. Richiedine uno nuovo.",
+  "Automatic updates": "Aggiornamenti automatici",
+  "Once a day: a backup first, then the updates, then a check that the home page still works. If it does not, the backup is put back by itself.": "Una volta al giorno: prima un backup, poi gli aggiornamenti, poi un controllo che la home page funzioni ancora. Se non funziona, il backup viene ripristinato da solo.",
+  "What to update": "Cosa aggiornare",
+  "Nothing: I update by hand": "Niente: aggiorno a mano",
+  "Security and minor releases only": "Solo sicurezza e versioni minori",
+  "Everything, major versions included": "Tutto, versioni maggiori comprese",
+  "Before automatic update": "Prima dell'aggiornamento automatico",
+  "Automatic updates are available for live WordPress sites": "Gli aggiornamenti automatici sono disponibili per i siti WordPress live",
 };
 
 export default it;

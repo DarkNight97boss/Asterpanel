@@ -632,6 +632,63 @@ export async function listMigrations(workloadId: string): Promise<MigrationRun[]
   });
 }
 
+// ─── WordPress: one-click login and automatic updates ───────────────────────
+
+/** Queues a single-use wp-admin link; the page that asked for it shows it once and wipes it. */
+export async function requestWpLogin(workloadId: string, actorId: string | null = null): Promise<string> {
+  const w = await load(workloadId);
+  if (w.type !== "wordpress") throw new PlatformError("This tool is only available for WordPress");
+  if (w.status !== "running") throw new PlatformError("The site must be running");
+  await audit(actorId, "wp.login_link", "workload", w.id);
+  return enqueue(w, "workload.tool", { spec: await buildSpec(w.id), tool: "wp.login", args: {} }, { actorId });
+}
+
+/** Reads the link of a finished login job exactly once: the stored copy is erased while it is handed out. */
+export async function takeWpLoginUrl(workloadId: string, jobId: string): Promise<{ state: "waiting" | "failed" | "gone" } | { state: "ready"; url: string }> {
+  const db = await getDb();
+  const [job] = await db.select().from(schema.jobs).where(and(eq(schema.jobs.id, jobId), eq(schema.jobs.workloadId, workloadId), eq(schema.jobs.type, "workload.tool")));
+  if (!job) return { state: "gone" };
+  if (job.status === "queued" || job.status === "running") return { state: "waiting" };
+  if (job.status !== "succeeded") return { state: "failed" };
+  const [taken] = await db.update(schema.jobs).set({ result: {} }).where(and(eq(schema.jobs.id, job.id), sql`${schema.jobs.result}->>'output' is not null`)).returning({ id: schema.jobs.id });
+  try {
+    const url = (JSON.parse(String(job.result.output ?? "{}")) as { url?: string }).url;
+    return taken && url && /^https:\/\/[^\s]+\?aster_login=[0-9a-f]{64}$/.test(url) ? { state: "ready", url } : { state: "gone" };
+  } catch {
+    return { state: "gone" };
+  }
+}
+
+export async function setAutoUpdate(workloadId: string, mode: "off" | "minor" | "all", actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "wordpress" || w.environment !== "live") throw new PlatformError("Automatic updates are available for live WordPress sites");
+  await (await getDb()).update(schema.workloads).set({ config: { ...w.config, autoUpdate: mode } }).where(eq(schema.workloads.id, w.id));
+  await audit(actorId, "wp.autoupdate_mode", "workload", w.id, { mode });
+}
+
+/**
+ * Cron: once a day per site, a backup and then the updates. The node checks
+ * the home page before and after; if the update broke it, the job fails and
+ * `applyOutcome` puts the backup back.
+ */
+export async function runWpAutoUpdates(now = new Date()): Promise<number> {
+  const db = await getDb();
+  const sites = await db.select().from(schema.workloads).where(and(eq(schema.workloads.type, "wordpress"), eq(schema.workloads.environment, "live"), eq(schema.workloads.status, "running")));
+  let started = 0;
+  for (const w of sites) {
+    const mode = w.config.autoUpdate ?? "off";
+    if (mode === "off" || (w.config.autoUpdateLastAt && now.getTime() - new Date(w.config.autoUpdateLastAt).getTime() < 24 * 60 * MINUTE)) continue;
+    const node = await db.query.nodes.findFirst({ where: eq(schema.nodes.id, w.nodeId) });
+    if (!node || !nodeIsOnline(node)) continue;
+    await db.update(schema.workloads).set({ config: { ...w.config, autoUpdateLastAt: now.toISOString() } }).where(eq(schema.workloads.id, w.id));
+    const backupId = await createBackup(w.id, "Before automatic update", "system");
+    await enqueue(w, "workload.tool", { spec: await buildSpec(w.id), tool: "wp.autoupdate", args: { scope: mode, backupId } });
+    await enqueue(w, "workload.tool", { spec: await buildSpec(w.id), tool: "wp.inventory", args: {} });
+    started++;
+  }
+  return started;
+}
+
 export async function requestLogs(workloadId: string, lines = 200) {
   const w = await load(workloadId);
   return enqueue(w, "workload.logs", { spec: await buildSpec(w.id), lines: Math.min(Math.max(lines, 10), 1000) });
@@ -1028,6 +1085,14 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   }
   if (!w) return;
 
+  if (job.type === "workload.tool" && !ok && /^SITE_UNHEALTHY/.test(error)) {
+    // An automatic update broke the site: put back the backup taken right before it.
+    const { tool, args } = decryptJson<{ tool?: string; args?: { backupId?: string } }>(job.payload, {});
+    if (tool === "wp.autoupdate" && args?.backupId) {
+      await restoreBackup(w.id, args.backupId).catch(() => {});
+      await audit(null, "wp.autoupdate_rolled_back", "workload", w.id, { reason: error.slice(0, 200) });
+    }
+  }
   const site = { id: w.id, name: w.name, type: w.type };
   if (job.deploymentId && result.commitSha && w.githubInstallationId) {
     const { reportCommitStatus } = await import("@/lib/github");

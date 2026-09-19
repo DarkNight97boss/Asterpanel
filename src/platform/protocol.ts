@@ -133,7 +133,9 @@ export type WpInventory = {
   plugins: { name: string; title: string; status: string; version: string; update: string }[];
   themes: { name: string; title: string; status: string; version: string; update: string }[];
 };
-export type ToolName = (typeof TOOLS)[number];
+/** Tools only the control plane may start: they need preparation (a backup) or return something sensitive (a login link). */
+export const INTERNAL_TOOLS = ["wp.login", "wp.autoupdate"] as const;
+export type ToolName = (typeof TOOLS)[number] | (typeof INTERNAL_TOOLS)[number];
 
 export type JobResult = {
   runtime?: { internalHost?: string; dbName?: string; dbUser?: string; diskUsedMb?: number; version?: string };

@@ -195,6 +195,28 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function wpLogin(form: FormData) {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  let jobId: string;
+  try {
+    jobId = await engine.requestWpLogin(workload.id, user.id);
+  } catch {
+    redirect(`/client/workloads/${workload.id}`);
+  }
+  redirect(`/client/workloads/${workload.id}/wp-login?job=${jobId}`);
+}
+
+export async function saveAutoUpdate(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    await engine.setAutoUpdate(workload.id, z.enum(["off", "minor", "all"]).parse(form.get("mode")), user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved" };
+}
+
 export async function connectGithub(form: FormData) {
   const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
   if (!canManage) redirect(`/client/workloads/${workload.id}/deployments`);

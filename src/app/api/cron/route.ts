@@ -5,7 +5,7 @@ import { syncDueDomains } from "@/lib/domains";
 import { runAutoCharges } from "@/lib/payment-methods";
 import { pollSdi } from "@/lib/sdi";
 import { maintainCapacity, syncCloudNodes } from "@/lib/cloud";
-import { runScheduledBackups } from "@/platform/engine";
+import { runScheduledBackups, runWpAutoUpdates } from "@/platform/engine";
 import { runUptimeChecks } from "@/platform/uptime";
 
 export const dynamic = "force-dynamic";
@@ -30,10 +30,11 @@ async function handle(request: Request) {
   await syncCloudNodes().catch(() => 0);
   const capacity = await maintainCapacity().catch(() => ({ created: 0, removed: 0 }));
   const backups = await runScheduledBackups();
+  const wpUpdates = await runWpAutoUpdates().catch(() => 0);
   const domains = await syncDueDomains().catch(() => 0);
   const uptime = await runUptimeChecks();
   await flushNotifications();
-  return Response.json({ ...report, charges, sdi, capacity, backups, domains, uptime });
+  return Response.json({ ...report, charges, sdi, capacity, backups, wpUpdates, domains, uptime });
 }
 
 export { handle as GET, handle as POST };

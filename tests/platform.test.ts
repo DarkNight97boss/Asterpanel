@@ -671,3 +671,48 @@ test("previews: other branches get their own environment, refreshed on push and 
   assert.equal((await engine.previewsOf(id)).length, 0, "switching previews off removes them");
   assert.equal((await workload(id)).status, "running");
 });
+
+test("one-click WordPress login: the link is handed out exactly once", async () => {
+  const id = await engine.createWorkload({ clientId, type: "wordpress", name: "Login Site" });
+  await drain();
+  const jobId = await engine.requestWpLogin(id);
+  assert.deepEqual(await engine.takeWpLoginUrl(id, jobId), { state: "waiting" });
+  await drain();
+  const first = await engine.takeWpLoginUrl(id, jobId);
+  assert.equal(first.state, "ready");
+  assert.match((first as { url: string }).url, /^https:\/\/login-site-[0-9a-f]{6}\.n1\.aster\.test\/\?aster_login=[0-9a-f]{64}$/);
+  assert.deepEqual(await engine.takeWpLoginUrl(id, jobId), { state: "gone" }, "a reload cannot read it again");
+  const db = await dbm.getDb();
+  assert.ok(!JSON.stringify((await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId)))[0].result).includes("aster_login"), "and it is no longer stored");
+  const other = await engine.createWorkload({ clientId, type: "wordpress", name: "Other Site" });
+  await drain();
+  assert.deepEqual(await engine.takeWpLoginUrl(other, jobId), { state: "gone" }, "a job id of another site is useless");
+  const dbw = await engine.createWorkload({ clientId, type: "database", name: "NoWp", config: { engine: "redis" } });
+  await assert.rejects(engine.requestWpLogin(dbw), /only available for WordPress/);
+});
+
+test("automatic updates: backup first, once a day, and a broken site gets its backup back", async () => {
+  const db = await dbm.getDb();
+  const good = await engine.createWorkload({ clientId, type: "wordpress", name: "Steady Blog" });
+  const bad = await engine.createWorkload({ clientId, type: "wordpress", name: "Fragile Shop" });
+  await drain();
+  assert.equal(await engine.runWpAutoUpdates(), 0, "off by default");
+  await engine.setAutoUpdate(good, "minor");
+  await engine.setAutoUpdate(bad, "all");
+  const now = new Date();
+  assert.equal(await engine.runWpAutoUpdates(now), 2);
+  assert.equal(await engine.runWpAutoUpdates(new Date(now.getTime() + 3_600_000)), 0, "not twice in a day");
+  await drain();
+
+  const jobsOf = async (id: string) => db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.workloadId, id));
+  const types = (await jobsOf(good)).sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime()).map((j) => j.type);
+  assert.ok(types.indexOf("backup.create") < types.lastIndexOf("workload.tool"), "the backup runs before the update");
+  assert.ok((await workload(good)).backups.some((b) => b.note === "Before automatic update" && b.status === "ready"));
+  assert.ok(!(await jobsOf(good)).some((j) => j.type === "backup.restore"), "a healthy site is left alone");
+
+  const restore = (await jobsOf(bad)).find((j) => j.type === "backup.restore");
+  assert.equal(restore?.status, "succeeded", "the broken site was rolled back");
+  assert.equal((await workload(bad)).status, "running");
+  assert.equal(await engine.runWpAutoUpdates(new Date(now.getTime() + 25 * 3_600_000)), 2, "and tomorrow it tries again");
+  await drain();
+});
