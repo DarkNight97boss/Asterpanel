@@ -13,7 +13,7 @@ const WEEK = 7 * 86_400_000;
  * purpose: an item disappears when it is dealt with (invoice paid, ticket
  * answered back, service healthy), so the bell never nags about old news.
  */
-export async function accountAlerts(accountId: string, role: AccountRole, now = new Date()): Promise<AccountAlert[]> {
+export async function accountAlerts(accountId: string, role: AccountRole, now = new Date(), only: string[] | null = null): Promise<AccountAlert[]> {
   const db = await getDb();
   const alerts: AccountAlert[] = [];
 
@@ -28,7 +28,7 @@ export async function accountAlerts(accountId: string, role: AccountRole, now = 
   }
 
   if (roleCan(role, "hosting")) {
-    const mine = await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt }).from(schema.workloads).where(eq(schema.workloads.clientId, accountId));
+    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt }).from(schema.workloads).where(eq(schema.workloads.clientId, accountId))).filter((w) => !only || only.includes(w.id));
     for (const w of mine) {
       if (w.status === "error") alerts.push({ kind: "workload", text: "{name} needs attention", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
       if (w.status === "suspended") alerts.push({ kind: "workload", text: "{name} is suspended", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });

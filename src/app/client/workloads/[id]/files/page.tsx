@@ -7,7 +7,7 @@ import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { requireWorkload } from "@/platform/access";
 import type { FilesResult } from "@/platform/protocol";
-import { filesAction } from "../../../platform-actions";
+import { filesAction, uploadFile } from "../../../platform-actions";
 
 /** A button that looks like a link: every navigation is a job, so it is a POST. */
 function Go({ id, action, path, children, className = "text-left hover:text-link hover:underline", confirm }: { id: string; action: string; path: string; children: React.ReactNode; className?: string; confirm?: string }) {
@@ -84,6 +84,15 @@ export default async function Files({ params, searchParams }: { params: Promise<
             ) : (
               <EmptyState title={t("This folder is empty")} />
             )}
+            <div className="border-t border-border p-6 pb-0">
+              <ActionForm action={uploadFile} className="flex flex-wrap items-center gap-3">
+                <input type="hidden" name="id" value={w.id} />
+                <input type="hidden" name="dir" value={dir} />
+                <input type="file" name="file" required className="text-sm file:mr-3 file:cursor-pointer file:rounded-theme file:border file:border-border file:bg-surface file:px-4 file:py-2 file:text-sm file:font-medium file:text-fg" />
+                <SubmitButton variant="secondary">{t("Upload here")}</SubmitButton>
+                <span className="text-xs text-muted">{t("Up to 5 MB. An existing file with the same name is replaced.")}</span>
+              </ActionForm>
+            </div>
             <div className="grid gap-4 border-t border-border p-6 md:grid-cols-2">
               {([["mkdir", t("New folder"), "uploads-2"], ["write", t("New file"), "robots.txt"]] as const).map(([action, label, placeholder]) => (
                 <ActionForm key={action} action={filesAction} className="flex items-start gap-2">

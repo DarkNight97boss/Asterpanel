@@ -13,7 +13,7 @@ import { listAccounts, roleCan, type Account, type Permission } from "./roles";
  */
 
 export const ACCOUNT_COOKIE = "aster_account";
-export { listAccounts, ROLE_LABEL, roleCan, type Account, type AccountRole, type Permission } from "./roles";
+export { listAccounts, mayAccess, ROLE_LABEL, roleCan, type Account, type AccountRole, type Permission } from "./roles";
 
 export const getAccount = cache(async (): Promise<{ user: SessionUser; account: Account; accounts: Account[] }> => {
   const user = await requireUser();

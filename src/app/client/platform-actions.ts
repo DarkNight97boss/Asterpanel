@@ -365,3 +365,22 @@ export async function sftpKeyAction(_: ActionState, form: FormData): Promise<Act
   }
   refresh(workload.id);
 }
+
+export async function uploadFile(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  const file = form.get("file");
+  const dir = String(form.get("dir") ?? "");
+  if (!(file instanceof File) || !file.size) return { error: "Choose a file to upload" };
+  if (file.size > engine.UPLOAD_LIMIT) return { error: "Files up to 5 MB can be uploaded here. Use SFTP for larger ones." };
+  // The browser-supplied name is untrusted: keep only its last segment.
+  const name = file.name.split(/[\\/]/).pop()!.replace(/[\0-\x1f]/g, "").trim();
+  if (!name || name === "." || name === "..") return { error: "Enter a valid name" };
+  let jobId: string;
+  try {
+    await engine.runFilesJob(workload.id, "write", `${dir}/${name}`, Buffer.from(await file.arrayBuffer()).toString("base64"), user.id, "base64");
+    jobId = await engine.runFilesJob(workload.id, "list", dir, undefined, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  redirect(`/client/workloads/${workload.id}/files?job=${jobId}`);
+}

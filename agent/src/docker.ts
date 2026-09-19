@@ -631,7 +631,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
 
   // ─── Driver: file manager ────────────────────────────────────────────────
 
-  async files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], rel: string, content: string | undefined, log: Log): Promise<JobResult> {
+  async files(spec: WorkloadSpec, action: JobPayloads["workload.files"]["action"], rel: string, content: string | undefined, log: Log, encoding: "utf8" | "base64" = "utf8"): Promise<JobResult> {
     const { name } = this.check(spec);
     // The control plane already normalises paths; never trust that alone.
     if (rel.split("/").some((part) => part === ".." || part === ".") || rel.startsWith("/") || /[\0-\x1f]/.test(rel)) throw new Error("Invalid path");
@@ -661,7 +661,8 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       return { output: JSON.stringify({ kind: "file", path: rel, content: binary ? "" : out.slice(0, LIMIT), truncated: out.length > LIMIT, binary }) };
     }
     log(`${action} ${rel}`);
-    if (action === "write") await run('d=$(dirname "/site/$P"); [ -d "$d" ] || exit 3; cat > "/site/$P.aster-tmp" && mv "/site/$P.aster-tmp" "/site/$P"', content ?? "");
+    // Uploads arrive base64-encoded and are decoded inside the container, so binary data never touches a JS string.
+    if (action === "write") await run(`d=$(dirname "/site/$P"); [ -d "$d" ] || exit 3; ${encoding === "base64" ? "base64 -d" : "cat"} > "/site/$P.aster-tmp" && mv "/site/$P.aster-tmp" "/site/$P"`, content ?? "");
     else if (action === "mkdir") await run('mkdir -p "/site/$P"');
     else await run('[ -n "$P" ] && rm -rf -- "/site/$P"');
     return { output: JSON.stringify({ kind: "done", path: rel }) };

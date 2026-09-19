@@ -5,7 +5,7 @@ import { Alert, ButtonLink, Card, CardHeader, EmptyState, StatusBadge, Table, Td
 import { getDb, schema } from "@/db";
 import { WORKLOAD_TYPES } from "@/db/schema";
 import { getLocale, getT } from "@/i18n";
-import { requireAccount } from "@/lib/account";
+import { mayAccess, requireAccount } from "@/lib/account";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { WORKLOAD_LABEL } from "@/platform/ui";
@@ -34,11 +34,11 @@ export default async function ClientDashboard() {
     getLocale(),
     getSettings("billing"),
     db.select({ type: schema.workloads.type, n: count() }).from(schema.workloads).where(mine).groupBy(schema.workloads.type),
-    db.query.workloads.findMany({ where: mine, with: { domains: true }, orderBy: desc(schema.workloads.updatedAt), limit: 6 }),
+    db.query.workloads.findMany({ where: mine, with: { domains: true }, orderBy: desc(schema.workloads.updatedAt), limit: 50 }),
     db.select({ n: count(), total: sum(schema.invoices.total) }).from(schema.invoices).where(and(eq(schema.invoices.clientId, user.id), eq(schema.invoices.status, "unpaid"))),
     db.select({ n: count() }).from(schema.tickets).where(and(eq(schema.tickets.clientId, user.id), inArray(schema.tickets.status, ["open", "answered", "customer_reply"]))),
   ]);
-  const myIds = (await db.select({ id: schema.workloads.id, name: schema.workloads.name }).from(schema.workloads).where(eq(schema.workloads.clientId, user.id)));
+  const myIds = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, parentId: schema.workloads.parentId }).from(schema.workloads).where(eq(schema.workloads.clientId, user.id))).filter((w) => mayAccess(user, w));
   const names = new Map(myIds.map((w) => [w.id, w.name]));
   const [activity, invoices, answered] = await Promise.all([
     myIds.length
@@ -52,7 +52,9 @@ export default async function ClientDashboard() {
     ...invoices.map((inv) => ({ at: inv.paidAt ?? inv.createdAt, href: `/client/invoices/${inv.id}`, text: inv.status === "paid" ? t("Invoice paid") : inv.status === "unpaid" ? t("New invoice to pay") : t("Invoice updated") })),
   ].sort((a, b) => b.at.getTime() - a.at.getTime()).slice(0, 6);
 
-  const n = (type: string) => counts.find((c) => c.type === type)?.n ?? 0;
+  const visible = recent.filter((w) => mayAccess(user, w));
+  // Restricted members get exact counts from what they can see; everyone else from SQL.
+  const n = (type: string) => (user.only ? visible.filter((w) => w.type === type).length : (counts.find((c) => c.type === type)?.n ?? 0));
 
   return (
     <>
@@ -121,9 +123,9 @@ export default async function ClientDashboard() {
 
       <Card>
         <CardHeader title={t("Recently updated")} action={tickets.n > 0 && <ButtonLink href="/client/tickets" size="sm" variant="secondary">{t("{n} open tickets", { n: tickets.n })}</ButtonLink>} />
-        {recent.length ? (
+        {visible.length ? (
           <Table head={[t("Name"), t("Type"), t("Primary domain"), t("Status")]}>
-            {recent.map((w) => (
+            {visible.map((w) => (
               <tr key={w.id}>
                 <Td><Link href={`/client/workloads/${w.id}`} className="font-medium hover:text-link">{w.name}</Link></Td>
                 <Td>{t(WORKLOAD_LABEL[w.type].one)}</Td>

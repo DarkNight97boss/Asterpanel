@@ -57,6 +57,13 @@
       "when": 1789814970426,
       "tag": "0007_dns",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789818119776,
+      "tag": "0008_member_sites",
+      "breakpoints": true
     }
   ]
 }

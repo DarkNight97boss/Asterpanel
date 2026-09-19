@@ -10,7 +10,7 @@ export const metadata = { title: "Dashboard" };
 export default async function ClientLayout({ children }: { children: React.ReactNode }) {
   await ensureInstalled();
   const [{ user, account, accounts }, t] = await Promise.all([getAccount(), getT()]);
-  const alerts = await accountAlerts(account.id, account.role);
+  const alerts = await accountAlerts(account.id, account.role, undefined, account.only);
   const can = (p: Parameters<typeof roleCan>[1]) => roleCan(account.role, p);
   return (
     <PanelShell
@@ -21,7 +21,7 @@ export default async function ClientLayout({ children }: { children: React.React
       alerts={alerts.length}
       nav={[
         { items: [{ href: "/client", label: t("Dashboard"), icon: "◧", exact: true }] },
-        ...(can("hosting") ? [{ title: t("Hosting"), items: [...Object.values(WORKLOAD_LABEL).map((l) => ({ href: l.path, label: t(l.many), icon: l.icon })), { href: "/client/dns", label: t("DNS management"), icon: "⇄" }] }] : []),
+        ...(can("hosting") ? [{ title: t("Hosting"), items: [...Object.values(WORKLOAD_LABEL).map((l) => ({ href: l.path, label: t(l.many), icon: l.icon })), ...(account.only ? [] : [{ href: "/client/dns", label: t("DNS management"), icon: "⇄" }])] }] : []),
         {
           title: t("Account"),
           items: [

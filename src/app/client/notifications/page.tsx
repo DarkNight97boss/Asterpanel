@@ -9,7 +9,7 @@ const ICON = { ticket: "✉", invoice: "▦", workload: "!", job: "⊗" } as con
 
 export default async function Notifications() {
   const { account } = await requireAccount("support");
-  const [t, locale, alerts] = await Promise.all([getT(), getLocale(), accountAlerts(account.id, account.role)]);
+  const [t, locale, alerts] = await Promise.all([getT(), getLocale(), accountAlerts(account.id, account.role, undefined, account.only)]);
   return (
     <>
       <PageHeader title={t("Notifications")} description={t("Things that need your attention. They disappear on their own once handled.")} />

@@ -468,3 +468,22 @@ test("alerts: only actionable items, filtered by role, gone once handled", async
   const after = await accountAlerts(clientId, "owner");
   assert.ok(!after.some((a) => a.kind === "invoice" || a.vars?.name === "Broken app"));
 });
+
+test("uploads: size-limited, decoded on the node, and their content is scrubbed from the queue afterwards", async () => {
+  const db = await dbm.getDb();
+  const [site] = (await db.select().from(dbm.schema.workloads)).filter((w) => w.name === "Sftp B");
+  const { decryptJson } = await import("../src/lib/crypto");
+  await assert.rejects(engine.runFilesJob(site.id, "write", "big.bin", "A".repeat(7_100_000), null, "base64"), /5 MB/);
+
+  const jobId = await engine.runFilesJob(site.id, "write", "wp-content/uploads/logo.png", Buffer.from([137, 80, 78, 71, 0, 1, 2, 3]).toString("base64"), null, "base64");
+  const before = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId)))[0];
+  assert.ok(decryptJson<{ content?: string }>(before.payload, {}).content, "present while queued");
+  await drain();
+  const after = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId)))[0];
+  assert.equal(after.status, "succeeded");
+  assert.equal(decryptJson<{ content?: string }>(after.payload, {}).content, undefined, "gone once the job is final");
+
+  const read = await engine.runFilesJob(site.id, "read", "wp-content/uploads/logo.png");
+  await drain();
+  assert.match(String((await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, read)))[0].result.output), /uploaded file, 8 bytes/);
+});
