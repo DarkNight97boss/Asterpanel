@@ -12,6 +12,8 @@ import { getSettings } from "./settings";
 
 let http: Http = (...args) => fetch(...args);
 export const setCloudHttpForTests = (fake: Http) => void (http = fake);
+/** The HTTP layer in use (the real one, or the tests' fake), for modules that talk to providers next to this one. */
+export const cloudHttp = (): Http => http;
 
 export class CloudNodeError extends Error {}
 
@@ -66,10 +68,16 @@ export async function createCloudNode(input: { provider: string; name: string; r
   const [node] = await db.insert(schema.nodes).values({ name, region: input.region, baseDomain: input.baseDomain, maxWorkloads: input.maxWorkloads, tokenHash: sha256(token), provider: provider.id, providerRegion: input.region, providerSize: input.size, autoscaled: !!input.autoscaled }).returning({ id: schema.nodes.id });
   try {
     const script = bootScript({ origin: input.origin, token: `${node.id}.${token}`, publicKey: (await signingKeys()).publicKey, acmeEmail: (await getSettings("cloud")).acmeEmail });
-    const server = await provider.create(creds, { name, region: input.region, size: input.size, bootScript: script }, http);
-    await db.update(schema.nodes).set({ providerServerId: server.id, publicIp: server.ip }).where(eq(schema.nodes.id, node.id));
+    // An address from the administrator's pools, when one covers this provider and region.
+    const { leaseAddress } = await import("./ip-pools");
+    const ip = (await leaseAddress(provider.id, input.region, node.id)) ?? undefined;
+    const server = await provider.create(creds, { name, region: input.region, size: input.size, bootScript: script, ip }, http);
+    await db.update(schema.nodes).set({ providerServerId: server.id, publicIp: ip?.address ?? server.ip }).where(eq(schema.nodes.id, node.id));
+    if (ip) await publishNodeDns({ name, baseDomain: input.baseDomain, publicIp: ip.address }).catch(() => {});
   } catch (err) {
     // Nothing was created (or we cannot know what): do not leave a node that will never come online.
+    // Its address goes back to the pool, still reserved, ready for the next server.
+    await (await import("./ip-pools")).unlease(node.id).catch(() => {});
     await db.delete(schema.nodes).where(eq(schema.nodes.id, node.id));
     throw err instanceof CloudError || err instanceof CloudNodeError ? new CloudNodeError(err.message) : err;
   }

@@ -467,6 +467,44 @@ export const nodes = pgTable("nodes", {
   createdAt: createdAt(),
 });
 
+/**
+ * A set of public addresses the administrator wants nodes to use. `block`: a
+ * range the company brought to the provider (BYOIP), handed out address by
+ * address. `reserved`: addresses reserved at the provider on demand and then
+ * kept, so a rebuilt server comes back on the same address.
+ */
+export const ipPools = pgTable("ip_pools", {
+  id: id(),
+  name: text("name").notNull(),
+  provider: text("provider").notNull(),
+  /** Provider region the addresses live in (GCP region, Hetzner location). */
+  region: text("region").notNull(),
+  mode: text("mode").$type<"block" | "reserved">().notNull(),
+  cidr: text("cidr").notNull().default(""),
+  /** Lease an address to every new server of this provider and region, by itself. */
+  autoLease: boolean("auto_lease").notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: createdAt(),
+});
+
+export const ipLeases = pgTable(
+  "ip_leases",
+  {
+    id: id(),
+    poolId: uuid("pool_id")
+      .notNull()
+      .references(() => ipPools.id, { onDelete: "restrict" }),
+    address: text("address").notNull().unique(),
+    /** How the provider names the reservation (Hetzner primary IP id, GCP address name). */
+    providerRef: text("provider_ref").notNull().default(""),
+    /** Null = reserved at the provider but free to be leased again. */
+    nodeId: uuid("node_id").references(() => nodes.id, { onDelete: "set null" }),
+    leasedAt: timestamp("leased_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ip_leases_pool_idx").on(t.poolId)],
+);
+
 export const WORKLOAD_TYPES = ["wordpress", "app", "database", "static"] as const;
 export type WorkloadType = (typeof WORKLOAD_TYPES)[number];
 export type WorkloadStatus = "creating" | "running" | "stopped" | "suspended" | "error" | "deleting" | "deleted";
