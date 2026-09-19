@@ -40,6 +40,7 @@ export default async function EinvoiceSettings() {
                 <Field label={t("0% VAT nature")}><Select name="zeroVatNature" defaultValue={s.zeroVatNature}>{NATURES.map((n) => <option key={n}>{n}</option>)}</Select></Field>
                 <Field label={t("Legal reference for 0% VAT")} hint={t("Used only when the tax rate is 0, for example for flat-rate sellers.")}><Input name="zeroVatNote" defaultValue={s.zeroVatNote} maxLength={100} placeholder="Operazione in franchigia da IVA ex art. 1 c. 54-89 L. 190/2014" /></Field>
               </div>
+              <Checkbox name="bollo" defaultChecked={s.bollo} label={t("Add the €2 virtual stamp duty to invoices without VAT above €77.47")} />
               <SubmitButton>{t("Save")}</SubmitButton>
             </ActionForm>
           </div>

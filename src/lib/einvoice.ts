@@ -45,6 +45,7 @@ export async function invoiceXml(invoice: LoadedInvoice): Promise<SdiDocument> {
       tax: invoice.tax,
       total: invoice.total,
       paid: invoice.status === "paid",
+      exemption: invoice.taxRate === 0 && invoice.notes.startsWith("Reverse charge") ? { nature: "N2.1", note: "Inversione contabile - art. 7-ter DPR 633/72" } : undefined,
       credits: credited && { number: invoiceLabel(billing.invoicePrefix, credited), date: credited.createdAt },
       paidBy: invoice.transactions.some((t) => t.gateway === "stripe") ? "card" : "transfer",
       lines: invoice.items.map((i) => ({ description: i.description, amount: i.amount })),

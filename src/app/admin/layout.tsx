@@ -31,7 +31,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           title: t("Business"),
           items: [
             ...(can("clients") ? [{ href: "/admin/clients", label: t("Clients"), icon: "☺" }] : []),
-            ...(can("billing") ? [{ href: "/admin/orders", label: t("Orders"), icon: "◈" }, { href: "/admin/services", label: t("Services"), icon: "▤" }, { href: "/admin/invoices", label: t("Invoices"), icon: "▦" }] : []),
+            ...(can("billing") ? [{ href: "/admin/orders", label: t("Orders"), icon: "◈" }, { href: "/admin/services", label: t("Services"), icon: "▤" }, { href: "/admin/invoices", label: t("Invoices"), icon: "▦" }, { href: "/admin/reports", label: t("Reports"), icon: "◔" }] : []),
             ...(can("support") ? [{ href: "/admin/tickets", label: t("Tickets"), icon: "✉" }, { href: "/admin/canned-replies", label: t("Canned replies"), icon: "❝" }] : []),
           ],
         },

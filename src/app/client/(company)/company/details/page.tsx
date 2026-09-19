@@ -4,7 +4,7 @@ import { Card, CardHeader, Field, Input, PageHeader, Select } from "@/components
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
-import { saveCompanyDetails } from "../actions";
+import { saveCompanyDetails, verifyVat } from "../actions";
 
 export const metadata = { title: "Billing details" };
 
@@ -43,6 +43,12 @@ export default async function CompanyDetails() {
             </div>
             <SubmitButton>{t("Save")}</SubmitButton>
           </ActionForm>
+          {co.vatId && (
+            <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-border pt-5 text-sm">
+              {co.vatValidatedAt ? <span className="text-success">● {t("VAT number confirmed by VIES")}{co.vatValidatedName && ` — ${co.vatValidatedName}`}</span> : <span className="text-muted">{t("VAT number not verified. EU businesses outside our country get invoices without VAT once it is confirmed.")}</span>}
+              <ActionForm action={verifyVat} className=""><SubmitButton size="sm" variant="secondary">{t("Verify with VIES")}</SubmitButton></ActionForm>
+            </div>
+          )}
         </div>
       </Card>
     </>

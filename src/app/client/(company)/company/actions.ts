@@ -12,6 +12,7 @@ import { audit } from "@/lib/audit";
 import { requireUser } from "@/lib/auth";
 import { rateLimit } from "@/lib/rate-limit";
 import { createCompany } from "@/lib/roles";
+import { validateCompanyVat } from "@/lib/tax";
 
 const text = (max: number) => z.string().trim().max(max);
 const details = z.object({
@@ -35,10 +36,22 @@ export async function saveCompanyDetails(_: ActionState, form: FormData): Promis
   const parsed = details.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: "Check the highlighted fields" };
   const db = await getDb();
-  await db.update(schema.companies).set(parsed.data).where(eq(schema.companies.id, account.id));
+  const [before] = await db.select({ vatId: schema.companies.vatId }).from(schema.companies).where(eq(schema.companies.id, account.id));
+  // A different VAT number has to earn its confirmation again.
+  await db.update(schema.companies).set({ ...parsed.data, ...(before?.vatId !== parsed.data.vatId ? { vatValidatedAt: null, vatValidatedName: "" } : {}) }).where(eq(schema.companies.id, account.id));
   await audit(user.id, "company.details_changed", "company", account.id);
   revalidatePath("/client", "layout");
   return { ok: "Saved" };
+}
+
+export async function verifyVat(): Promise<ActionState> {
+  const { user, account } = await requireAccount("billing");
+  if (!rateLimit(`vies:${account.id}`, 10, 60 * 60_000)) return { error: "Too many attempts. Try again in a few minutes." };
+  const result = await validateCompanyVat(account.id);
+  await audit(user.id, "company.vat_checked", "company", account.id, { result });
+  revalidatePath("/client/company/details");
+  if (result === "valid") return { ok: "Confirmed by VIES. Invoices to a business in another EU country are issued without VAT (reverse charge)." };
+  return { error: result === "invalid" ? "VIES does not know this VAT number. Check it, including the country prefix (e.g. DE123456789)." : "VIES is not answering right now. Try again later: nothing was changed." };
 }
 
 export async function newCompany(_: ActionState, form: FormData): Promise<ActionState> {

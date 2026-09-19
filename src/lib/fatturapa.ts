@@ -4,9 +4,9 @@
  * job of an accredited intermediary; this produces what they accept.
  */
 
-export type FpaSeller = { name: string; vatCountry: string; vatNumber: string; fiscalCode: string; regime: string; address: string; zip: string; city: string; province: string; zeroVatNature: string; zeroVatNote: string; iban: string };
+export type FpaSeller = { name: string; vatCountry: string; vatNumber: string; fiscalCode: string; regime: string; address: string; zip: string; city: string; province: string; zeroVatNature: string; zeroVatNote: string; iban: string; bollo?: boolean };
 export type FpaBuyer = { name: string; firstName: string; lastName: string; isCompany: boolean; vatId: string; taxCode: string; address: string; zip: string; city: string; province: string; country: string; sdiCode: string; pec: string };
-export type FpaInvoice = { number: string; progressive: number; date: Date; dueDate: Date; currency: string; taxRateBp: number; subtotal: number; tax: number; total: number; paid: boolean; paidBy: "card" | "transfer"; /** Set on credit notes: the invoice being reversed. */ credits?: { number: string; date: Date }; lines: { description: string; amount: number }[] };
+export type FpaInvoice = { number: string; progressive: number; date: Date; dueDate: Date; currency: string; taxRateBp: number; subtotal: number; tax: number; total: number; paid: boolean; paidBy: "card" | "transfer"; /** Set on credit notes: the invoice being reversed. */ credits?: { number: string; date: Date }; /** Why this particular invoice carries no VAT, when it is not the seller's general regime (e.g. EU reverse charge: N2.1). */ exemption?: { nature: string; note: string }; lines: { description: string; amount: number }[] };
 
 export class FpaError extends Error {}
 
@@ -42,6 +42,8 @@ export function buildFatturaPa(seller: FpaSeller, buyer: FpaBuyer, inv: FpaInvoi
   const recipient = !italian ? "XXXXXXX" : /^[A-Z0-9]{7}$/i.test(buyer.sdiCode) ? buyer.sdiCode.toUpperCase() : "0000000";
   const rate = (inv.taxRateBp / 100).toFixed(2);
   const zeroVat = inv.taxRateBp === 0;
+  const nature = inv.exemption?.nature ?? seller.zeroVatNature;
+  const natureNote = inv.exemption?.note ?? seller.zeroVatNote;
   const who = (name: string, first: string, last: string, company: boolean) => (company || !last ? tag("Denominazione", latin(name, 80)) : tag("Nome", latin(first, 60)) + tag("Cognome", latin(last, 60)));
 
   return [
@@ -79,14 +81,16 @@ export function buildFatturaPa(seller: FpaSeller, buyer: FpaBuyer, inv: FpaInvoi
     tag("Divisa", "EUR"),
     tag("Data", day(inv.date)),
     tag("Numero", latin(inv.number, 20)),
+    // Virtual stamp duty: invoices without VAT above EUR 77.47.
+    seller.bollo && zeroVat && !inv.exemption && inv.total > 7747 && !inv.credits && `<DatiBollo>${tag("BolloVirtuale", "SI")}${tag("ImportoBollo", "2.00")}</DatiBollo>`,
     tag("ImportoTotaleDocumento", money(inv.total)),
-    zeroVat && tag("Causale", latin(seller.zeroVatNote, 200)),
+    zeroVat && tag("Causale", latin(natureNote, 200)),
     "</DatiGeneraliDocumento>",
     inv.credits && `<DatiFattureCollegate>${tag("IdDocumento", latin(inv.credits.number, 20))}${tag("Data", day(inv.credits.date))}</DatiFattureCollegate>`,
     "</DatiGenerali>",
     "<DatiBeniServizi>",
-    ...inv.lines.map((l, i) => `<DettaglioLinee>${tag("NumeroLinea", String(i + 1))}${tag("Descrizione", latin(l.description, 1000) || "-")}${tag("Quantita", "1.00")}${tag("PrezzoUnitario", money(l.amount))}${tag("PrezzoTotale", money(l.amount))}${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", seller.zeroVatNature) : ""}</DettaglioLinee>`),
-    `<DatiRiepilogo>${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", seller.zeroVatNature) : ""}${tag("ImponibileImporto", money(inv.subtotal))}${tag("Imposta", money(inv.tax))}${zeroVat ? tag("RiferimentoNormativo", latin(seller.zeroVatNote, 100)) : tag("EsigibilitaIVA", "I")}</DatiRiepilogo>`,
+    ...inv.lines.map((l, i) => `<DettaglioLinee>${tag("NumeroLinea", String(i + 1))}${tag("Descrizione", latin(l.description, 1000) || "-")}${tag("Quantita", "1.00")}${tag("PrezzoUnitario", money(l.amount))}${tag("PrezzoTotale", money(l.amount))}${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", nature) : ""}</DettaglioLinee>`),
+    `<DatiRiepilogo>${tag("AliquotaIVA", rate)}${zeroVat ? tag("Natura", nature) : ""}${tag("ImponibileImporto", money(inv.subtotal))}${tag("Imposta", money(inv.tax))}${zeroVat ? tag("RiferimentoNormativo", latin(natureNote, 100)) : tag("EsigibilitaIVA", "I")}</DatiRiepilogo>`,
     "</DatiBeniServizi>",
     `<DatiPagamento>${tag("CondizioniPagamento", "TP02")}<DettaglioPagamento>${tag("ModalitaPagamento", inv.paidBy === "card" ? "MP08" : "MP05")}${tag("DataScadenzaPagamento", day(inv.dueDate))}${tag("ImportoPagamento", money(inv.total))}${inv.paidBy === "transfer" ? tag("IBAN", seller.iban.replace(/\s/g, "").toUpperCase()) : ""}</DettaglioPagamento></DatiPagamento>`,
     "</FatturaElettronicaBody>",
