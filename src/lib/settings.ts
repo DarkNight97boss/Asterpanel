@@ -177,6 +177,8 @@ export const settingsSchemas = {
   }),
   /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
   platform: z.object({
+    /** Bearer token for GET /api/metrics (Prometheus). Empty = endpoint off. */
+    metricsToken: z.string().default(""),
     signingPrivateKey: z.string().default(""),
     signingPublicKey: z.string().default(""),
   }),

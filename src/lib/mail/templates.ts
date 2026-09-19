@@ -184,6 +184,17 @@ export const TEMPLATES: TemplateDef[] = [
     sample: serviceSample,
   },
   {
+    id: "node.alert",
+    name: "Server problem",
+    description: "Sent to staff when a server goes offline or runs out of disk or memory, and when it recovers.",
+    audience: "staff",
+    variables: { site: "Site name", node: "Server name", problem: "What is wrong" },
+    subject: "[{site}] {node}: {problem}",
+    heading: "{node}: {problem}",
+    body: ["This was noticed by the periodic check of your servers. You will get one more message when it is back to normal."],
+    sample: { site: "Acme Hosting", node: "fsn1-node-01", problem: "disk 93% full" },
+  },
+  {
     id: "ticket.staff_reply",
     name: "Ticket reply",
     description: "Sent to the client when staff replies. The reply is quoted below the text.",

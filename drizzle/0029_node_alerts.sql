@@ -1,0 +1,1 @@
+ALTER TABLE "nodes" ADD COLUMN "alerts" jsonb DEFAULT '[]'::jsonb NOT NULL;

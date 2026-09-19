@@ -204,6 +204,13 @@
       "when": 1789852473619,
       "tag": "0028_require2fa_chat_hooks",
       "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "7",
+      "when": 1789852782841,
+      "tag": "0029_node_alerts",
+      "breakpoints": true
     }
   ]
 }

@@ -1734,6 +1734,16 @@ const it: Record<string, string> = {
   "Added. Press “Send test” to see a message arrive.": "Aggiunto. Premi «Invia test» per veder arrivare un messaggio.",
   "This address does not belong to the chosen chat service": "Questo indirizzo non appartiene al servizio di chat scelto",
   "Telegram needs https://api.telegram.org/bot<token>/sendMessage and a chat id": "Telegram richiede https://api.telegram.org/bot<token>/sendMessage e un ID chat",
+  "Server problem": "Problema su un server",
+  "Sent to staff when a server goes offline or runs out of disk or memory, and when it recovers.": "Inviata allo staff quando un server va offline o esaurisce disco o memoria, e quando si riprende.",
+  "This was noticed by the periodic check of your servers. You will get one more message when it is back to normal.": "Rilevato dal controllo periodico dei tuoi server. Riceverai un altro messaggio quando tornerà alla normalità.",
+  "Open the servers page": "Apri la pagina dei server",
+  "Monitoring": "Monitoraggio",
+  "Staff gets an email when a server goes offline, its disk passes 90% or its memory 95%, and again when it recovers. For your own dashboards there is a Prometheus endpoint with servers, services, jobs and unpaid invoices.": "Lo staff riceve un'email quando un server va offline, il disco supera il 90% o la memoria il 95%, e di nuovo quando si riprende. Per le tue dashboard c'è un endpoint Prometheus con server, servizi, job e fatture non pagate.",
+  "The metrics endpoint is on.": "L'endpoint delle metriche è attivo.",
+  "The metrics endpoint is off.": "L'endpoint delle metriche è spento.",
+  "New token": "Nuovo token",
+  "Metrics endpoint switched off": "Endpoint delle metriche disattivato",
 };
 
 export default it;
