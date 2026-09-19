@@ -6,10 +6,11 @@ import { AUTHOR_COLUMNS, TicketThread } from "@/components/ticket-thread";
 import { Button, Card, PageHeader, StatusBadge, STATUS_LABEL, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { setTicketStatus, staffReply } from "../../actions";
 
 export default async function AdminTicket({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("support");
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();

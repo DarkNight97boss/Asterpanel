@@ -8,7 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type WorkloadConfig } from "@/db/schema";
 import { requireAccount } from "@/lib/account";
-import { isStaff, requireStaff } from "@/lib/auth";
+import { isStaff, requireArea } from "@/lib/auth";
 import { BillingError, placeOrder, terminateService } from "@/lib/billing";
 import { seedPlatformPlans } from "@/lib/install";
 import { requestMeta } from "@/lib/request";
@@ -90,7 +90,7 @@ export async function createFromPlan(_: ActionState, form: FormData): Promise<Ac
 }
 
 export async function seedPlans() {
-  await requireStaff();
+  await requireArea("billing");
   await seedPlatformPlans();
   revalidatePath("/client", "layout");
 }

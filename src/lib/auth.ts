@@ -6,6 +6,7 @@ import { and, eq, gt, lt } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { randomToken, sha256 } from "./crypto";
 import { requestMeta } from "./request";
+import { AREA_HOME, staffAreas, staffCan, type StaffArea } from "./staff";
 
 const COOKIE = "aster_session";
 const SESSION_DAYS = 14;
@@ -76,6 +77,13 @@ export async function requireUser(next = "/client"): Promise<SessionUser> {
 export async function requireStaff(): Promise<SessionUser> {
   const user = await requireUser("/admin");
   if (!isStaff(user)) redirect("/client");
+  return user;
+}
+
+/** Staff whose role opens `area`. Others land on the first area they do have. */
+export async function requireArea(area: StaffArea): Promise<SessionUser> {
+  const user = await requireStaff();
+  if (!staffCan(user, area)) redirect(AREA_HOME[staffAreas(user)[0]]);
   return user;
 }
 

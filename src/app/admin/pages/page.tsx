@@ -6,8 +6,10 @@ import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { ConfirmButton } from "@/components/confirm-button";
 import { installPlatformHome } from "../actions";
+import { requireArea } from "@/lib/auth";
 
 export default async function Pages() {
+  await requireArea("content");
   const db = await getDb();
   const [t, locale, pages] = await Promise.all([getT(), getLocale(), db.select().from(schema.pages).orderBy(asc(schema.pages.slug))]);
   return (

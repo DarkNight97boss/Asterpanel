@@ -3,12 +3,13 @@ import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, CardHeader, EmptyState, PageHeader, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { baseUrl } from "@/lib/url";
 import { runAutomationNow } from "../actions";
 
 export default async function Automation() {
+  await requireArea("billing");
   const db = await getDb();
   const [t, locale, origin, log] = await Promise.all([
     getT(),

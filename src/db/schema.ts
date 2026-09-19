@@ -31,6 +31,8 @@ const updatedAt = () =>
 // ─── Identity ────────────────────────────────────────────────────────────────
 
 export type UserRole = "admin" | "staff" | "client";
+/** What a `staff` user may open in the back office (see lib/staff.ts). */
+export type StaffRole = "manager" | "ops" | "support" | "billing" | "content";
 export type UserStatus = "active" | "suspended" | "closed";
 
 export const users = pgTable(
@@ -40,6 +42,7 @@ export const users = pgTable(
     email: text("email").notNull(),
     passwordHash: text("password_hash").notNull(),
     role: text("role").$type<UserRole>().notNull().default("client"),
+    staffRole: text("staff_role").$type<StaffRole | "">().notNull().default(""),
     status: text("status").$type<UserStatus>().notNull().default("active"),
     firstName: text("first_name").notNull().default(""),
     lastName: text("last_name").notNull().default(""),

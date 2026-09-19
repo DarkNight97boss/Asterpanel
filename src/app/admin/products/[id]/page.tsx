@@ -9,9 +9,11 @@ import { centsToInput, CYCLE_LABEL } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { provisioningModules } from "@/modules/provisioning";
 import { deleteProduct, saveProduct } from "../../actions";
+import { requireArea } from "@/lib/auth";
 
 /** `/admin/products/new` creates, any other id edits. */
 export default async function ProductEditor({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("billing");
   const { id } = await params;
   const isNew = id === "new";
   if (!isNew && !/^[0-9a-f-]{36}$/i.test(id)) notFound();

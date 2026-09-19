@@ -3,10 +3,11 @@ import { desc, ne } from "drizzle-orm";
 import { Badge, Card, EmptyState, PageHeader, StatusBadge, STATUS_LABEL, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 
 export default async function Tickets({ searchParams }: { searchParams: Promise<{ all?: string }> }) {
+  await requireArea("support");
   const all = !!(await searchParams).all;
   const db = await getDb();
   const [t, locale, tickets] = await Promise.all([

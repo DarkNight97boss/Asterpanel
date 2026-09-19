@@ -6,12 +6,13 @@ import { Card, CardHeader, Field, Input, PageHeader, Select, StatusBadge, STATUS
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES } from "@/db/schema";
 import { getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { centsToInput, CYCLE_LABEL } from "@/lib/format";
 import { getProvisioningModule } from "@/modules/provisioning";
 import { saveService, serviceCommand } from "../../actions";
 
 export default async function ServiceDetail({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("billing");
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();

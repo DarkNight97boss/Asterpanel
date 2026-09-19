@@ -4,8 +4,10 @@ import { Button, Card, CardHeader, Input, PageHeader } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { deleteMenuItem, saveMenuItem } from "../actions";
+import { requireArea } from "@/lib/auth";
 
 export default async function Menus() {
+  await requireArea("content");
   const db = await getDb();
   const [t, all] = await Promise.all([getT(), db.select().from(schema.menuItems).orderBy(asc(schema.menuItems.position))]);
   const rowFor = (location: string) => `grid items-center gap-2 space-y-0 ${location === "footer" ? "sm:grid-cols-[1fr_1.4fr_1fr_5rem_auto]" : "sm:grid-cols-[1fr_1.4fr_5rem_auto]"}`;

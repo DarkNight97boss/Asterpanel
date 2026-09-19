@@ -5,8 +5,10 @@ import { Card, EmptyState, PageHeader, StatusBadge, Table, Td } from "@/componen
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
+import { requireArea } from "@/lib/auth";
 
 export default async function Jobs() {
+  await requireArea("platform");
   const db = await getDb();
   const [t, locale, jobs] = await Promise.all([
     getT(),

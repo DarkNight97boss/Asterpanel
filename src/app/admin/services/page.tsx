@@ -4,13 +4,14 @@ import { Card, EmptyState, PageHeader, StatusBadge, STATUS_LABEL, Table, Td, cn 
 import { getDb, schema } from "@/db";
 import type { ServiceStatus } from "@/db/schema";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDate, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 
 const FILTERS: ServiceStatus[] = ["pending", "active", "suspended", "terminated", "cancelled"];
 
 export default async function Services({ searchParams }: { searchParams: Promise<{ status?: string }> }) {
+  await requireArea("billing");
   const { status } = await searchParams;
   const filter = FILTERS.find((f) => f === status);
   const db = await getDb();

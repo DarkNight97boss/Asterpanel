@@ -6,8 +6,10 @@ import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { displayName, formatDate } from "@/lib/format";
 import { WORKLOAD_LABEL } from "@/platform/ui";
+import { requireArea } from "@/lib/auth";
 
 export default async function AdminWorkloads() {
+  await requireArea("platform");
   const db = await getDb();
   const [t, locale, rows] = await Promise.all([
     getT(),

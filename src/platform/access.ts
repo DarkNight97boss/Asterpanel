@@ -3,11 +3,11 @@ import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { getAccount, mayAccess, roleCan } from "@/lib/account";
-import { isStaff } from "@/lib/auth";
+import { staffCan } from "@/lib/staff";
 
 /**
  * Loads a workload for the signed-in user: the active account's members with
- * hosting access see it, staff see all. "Not yours" and "does not exist" are indistinguishable (404).
+ * hosting access see it, staff with the platform area see all. "Not yours" and "does not exist" are indistinguishable (404).
  */
 export async function requireWorkload(id: string) {
   const { user, account } = await getAccount();
@@ -20,6 +20,7 @@ export async function requireWorkload(id: string) {
       domains: { orderBy: [desc(schema.domains.isPrimary), asc(schema.domains.createdAt)] },
     },
   });
-  if (!workload || workload.status === "deleted" || (!isStaff(user) && (workload.companyId !== account.id || !roleCan(account.role, "hosting") || !mayAccess(account, workload)))) notFound();
-  return { user, account, workload, canManage: isStaff(user) || roleCan(account.role, "manage") };
+  const staff = staffCan(user, "platform");
+  if (!workload || workload.status === "deleted" || (!staff && (workload.companyId !== account.id || !roleCan(account.role, "hosting") || !mayAccess(account, workload)))) notFound();
+  return { user, account, workload, canManage: staff || roleCan(account.role, "manage") };
 }

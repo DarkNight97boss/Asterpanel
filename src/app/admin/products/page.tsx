@@ -8,8 +8,10 @@ import { CYCLE_SUFFIX, formatMoney, headlineCycle } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { getProvisioningModule } from "@/modules/provisioning";
 import { deleteGroup, saveGroup } from "../actions";
+import { requireArea } from "@/lib/auth";
 
 export default async function Products() {
+  await requireArea("billing");
   const db = await getDb();
   const [t, locale, billing, groups] = await Promise.all([
     getT(),
