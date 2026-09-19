@@ -232,6 +232,13 @@
       "when": 1789854872394,
       "tag": "0032_quotes",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1789855586777,
+      "tag": "0033_page_excerpt",
+      "breakpoints": true
     }
   ]
 }

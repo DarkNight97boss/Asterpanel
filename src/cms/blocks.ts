@@ -285,6 +285,18 @@ export const BLOCKS: BlockDef[] = [
     defaults: { title: "Frequently asked questions", items: [] },
   },
   {
+    type: "pageList",
+    label: "Page list",
+    description: "Lists published pages whose address starts with a prefix: a blog index, a help centre.",
+    fields: [
+      { name: "title", label: "Title", type: "text" },
+      { name: "prefix", label: "Address prefix", type: "text", placeholder: "blog/" },
+      { name: "layout", label: "Layout", type: "select", options: [{ value: "cards", label: "Cards with date (blog)" }, { value: "list", label: "Plain list (help centre)" }] },
+      { name: "limit", label: "How many (newest first)", type: "text", placeholder: "12" },
+    ],
+    defaults: { title: "", prefix: "blog/", layout: "cards", limit: "12" },
+  },
+  {
     type: "comparison",
     label: "Comparison table",
     description: "Plans or products side by side, feature by feature.",
