@@ -117,7 +117,7 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
         : undefined,
     cdn: w.type === "wordpress" && c.cdnEnabled ? { enabled: true, maxAgeDays: c.cdnMaxAgeDays ?? 30 } : undefined,
     cache: w.type === "wordpress" && c.cacheEnabled ? { enabled: true, ttlMinutes: c.cacheTtlMinutes ?? 60, bypass: c.cacheBypass ?? [] } : undefined,
-    sftp: w.type === "wordpress" && c.sftpEnabled && c.sftpPort && secrets.sftpPassword ? { enabled: true, port: c.sftpPort, username: w.slug.replace(/-/g, "").slice(0, 24), password: secrets.sftpPassword } : undefined,
+    sftp: w.type === "wordpress" && c.sftpEnabled && c.sftpPort && secrets.sftpPassword ? { enabled: true, port: c.sftpPort, username: w.slug.replace(/-/g, "").slice(0, 24), password: secrets.sftpPassword, keys: (c.sftpKeys ?? []).map((k) => k.key) } : undefined,
     wordpress:
       w.type === "wordpress"
         ? {
@@ -646,6 +646,26 @@ export async function setSftp(workloadId: string, enabled: boolean, actorId: str
   await db.update(schema.workloads).set({ config: { ...w.config, sftpEnabled: enabled, sftpPort: port }, secrets: encryptJson(secrets) }).where(eq(schema.workloads.id, w.id));
   await applyWorkload(w.id, actorId);
   await audit(actorId, rotate ? "sftp.password_rotated" : enabled ? "sftp.enabled" : "sftp.disabled", "workload", w.id);
+}
+
+const SSH_KEY_RE = /^(ssh-ed25519|ssh-rsa|ecdsa-sha2-nistp(?:256|384|521)|sk-ssh-ed25519@openssh\.com|sk-ecdsa-sha2-nistp256@openssh\.com) ([A-Za-z0-9+/]{60,1000}={0,3})( .*)?$/;
+
+export async function addSftpKey(workloadId: string, name: string, publicKey: string, actorId: string | null = null) {
+  const w = await load(workloadId);
+  const match = SSH_KEY_RE.exec(publicKey.trim().replace(/\s+/g, " "));
+  if (!match) throw new PlatformError("Paste an OpenSSH public key, e.g. ssh-ed25519 AAAA… (never a private key)");
+  const key = `${match[1]} ${match[2]}`; // the comment is dropped: it is free text
+  const keys = w.config.sftpKeys ?? [];
+  if (keys.some((k) => k.key === key)) throw new PlatformError("This key is already authorised");
+  if (keys.length >= 20) throw new PlatformError("Too many keys");
+  await updateWorkloadConfig(w.id, { sftpKeys: [...keys, { name: name.trim().slice(0, 60) || "key", key }] }, actorId);
+  await audit(actorId, "sftp.key_added", "workload", w.id, { name });
+}
+
+export async function removeSftpKey(workloadId: string, key: string, actorId: string | null = null) {
+  const w = await load(workloadId);
+  await updateWorkloadConfig(w.id, { sftpKeys: (w.config.sftpKeys ?? []).filter((k) => k.key !== key) }, actorId);
+  await audit(actorId, "sftp.key_removed", "workload", w.id);
 }
 
 // ─── Database console ────────────────────────────────────────────────────────

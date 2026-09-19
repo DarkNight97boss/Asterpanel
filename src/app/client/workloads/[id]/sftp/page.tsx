@@ -1,9 +1,9 @@
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Alert, Card, DataField, PageHeader } from "@/components/ui";
+import { Alert, Card, CardHeader, DataField, Field, Input, PageHeader, Table, Td } from "@/components/ui";
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
 import { readSecrets, sftpUsername } from "@/platform/engine";
-import { sftpAction } from "../../../platform-actions";
+import { sftpAction, sftpKeyAction } from "../../../platform-actions";
 
 export default async function Sftp({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -38,6 +38,37 @@ export default async function Sftp({ params }: { params: Promise<{ id: string }>
               <DataField label={t("Terminal command")} className="sm:col-span-2 lg:col-span-4"><code className="font-mono text-xs select-all">sftp -P {w.config.sftpPort} {user}@{host}</code></DataField>
             </div>
             <p className="mt-5 text-sm text-muted">{t("Your files are in the “site” folder. WordPress lives in site/, uploads in site/wp-content/uploads.")}</p>
+          </Card>
+          <Card>
+            <CardHeader title={t("SSH keys")} description={t("Log in without a password. Paste the public key (the .pub file), never the private one.")} />
+            {(w.config.sftpKeys ?? []).length > 0 && (
+              <Table head={[t("Name"), t("Key"), ""]}>
+                {(w.config.sftpKeys ?? []).map((k) => (
+                  <tr key={k.key}>
+                    <Td className="font-medium">{k.name}</Td>
+                    <Td className="font-mono text-xs text-body">{k.key.split(" ")[0]} …{k.key.slice(-16)}</Td>
+                    <Td className="text-right">
+                      <ActionForm action={sftpKeyAction} className="">
+                        <input type="hidden" name="id" value={w.id} />
+                        <input type="hidden" name="action" value="remove" />
+                        <input type="hidden" name="key" value={k.key} />
+                        <SubmitButton size="sm" variant="ghost">{t("Remove")}</SubmitButton>
+                      </ActionForm>
+                    </Td>
+                  </tr>
+                ))}
+              </Table>
+            )}
+            <div className="p-6 pt-4">
+              <ActionForm action={sftpKeyAction}>
+                <input type="hidden" name="id" value={w.id} />
+                <div className="grid gap-4 md:grid-cols-[14rem_1fr]">
+                  <Field label={t("Name")}><Input name="name" placeholder="MacBook" maxLength={60} /></Field>
+                  <Field label={t("Public key")}><Input name="publicKey" required placeholder="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA…" className="font-mono" spellCheck={false} /></Field>
+                </div>
+                <SubmitButton variant="secondary">{t("Add key")}</SubmitButton>
+              </ActionForm>
+            </div>
           </Card>
           <Card className="flex flex-wrap items-center justify-between gap-4 p-6">
             <div>

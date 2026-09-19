@@ -44,7 +44,7 @@ export type WorkloadSpec = {
   /** Edge page cache in front of a WordPress site. */
   cache?: { enabled: boolean; ttlMinutes: number; bypass: string[] };
   /** SFTP access to the site's files (WordPress). Absent or disabled = no SFTP container. */
-  sftp?: { enabled: boolean; port: number; username: string; password: string };
+  sftp?: { enabled: boolean; port: number; username: string; password: string; keys?: string[] };
 };
 
 export type JobPayloads = {

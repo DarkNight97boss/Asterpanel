@@ -435,3 +435,36 @@ test("bot protection, CDN and APM: validated, carried by the spec, reported by t
   assert.equal(report.slowest[0].path, "/checkout/");
   await assert.rejects(engine.runApmJob(database.id, 60), /web services/);
 });
+
+test("SFTP keys: only real OpenSSH public keys, no duplicates, delivered to the node", async () => {
+  const db = await dbm.getDb();
+  const [site] = (await db.select().from(dbm.schema.workloads)).filter((w) => w.name === "Sftp B");
+  const good = `ssh-ed25519 ${"A".repeat(68)} me@laptop`;
+  await assert.rejects(engine.addSftpKey(site.id, "x", "-----BEGIN OPENSSH PRIVATE KEY-----"), /public key/);
+  await assert.rejects(engine.addSftpKey(site.id, "x", "ssh-ed25519 short"), /public key/);
+  await engine.addSftpKey(site.id, "Laptop", good);
+  await assert.rejects(engine.addSftpKey(site.id, "Again", good.replace("me@laptop", "other comment")), /already authorised/);
+  assert.deepEqual((await engine.buildSpec(site.id)).sftp?.keys, [`ssh-ed25519 ${"A".repeat(68)}`], "the free-text comment is dropped");
+  await engine.removeSftpKey(site.id, `ssh-ed25519 ${"A".repeat(68)}`);
+  assert.deepEqual((await engine.buildSpec(site.id)).sftp?.keys, []);
+  await drain();
+});
+
+test("alerts: only actionable items, filtered by role, gone once handled", async () => {
+  const { accountAlerts } = await import("../src/lib/alerts");
+  const db = await dbm.getDb();
+  const [broken] = await db.insert(dbm.schema.workloads).values({ clientId, nodeId, type: "app", name: "Broken app", slug: "broken-app-000000", status: "error" }).returning();
+  const [invoice] = await db.insert(dbm.schema.invoices).values({ clientId, currency: "EUR", total: 1000, subtotal: 1000, dueDate: new Date(Date.now() - 86_400_000) }).returning();
+
+  const kinds = (list: { kind: string }[]) => [...new Set(list.map((a) => a.kind))].sort();
+  const owner = await accountAlerts(clientId, "owner");
+  assert.ok(owner.some((a) => a.text === "{name} needs attention" && a.vars?.name === "Broken app"));
+  assert.ok(owner.some((a) => a.text === "Invoice #{n} is overdue"));
+  assert.ok(!kinds(await accountAlerts(clientId, "developer")).includes("invoice"), "developers do not see billing");
+  assert.deepEqual(kinds(await accountAlerts(clientId, "billing")), ["invoice"], "billing sees only billing");
+
+  await db.update(dbm.schema.invoices).set({ status: "paid" }).where(eq(dbm.schema.invoices.id, invoice.id));
+  await db.update(dbm.schema.workloads).set({ status: "deleted" }).where(eq(dbm.schema.workloads.id, broken.id));
+  const after = await accountAlerts(clientId, "owner");
+  assert.ok(!after.some((a) => a.kind === "invoice" || a.vars?.name === "Broken app"));
+});

@@ -393,6 +393,8 @@ export type WorkloadConfig = {
   // file access (WordPress)
   sftpEnabled?: boolean;
   sftpPort?: number;
+  /** OpenSSH public keys allowed to log in, besides the password. */
+  sftpKeys?: { name: string; key: string }[];
   // plan limits
   memoryMb?: number;
   cpus?: number;

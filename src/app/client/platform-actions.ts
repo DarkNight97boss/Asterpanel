@@ -354,3 +354,14 @@ export async function analysePerformance(form: FormData) {
   const jobId = await engine.runApmJob(workload.id, Number(form.get("minutes")));
   redirect(`/client/workloads/${workload.id}/apm?job=${jobId}`);
 }
+
+export async function sftpKeyAction(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    if (form.get("action") === "remove") await engine.removeSftpKey(workload.id, String(form.get("key") ?? ""), user.id);
+    else await engine.addSftpKey(workload.id, String(form.get("name") ?? ""), String(form.get("publicKey") ?? ""), user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+}
