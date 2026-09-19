@@ -21,7 +21,7 @@ export default async function ClientLayout({ children }: { children: React.React
       alerts={alerts.length}
       nav={[
         { items: [{ href: "/client", label: t("Dashboard"), icon: "◧", exact: true }] },
-        ...(can("hosting") ? [{ title: t("Hosting"), items: [...Object.values(WORKLOAD_LABEL).map((l) => ({ href: l.path, label: t(l.many), icon: l.icon })), ...(account.only ? [] : [{ href: "/client/dns", label: t("DNS management"), icon: "⇄" }])] }] : []),
+        ...(can("hosting") ? [{ title: t("Hosting"), items: [...Object.values(WORKLOAD_LABEL).map((l) => ({ href: l.path, label: t(l.many), icon: l.icon })), ...(account.only ? [] : [{ href: "/client/domains", label: t("Domains"), icon: "◍" }, { href: "/client/dns", label: t("DNS management"), icon: "⇄" }])] }] : []),
         {
           title: t("Company"),
           items: [

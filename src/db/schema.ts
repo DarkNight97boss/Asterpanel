@@ -666,6 +666,48 @@ export const counters = pgTable("counters", {
   value: integer("value").notNull().default(0),
 });
 
+// ─── Domain names ────────────────────────────────────────────────────────────
+
+/** A TLD on sale: which registrar serves it and what a year costs (cents). */
+export const domainTlds = pgTable("domain_tlds", {
+  id: id(),
+  /** Without the leading dot: `com`, `it`, `co.uk`. */
+  tld: text("tld").notNull().unique(),
+  registrar: text("registrar").notNull(),
+  registerPrice: integer("register_price").notNull(),
+  renewPrice: integer("renew_price").notNull(),
+  transferPrice: integer("transfer_price").notNull(),
+  enabled: boolean("enabled").notNull().default(true),
+  sort: integer("sort").notNull().default(0),
+});
+
+export type DomainStatus = "pending" | "active" | "transferring" | "expired" | "failed" | "cancelled";
+
+/** A domain name registered or transferred through a registrar module. Billed through its service. */
+export const domainNames = pgTable(
+  "domain_names",
+  {
+    id: id(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "restrict" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
+    name: text("name").notNull().unique(),
+    registrar: text("registrar").notNull(),
+    status: text("status").$type<DomainStatus>().notNull().default("pending"),
+    statusMessage: text("status_message").notNull().default(""),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    nameservers: jsonb("nameservers").$type<string[]>().notNull().default([]),
+    locked: boolean("locked").notNull().default(true),
+    /** Registrant snapshot used for the registration. */
+    contact: jsonb("contact").$type<Record<string, string>>().notNull().default({}),
+    syncedAt: timestamp("synced_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("domain_names_company_idx").on(t.companyId)],
+);
+
 // ─── Support ─────────────────────────────────────────────────────────────────
 
 export type TicketStatus = "open" | "answered" | "customer_reply" | "closed";

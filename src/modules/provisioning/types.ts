@@ -55,6 +55,8 @@ export interface ProvisioningModule {
   productFields: ModuleField[];
   testConnection?(server: ServerConnection): Promise<{ ok: boolean; message: string }>;
   create(ctx: ProvisionContext): Promise<ProvisionResult>;
+  /** Called when a renewal invoice is paid, for services that must be renewed somewhere else (domains). */
+  renew?(ctx: ProvisionContext): Promise<void>;
   suspend(ctx: ProvisionContext, reason: string): Promise<void>;
   unsuspend(ctx: ProvisionContext): Promise<void>;
   terminate(ctx: ProvisionContext): Promise<void>;

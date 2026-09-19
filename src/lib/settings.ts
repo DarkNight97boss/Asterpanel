@@ -82,6 +82,12 @@ export const settingsSchemas = {
     hostmaster: z.string().default(""),
   }),
   /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
+  registrars: z.object({
+    /** Credentials per registrar module id. */
+    accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),
+    /** Name servers given to new registrations. */
+    nameservers: z.array(z.string()).default([]),
+  }),
   backups: z.object({
     /** Scheduled daily backups kept per service. */
     keepScheduled: z.number().int().min(1).max(90).default(14),
@@ -100,7 +106,7 @@ export const settingsSchemas = {
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

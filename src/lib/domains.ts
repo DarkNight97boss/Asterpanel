@@ -1,0 +1,294 @@
+import "server-only";
+import { and, asc, eq, inArray, lt, or, isNull } from "drizzle-orm";
+import { z } from "zod";
+import { getDb, schema } from "@/db";
+import { getRegistrar, RegistrarError, type DomainContact, type Http, type RegistrarCredentials, type RegistrarModule } from "@/modules/registrars";
+import { audit } from "./audit";
+import { decryptJson, encryptJson } from "./crypto";
+import { getSettings } from "./settings";
+
+/**
+ * Domain names: search, order, registration and management through the
+ * registrar modules. A domain is billed like any other service (yearly), so
+ * invoices, reminders and renewals come from the billing engine; this file is
+ * what the `domain` provisioning module calls when those invoices are paid.
+ */
+
+export class DomainError extends Error {}
+
+let http: Http = (...args) => fetch(...args);
+export const setRegistrarHttpForTests = (fake: Http) => void (http = fake);
+
+// ─── Names, phones, contacts ─────────────────────────────────────────────────
+
+const LABEL = /^(?!-)[a-z0-9-]{1,63}(?<!-)$/;
+
+/** Splits a name against the TLDs on sale (longest suffix wins: `co.uk` before `uk`). */
+export function splitDomain(input: string, tlds: string[]): { name: string; sld: string; tld: string } | null {
+  const name = input.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/[/?#].*$/, "").replace(/\.$/, "");
+  const tld = [...tlds].sort((a, b) => b.length - a.length).find((t) => name.endsWith(`.${t}`));
+  if (!tld) return null;
+  const sld = name.slice(0, -tld.length - 1);
+  // One label only: sub.example.com is not something a registry sells.
+  return LABEL.test(sld) && sld.length >= 2 ? { name, sld, tld } : null;
+}
+
+/** Country calling codes, to split `+390612345678` into `+39.0612345678` as registries want it. */
+const CALLING = new Set(
+  "1 7 20 27 30 31 32 33 34 36 39 40 41 43 44 45 46 47 48 49 51 52 53 54 55 56 57 58 60 61 62 63 64 65 66 81 82 84 86 90 91 92 93 94 95 98 211 212 213 216 218 220 221 222 223 224 225 226 227 228 229 230 231 232 233 234 235 236 237 238 239 240 241 242 243 244 245 246 248 249 250 251 252 253 254 255 256 257 258 260 261 262 263 264 265 266 267 268 269 290 291 297 298 299 350 351 352 353 354 355 356 357 358 359 370 371 372 373 374 375 376 377 378 380 381 382 383 385 386 387 389 420 421 423 500 501 502 503 504 505 506 507 508 509 590 591 592 593 594 595 596 597 598 599 670 672 673 674 675 676 677 678 679 680 681 682 683 685 686 687 688 689 690 691 692 850 852 853 855 856 880 886 960 961 962 963 964 965 966 967 968 970 971 972 973 974 975 976 977 992 993 994 995 996 998".split(" "),
+);
+
+export function normalizePhone(raw: string): string {
+  const compact = raw.trim().replace(/^00/, "+").replace(/[\s().-]/g, "");
+  const m = /^\+(\d{7,15})$/.exec(compact);
+  if (!m) throw new DomainError("Enter the phone number in international format, for example +39 06 1234567");
+  const cc = [1, 2, 3].map((n) => m[1].slice(0, n)).find((c) => CALLING.has(c));
+  if (!cc) throw new DomainError("The phone number starts with an unknown country code");
+  return `+${cc}.${m[1].slice(cc.length)}`;
+}
+
+const line = (max: number) => z.string().trim().min(1).max(max).regex(/^[^\r\n<>]*$/);
+const contactSchema = z.object({
+  firstName: line(60),
+  lastName: line(60),
+  organization: z.string().trim().max(100).regex(/^[^\r\n<>]*$/),
+  email: z.string().trim().toLowerCase().email().max(200),
+  phone: z.string(),
+  address: line(200),
+  city: line(80),
+  zip: line(20),
+  state: z.string().trim().max(80).regex(/^[^\r\n<>]*$/),
+  country: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+  taxCode: z.string().trim().toUpperCase().max(40).regex(/^[A-Z0-9]*$/),
+});
+
+export function cleanContact(input: Record<string, unknown>, domain = ""): DomainContact {
+  const parsed = contactSchema.safeParse(input);
+  if (!parsed.success) throw new DomainError(`Check the registrant details: ${parsed.error.issues[0].path.join(".")}`);
+  if (domain.endsWith(".it") && !parsed.data.taxCode) throw new DomainError("The .it registry requires the tax code (codice fiscale or VAT number) of the registrant");
+  return { ...parsed.data, phone: normalizePhone(parsed.data.phone) };
+}
+
+export function cleanNameservers(input: string[]): string[] {
+  const list = [...new Set(input.map((n) => n.trim().toLowerCase().replace(/\.$/, "")).filter(Boolean))];
+  if (list.length < 2 || list.length > 6) throw new DomainError("Enter between 2 and 6 name servers");
+  for (const ns of list) if (!/^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(ns)) throw new DomainError(`“${ns}” is not a valid name server`);
+  return list;
+}
+
+// ─── Registrars ──────────────────────────────────────────────────────────────
+
+async function account(registrarId: string): Promise<{ mod: RegistrarModule; creds: RegistrarCredentials }> {
+  const mod = getRegistrar(registrarId);
+  const creds = (await getSettings("registrars")).accounts[registrarId];
+  if (!mod || !creds || !Object.values(creds).some(Boolean)) throw new DomainError("This registrar is not configured");
+  return { mod, creds };
+}
+
+export async function testRegistrar(registrarId: string): Promise<string> {
+  const { mod, creds } = await account(registrarId);
+  return mod.test(creds, http);
+}
+
+const readable = (err: unknown) => (err instanceof RegistrarError || err instanceof DomainError ? err.message : "The registrar could not be reached");
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+
+export type SearchHit = { domain: string; tld: string; available: boolean | null; registerPrice: number; renewPrice: number; transferPrice: number };
+
+/** `example` checks every TLD on sale; `example.it` puts that one first. */
+export async function searchDomains(query: string): Promise<SearchHit[]> {
+  const db = await getDb();
+  const tlds = await db.select().from(schema.domainTlds).where(eq(schema.domainTlds.enabled, true)).orderBy(asc(schema.domainTlds.sort), asc(schema.domainTlds.tld));
+  if (!tlds.length) return [];
+  const exact = splitDomain(query, tlds.map((t) => t.tld));
+  const sld = exact?.sld ?? query.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").split(".")[0];
+  if (!LABEL.test(sld) || sld.length < 2) throw new DomainError("Use letters, numbers and dashes only, at least two characters");
+
+  const ordered = [...tlds].sort((a, b) => Number(b.tld === exact?.tld) - Number(a.tld === exact?.tld)).slice(0, 12);
+  const taken = new Set((await db.select({ name: schema.domainNames.name }).from(schema.domainNames).where(and(inArray(schema.domainNames.name, ordered.map((t) => `${sld}.${t.tld}`)), inArray(schema.domainNames.status, ["pending", "active", "transferring"])))).map((d) => d.name));
+  const hits = new Map<string, boolean | null>();
+  await Promise.all(
+    [...Map.groupBy(ordered, (t) => t.registrar)].map(async ([registrarId, group]) => {
+      const names = group.map((t) => `${sld}.${t.tld}`);
+      try {
+        const { mod, creds } = await account(registrarId);
+        for (const r of await mod.check(creds, names, http)) hits.set(r.domain, r.available);
+      } catch {
+        for (const n of names) hits.set(n, null); // unknown: shown as "could not check"
+      }
+    }),
+  );
+  return ordered.map((t) => ({ domain: `${sld}.${t.tld}`, tld: t.tld, available: taken.has(`${sld}.${t.tld}`) ? false : (hits.get(`${sld}.${t.tld}`) ?? null), registerPrice: t.registerPrice, renewPrice: t.renewPrice, transferPrice: t.transferPrice }));
+}
+
+// ─── Ordering ────────────────────────────────────────────────────────────────
+
+/** The hidden catalogue entry every domain service hangs off. */
+async function domainProduct(): Promise<string> {
+  const db = await getDb();
+  const [existing] = await db.select({ id: schema.products.id }).from(schema.products).where(eq(schema.products.slug, "domain-name"));
+  if (existing) return existing.id;
+  const [group] = await db.insert(schema.productGroups).values({ slug: "domains", name: "Domain names", hidden: true }).onConflictDoNothing().returning({ id: schema.productGroups.id });
+  const groupId = group?.id ?? (await db.select({ id: schema.productGroups.id }).from(schema.productGroups).where(eq(schema.productGroups.slug, "domains")))[0].id;
+  const [product] = await db.insert(schema.products).values({ groupId, slug: "domain-name", name: "Domain name", module: "domain", hidden: true, requiresDomain: true, pricing: { annually: 0 } }).returning({ id: schema.products.id });
+  return product.id;
+}
+
+export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string }): Promise<{ invoiceId: string; domainId: string }> {
+  const db = await getDb();
+  const tlds = await db.select().from(schema.domainTlds).where(eq(schema.domainTlds.enabled, true));
+  const parts = splitDomain(input.domain, tlds.map((t) => t.tld));
+  if (!parts) throw new DomainError("This extension is not on sale");
+  const tld = tlds.find((t) => t.tld === parts.tld)!;
+  const contact = cleanContact(input.contact, parts.name);
+  const authCode = String(input.authCode ?? "").trim();
+  if (input.action === "transfer" && (!authCode || authCode.length > 100)) throw new DomainError("Enter the transfer (EPP / auth) code given by the current registrar");
+
+  const [existing] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.name, parts.name));
+  if (existing && !["failed", "cancelled", "expired"].includes(existing.status)) throw new DomainError("This domain is already in an account");
+  const { mod, creds } = await account(tld.registrar);
+  if (input.action === "register") {
+    const [hit] = await mod.check(creds, [parts.name], http).catch((err) => {
+      throw new DomainError(readable(err));
+    });
+    if (!hit?.available) throw new DomainError("This domain is no longer available");
+  }
+
+  const settings = await getSettings("registrars");
+  const { placeOrder } = await import("./billing");
+  const first = input.action === "register" ? tld.registerPrice : tld.transferPrice;
+  const { invoiceId, serviceId } = await placeOrder({
+    clientId: input.clientId,
+    companyId: input.companyId,
+    productId: await domainProduct(),
+    cycle: "annually",
+    domain: parts.name,
+    ip: input.ip,
+    pricing: { first, recurring: tld.renewPrice, label: input.action === "register" ? "Domain registration" : "Domain transfer" },
+    // The transfer code is a secret of the customer's: encrypted until used.
+    request: { action: input.action, authCode: authCode ? encryptJson(authCode) : "" },
+  });
+  const row = { companyId: input.companyId, clientId: input.clientId, serviceId, registrar: tld.registrar, status: "pending" as const, statusMessage: "", contact: contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
+  const [domain] = existing
+    ? await db.update(schema.domainNames).set(row).where(eq(schema.domainNames.id, existing.id)).returning({ id: schema.domainNames.id })
+    : await db.insert(schema.domainNames).values({ ...row, name: parts.name }).returning({ id: schema.domainNames.id });
+  return { invoiceId, domainId: domain.id };
+}
+
+// ─── Called by the provisioning module when invoices are paid ────────────────
+
+async function byService(serviceId: string) {
+  const db = await getDb();
+  const [d] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.serviceId, serviceId));
+  if (!d) throw new DomainError("No domain is linked to this service");
+  return d;
+}
+
+const DEFAULT_NS_HINT = "Set the default name servers in the registrar settings first";
+
+export async function provisionDomain(serviceId: string, request: { action?: string; authCode?: string }): Promise<void> {
+  const db = await getDb();
+  const d = await byService(serviceId);
+  // A retry after a half-finished attempt must not register (and pay for) the name twice.
+  if (d.status === "active" || d.status === "transferring") return;
+  try {
+    const { mod, creds } = await account(d.registrar);
+    const nameservers = d.nameservers.length ? d.nameservers : (await getSettings("registrars")).nameservers;
+    if (nameservers.length < 2) throw new DomainError(DEFAULT_NS_HINT);
+    const contact = d.contact as unknown as DomainContact;
+    if (request.action === "transfer") {
+      await mod.transfer(creds, { domain: d.name, authCode: decryptJson<string>(request.authCode ?? "", ""), contact, nameservers }, http);
+      await db.update(schema.domainNames).set({ status: "transferring", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
+    } else {
+      await mod.register(creds, { domain: d.name, years: 1, contact, nameservers }, http);
+      await db.update(schema.domainNames).set({ status: "active", statusMessage: "", nameservers }).where(eq(schema.domainNames.id, d.id));
+    }
+    await syncDomain(d.id).catch(() => {});
+  } catch (err) {
+    await db.update(schema.domainNames).set({ status: "failed", statusMessage: readable(err).slice(0, 300) }).where(eq(schema.domainNames.id, d.id));
+    throw err;
+  }
+}
+
+export async function renewDomain(serviceId: string): Promise<void> {
+  const db = await getDb();
+  const d = await byService(serviceId);
+  try {
+    const { mod, creds } = await account(d.registrar);
+    await mod.renew(creds, { domain: d.name, years: 1, currentExpiry: d.expiresAt }, http);
+    await db.update(schema.domainNames).set({ status: "active", statusMessage: "" }).where(eq(schema.domainNames.id, d.id));
+    await syncDomain(d.id).catch(() => {});
+  } catch (err) {
+    // Paid but not renewed: staff must see this.
+    await db.update(schema.domainNames).set({ statusMessage: `Renewal failed: ${readable(err)}`.slice(0, 300) }).where(eq(schema.domainNames.id, d.id));
+    throw err;
+  }
+}
+
+// ─── Management ──────────────────────────────────────────────────────────────
+
+async function manageable(domainId: string) {
+  const db = await getDb();
+  const [d] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.id, domainId));
+  if (!d) throw new DomainError("Domain not found");
+  if (d.status !== "active") throw new DomainError("This domain is not active yet");
+  return { d, ...(await account(d.registrar)) };
+}
+
+const wrap = async <T>(work: () => Promise<T>): Promise<T> => {
+  try {
+    return await work();
+  } catch (err) {
+    throw err instanceof DomainError ? err : new DomainError(readable(err));
+  }
+};
+
+export async function syncDomain(domainId: string): Promise<void> {
+  const db = await getDb();
+  const [d] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.id, domainId));
+  if (!d || !["active", "transferring", "expired"].includes(d.status)) return;
+  const { mod, creds } = await account(d.registrar);
+  const info = await mod.info(creds, d.name, http);
+  // A transfer that has completed shows up as a normal, active registration.
+  const status = info.status === "unknown" || info.status === "pending" ? d.status : info.status;
+  await db.update(schema.domainNames).set({ status, expiresAt: info.expiresAt ?? d.expiresAt, nameservers: info.nameservers.length ? info.nameservers : d.nameservers, locked: info.locked, syncedAt: new Date() }).where(eq(schema.domainNames.id, d.id));
+}
+
+/** Cron: refreshes the domains not looked at for a day, a few per run. */
+export async function syncDueDomains(now = new Date(), limit = 25): Promise<number> {
+  const db = await getDb();
+  const due = await db
+    .select({ id: schema.domainNames.id })
+    .from(schema.domainNames)
+    .where(and(inArray(schema.domainNames.status, ["active", "transferring"]), or(isNull(schema.domainNames.syncedAt), lt(schema.domainNames.syncedAt, new Date(now.getTime() - 86_400_000)))))
+    .orderBy(asc(schema.domainNames.syncedAt))
+    .limit(limit);
+  let done = 0;
+  for (const { id } of due) await syncDomain(id).then(() => done++, () => {});
+  return done;
+}
+
+export async function setDomainNameservers(domainId: string, input: string[], actorId: string | null = null) {
+  const nameservers = cleanNameservers(input);
+  const { d, mod, creds } = await manageable(domainId);
+  await wrap(() => mod.setNameservers(creds, d.name, nameservers, http));
+  await (await getDb()).update(schema.domainNames).set({ nameservers }).where(eq(schema.domainNames.id, d.id));
+  await audit(actorId, "domain.nameservers", "domain", d.id, { nameservers });
+}
+
+export async function setDomainLock(domainId: string, locked: boolean, actorId: string | null = null) {
+  const { d, mod, creds } = await manageable(domainId);
+  await wrap(() => mod.setLock(creds, d.name, locked, http));
+  await (await getDb()).update(schema.domainNames).set({ locked }).where(eq(schema.domainNames.id, d.id));
+  await audit(actorId, locked ? "domain.locked" : "domain.unlocked", "domain", d.id);
+}
+
+/** The code that lets the owner move the domain elsewhere. Audited, never stored. */
+export async function domainAuthCode(domainId: string, actorId: string | null = null): Promise<string> {
+  const { d, mod, creds } = await manageable(domainId);
+  if (d.locked) throw new DomainError("Unlock the domain first");
+  const code = await wrap(() => mod.authCode(creds, d.name, http));
+  await audit(actorId, "domain.authcode_revealed", "domain", d.id);
+  return code;
+}
