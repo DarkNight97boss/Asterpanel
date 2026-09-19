@@ -8,6 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type WorkloadConfig } from "@/db/schema";
 import { requireAccount } from "@/lib/account";
+import { rateLimit } from "@/lib/rate-limit";
 import { isStaff, requireArea } from "@/lib/auth";
 import { BillingError, placeOrder, terminateService } from "@/lib/billing";
 import { seedPlatformPlans } from "@/lib/install";
@@ -177,6 +178,20 @@ export async function deploy(_: ActionState, form: FormData): Promise<ActionStat
     return fail(err);
   }
   refresh(workload.id);
+}
+
+export async function migrate(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
+  if (!canManage) return { error: "Only owners and administrators can migrate a site" };
+  if (!rateLimit(`migrate:${workload.id}`, 6, 60 * 60_000)) return { error: "Too many attempts. Try again in a few minutes." };
+  const f = (k: string) => String(form.get(k) ?? "");
+  try {
+    await engine.startMigration(workload.id, { type: f("type"), url: f("url"), host: f("host"), port: f("port"), user: f("user"), password: f("password"), path: f("path") }, user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Migration started. A safety backup is taken first." };
 }
 
 export async function runTool(_: ActionState, form: FormData): Promise<ActionState> {

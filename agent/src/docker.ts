@@ -1,9 +1,9 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { mkdir, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
-import type { ApmReport, JobPayloads, JobResult, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
+import type { ApmReport, JobPayloads, JobResult, MigrationSource, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
 import type { Driver, Log } from "./driver";
 
 /**
@@ -570,6 +570,97 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         return { output: await this.wp(spec, ["search-replace", "--all-tables", "--skip-columns=guid", "--", args.search, args.replace], log) };
       default:
         throw new Error(`Unknown tool ${String(tool)}`);
+    }
+  }
+
+  // ─── Driver: WordPress migration ─────────────────────────────────────────
+
+  /**
+   * Runs inside a throw-away container that sees only the work folder. Inputs
+   * arrive as environment variables. The source host is resolved once, refused
+   * when it points at a private address, and then pinned for the transfer, so
+   * a DNS answer cannot change between the check and the connection.
+   */
+  private static MIGRATE_FETCH = `set -eu
+apk add --no-cache -q curl unzip rsync openssh-client sshpass >/dev/null
+IP=$(getent ahostsv4 "$SRC_HOST" | awk 'NR==1{print $1}')
+[ -n "$IP" ] || { echo "Cannot resolve $SRC_HOST" >&2; exit 1; }
+case "$IP" in 10.*|127.*|0.*|169.254.*|192.168.*|172.1[6-9].*|172.2[0-9].*|172.3[01].*|100.6[4-9].*|100.[7-9][0-9].*|100.1[01][0-9].*|100.12[0-7].*) echo "$SRC_HOST points at a private address" >&2; exit 1;; esac
+mkdir -p /work/site
+if [ "$SRC_TYPE" = archive ]; then
+  curl -fsSL --proto '=https' --proto-redir '=https' --max-redirs 3 --max-filesize 21474836480 --resolve "$SRC_HOST:443:$IP" -o /work/archive "$SRC_URL"
+  if unzip -tq /work/archive >/dev/null 2>&1; then unzip -q -o /work/archive -d /work/site; else tar -xf /work/archive -C /work/site; fi
+  rm -f /work/archive
+else
+  SSH="ssh -p $SRC_PORT -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/work/known_hosts -o HostKeyAlias=$SRC_HOST -o ConnectTimeout=20 -o PreferredAuthentications=password,keyboard-interactive -o PubkeyAuthentication=no"
+  sshpass -e rsync -az --safe-links --exclude '.git' -e "$SSH" "$SRC_USER@$IP:$SRC_PATH/" /work/site/
+fi
+LOAD=$(find /work/site -maxdepth 4 -name wp-load.php | head -n 1)
+[ -n "$LOAD" ] || { echo "No WordPress installation was found (wp-load.php is missing)" >&2; exit 1; }
+ROOT=$(dirname "$LOAD")
+CFG="$ROOT/wp-config.php"
+[ -f "$CFG" ] || CFG="$(dirname "$ROOT")/wp-config.php"
+conf() { sed -n "s/^[[:space:]]*define([[:space:]]*['\\"]$1['\\"][[:space:]]*,[[:space:]]*['\\"]\\(.*\\)['\\"][[:space:]]*).*/\\1/p" "$CFG" | head -n 1 | sed 's/\\\\\\(.\\)/\\1/g'; }
+PREFIX=wp_
+[ -f "$CFG" ] && PREFIX=$(sed -n "s/^[[:space:]]*\\$table_prefix[[:space:]]*=[[:space:]]*['\\"]\\([A-Za-z0-9_]*\\)['\\"].*/\\1/p" "$CFG" | head -n 1)
+if [ "$SRC_TYPE" = ssh ]; then
+  [ -f "$CFG" ] || { echo "wp-config.php was not found on the old server" >&2; exit 1; }
+  q() { printf "'%s'" "$(printf %s "$1" | sed "s/'/'\\\\\\\\''/g")"; }
+  DBH=$(conf DB_HOST); DBHOST=\${DBH%%:*}; DBPORT=\${DBH#*:}; [ "$DBPORT" = "$DBH" ] && DBPORT=3306
+  case "$DBPORT" in *[!0-9]*) DBPORT=3306;; esac
+  sshpass -e $SSH "$SRC_USER@$IP" "MYSQL_PWD=$(q "$(conf DB_PASSWORD)") mysqldump --no-tablespaces --single-transaction --default-character-set=utf8mb4 -h $(q "$DBHOST") -P $DBPORT -u $(q "$(conf DB_USER)") $(q "$(conf DB_NAME)")" > /work/database.sql
+else
+  DUMP=$(find /work/site -maxdepth 5 \\( -name '*.sql' -o -name '*.sql.gz' \\) -size +1k ! -path '*/wp-content/plugins/*' ! -path '*/wp-content/themes/*' | head -n 1)
+  [ -n "$DUMP" ] || { echo "The archive contains no SQL dump (.sql or .sql.gz)" >&2; exit 1; }
+  case "$DUMP" in *.gz) gunzip -c "$DUMP" > /work/database.sql;; *) mv "$DUMP" /work/database.sql;; esac
+  rm -f "$DUMP"
+fi
+[ -s /work/database.sql ] || { echo "The database dump is empty" >&2; exit 1; }
+printf %s "\${PREFIX:-wp_}" > /work/prefix
+mv "$ROOT" /work/root
+`;
+
+  async migrate(spec: WorkloadSpec, source: MigrationSource, newUrl: string, log: Log): Promise<JobResult> {
+    const { name } = this.check(spec);
+    if (spec.kind !== "wordpress") throw new Error("Migrations are only available for WordPress");
+    const work = path.join(this.opts.dataDir, "migrations", spec.slug);
+    await rm(work, { recursive: true, force: true });
+    await mkdir(work, { recursive: true });
+    try {
+      const env: Record<string, string> =
+        source.type === "archive"
+          ? { SRC_TYPE: "archive", SRC_URL: source.url, SRC_HOST: new URL(source.url).hostname }
+          : { SRC_TYPE: "ssh", SRC_HOST: source.host, SRC_PORT: String(source.port), SRC_USER: source.user, SRC_PATH: source.path, SSHPASS: source.password };
+      log(source.type === "archive" ? `downloading the archive from ${env.SRC_HOST}` : `copying files and database from ${source.user}@${source.host}`);
+      await this.docker(["run", "--rm", "-v", `${work}:/work`, ...this.envArgs(env), "alpine:3", "sh", "-c", DockerDriver.MIGRATE_FETCH], log, { env, timeoutMs: 6 * 60 * 60_000 });
+
+      const prefix = (await readFile(path.join(work, "prefix"), "utf8")).trim();
+      if (!/^[A-Za-z0-9_]{1,40}$/.test(prefix)) throw new Error("The old site uses an unsupported table prefix");
+
+      log("replacing the site's files");
+      // Our wp-config.php stays: it reads the database credentials of this container from the environment.
+      await this.docker(["run", "--rm", "-v", `${work}:/work:ro`, "-v", `${name}-files:/dest`, "alpine:3", "sh", "-c", "apk add --no-cache -q rsync >/dev/null && rsync -a --delete --safe-links --exclude /wp-config.php /work/root/ /dest/ && chown -R 33:33 /dest"], log, { timeoutMs: 2 * 60 * 60_000 });
+
+      log(`importing the database (${prefix} tables)`);
+      await this.wp(spec, ["db", "reset", "--yes"], log);
+      const db = this.dbCommand(spec, "restore")!;
+      await this.exec("sh", ["-c", 'docker exec -i $ENVS "$C" "$@" < "$IN"', "sh", ...db.argv], log, { env: { ...db.env, C: db.container, IN: path.join(work, "database.sql"), ENVS: Object.keys(db.env).map((k) => `-e ${k}`).join(" ") }, timeoutMs: 2 * 60 * 60_000 });
+      await this.wp(spec, ["config", "set", "table_prefix", prefix, "--type=variable"], log);
+
+      const oldUrl = (await this.wp(spec, ["option", "get", "siteurl"])).trim().replace(/\/+$/, "");
+      if (oldUrl && oldUrl !== newUrl) {
+        log(`replacing ${oldUrl} with ${newUrl}`);
+        const bare = oldUrl.replace(/^https?:\/\//, "");
+        for (const from of new Set([`https://${bare}`, `http://${bare}`])) await this.wp(spec, ["search-replace", "--all-tables", "--skip-columns=guid", "--", from, newUrl], log);
+      }
+      await this.wp(spec, ["cache", "flush"]).catch(() => {});
+      await this.wp(spec, ["rewrite", "flush"]).catch(() => {});
+      await this.tool(spec, "cache.purge", {}, log).catch(() => {});
+      const wpVersion = (await this.wp(spec, ["core", "version"]).catch(() => "")).trim();
+      return { runtime: wpVersion ? { version: wpVersion } : undefined, output: JSON.stringify({ oldUrl, tablePrefix: prefix, wpVersion }) };
+    } finally {
+      // The work folder holds a full copy of the customer's site and database.
+      await rm(work, { recursive: true, force: true });
     }
   }
 

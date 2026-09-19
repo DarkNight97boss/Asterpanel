@@ -561,3 +561,36 @@ test("off-site backups: uploaded, restorable without the local copy, failures re
 
   await updateSettings("backups", { ...base, offsiteEnabled: false, bucket: "good-bucket" });
 });
+
+test("migration: inputs are confined, a safety backup runs first, and the password never stays in the queue", async () => {
+  const db = await dbm.getDb();
+  const { decryptJson } = await import("../src/lib/crypto");
+  const clean = engine.cleanMigrationSource;
+  const ssh = { type: "ssh", host: "old.example.com", port: "2222", user: "site_user", password: "hunter2-secret", path: "public_html/" };
+  assert.deepEqual(clean(ssh), { source: { type: "ssh", host: "old.example.com", port: 2222, user: "site_user", password: "hunter2-secret", path: "public_html" }, label: "site_user@old.example.com" });
+  for (const bad of [{ host: "localhost" }, { host: "10.0.0.5" }, { host: "192.168.1.1" }, { host: "172.20.0.1" }, { host: "node.internal" }, { host: "a.com; rm -rf /" }, { user: "root;id" }, { user: "-oProxyCommand=x" }, { path: "../../etc" }, { path: "a b" }, { path: "$(id)" }, { port: "0" }, { password: "" }, { password: "a\nb" }])
+    assert.throws(() => clean({ ...ssh, ...bad }), engine.PlatformError, JSON.stringify(bad));
+  assert.equal(clean({ type: "archive", url: "https://backups.example.com/site.zip?sig=1" }).label, "backups.example.com");
+  for (const url of ["http://example.com/a.zip", "https://user:pw@example.com/a.zip", "https://127.0.0.1/a.zip", "https://169.254.169.254/latest", "https://[::1]/a.zip", "https://intranet/a.zip", "file:///etc/passwd", "nope"])
+    assert.throws(() => clean({ type: "archive", url }), engine.PlatformError, url);
+
+  const id = await engine.createWorkload({ clientId, type: "wordpress", name: "Moved" });
+  await drain();
+  const jobId = await engine.startMigration(id, ssh);
+  await assert.rejects(engine.startMigration(id, ssh), /already in progress/);
+  await drain();
+  const w = await workload(id);
+  assert.ok(w.backups.some((b) => b.note === "Before migration" && b.status === "ready"));
+  assert.equal(w.runtime.version, "6.7", "the site now runs the migrated WordPress version");
+  const [run] = await engine.listMigrations(id);
+  assert.deepEqual([run.id, run.status, run.label, run.summary.oldUrl, run.summary.tablePrefix], [jobId, "succeeded", "site_user@old.example.com", "https://old-site.example", "wpx_"]);
+  const [job] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, jobId));
+  assert.deepEqual(decryptJson(job.payload, {}), { label: "site_user@old.example.com" }, "source and password are gone once the job is final");
+  assert.ok(!job.log.includes("hunter2"));
+
+  await engine.startMigration(id, { ...ssh, host: "fail.example.com" });
+  await drain();
+  const [failed] = await engine.listMigrations(id);
+  assert.deepEqual([failed.status, failed.error], ["failed", "Permission denied (password)"]);
+  assert.equal((await workload(id)).status, "running", "a failed migration leaves the site up");
+});

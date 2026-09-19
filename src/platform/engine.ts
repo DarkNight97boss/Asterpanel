@@ -15,6 +15,7 @@ import {
   type JobReport,
   type JobResult,
   type JobType,
+  type MigrationSource,
   type OffsiteTarget,
   type PollRequest,
   type SignedJob,
@@ -449,6 +450,75 @@ export async function runTool(workloadId: string, tool: ToolName, args: Record<s
   return enqueue(w, "workload.tool", { spec: await buildSpec(w.id), tool, args }, { actorId });
 }
 
+// ─── WordPress migration ─────────────────────────────────────────────────────
+
+const PRIVATE_HOST = /^(localhost|.*\.(local|internal|localhost|lan|home|test)|\[.*\]|127\.|10\.|0\.|169\.254\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.)/i;
+
+/**
+ * Validates what the client typed. Everything that later reaches a shell on the
+ * node is restricted to a safe alphabet here, and the node is never pointed at
+ * loopback or private addresses.
+ */
+export function cleanMigrationSource(input: { type?: string; url?: string; host?: string; port?: string | number; user?: string; password?: string; path?: string }): { source: MigrationSource; label: string } {
+  if (input.type === "archive") {
+    let url: URL;
+    try {
+      url = new URL(String(input.url ?? "").trim());
+    } catch {
+      throw new PlatformError("Enter the full link to the archive, starting with https://");
+    }
+    if (url.protocol !== "https:" || url.username || url.password) throw new PlatformError("The archive link must start with https:// and contain no credentials");
+    if (PRIVATE_HOST.test(url.hostname) || !url.hostname.includes(".")) throw new PlatformError("This address is not reachable from the internet");
+    if (url.href.length > 2000) throw new PlatformError("This link is too long");
+    return { source: { type: "archive", url: url.href }, label: url.hostname };
+  }
+  if (input.type === "ssh") {
+    const host = String(input.host ?? "").trim().toLowerCase();
+    const user = String(input.user ?? "").trim();
+    const path = String(input.path ?? "").trim().replace(/\/+$/, "") || ".";
+    const port = Number(input.port || 22);
+    const password = String(input.password ?? "");
+    if (!/^(?=.{1,253}$)([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z0-9-]{1,63}$/.test(host) || PRIVATE_HOST.test(host)) throw new PlatformError("Enter the public host name or IP address of the old server");
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new PlatformError("Invalid port");
+    if (!/^[a-z_][\w.-]{0,63}$/i.test(user)) throw new PlatformError("Invalid user name");
+    if (!/^[\w.~/-]{1,300}$/.test(path) || path.includes("..")) throw new PlatformError("The folder may contain letters, numbers, dots, dashes and slashes only");
+    if (!password || password.length > 200 || /[\r\n\0]/.test(password)) throw new PlatformError("Enter the SSH password");
+    return { source: { type: "ssh", host, port, user, password, path }, label: `${user}@${host}` };
+  }
+  throw new PlatformError("Choose where to migrate from");
+}
+
+/** Copies another WordPress site over this one, after a safety backup. Returns the job id. */
+export async function startMigration(workloadId: string, input: Parameters<typeof cleanMigrationSource>[0], actorId: string | null = null): Promise<string> {
+  const w = await load(workloadId);
+  if (w.type !== "wordpress") throw new PlatformError("Migrations are only available for WordPress");
+  if (w.status !== "running") throw new PlatformError("The site must be running");
+  const { source, label } = cleanMigrationSource(input);
+  const db = await getDb();
+  const [busy] = await db.select({ id: schema.jobs.id }).from(schema.jobs).where(and(eq(schema.jobs.workloadId, w.id), eq(schema.jobs.type, "workload.migrate"), inArray(schema.jobs.status, ["queued", "running"])));
+  if (busy) throw new PlatformError("A migration is already in progress");
+  const spec = await buildSpec(w.id);
+  // Jobs of one workload run in order: the safety backup finishes before the import starts.
+  await createBackup(w.id, "Before migration", "system", actorId);
+  const jobId = await enqueue(w, "workload.migrate", { spec, source, newUrl: `https://${spec.domains[0]}`, label }, { actorId });
+  await audit(actorId, "workload.migrate", "workload", w.id, { from: label, type: source.type });
+  return jobId;
+}
+
+export type MigrationRun = { id: string; status: string; label: string; createdAt: Date; finishedAt: Date | null; error: string; log: string; summary: { oldUrl?: string; tablePrefix?: string; wpVersion?: string } };
+
+export async function listMigrations(workloadId: string): Promise<MigrationRun[]> {
+  const db = await getDb();
+  const jobs = await db.select().from(schema.jobs).where(and(eq(schema.jobs.workloadId, workloadId), eq(schema.jobs.type, "workload.migrate"))).orderBy(desc(schema.jobs.createdAt)).limit(10);
+  return jobs.map((j) => {
+    let summary = {};
+    try {
+      summary = JSON.parse(String(j.result?.output ?? "{}"));
+    } catch {}
+    return { id: j.id, status: j.status, label: String(decryptJson<{ label?: string }>(j.payload, {}).label ?? ""), createdAt: j.createdAt, finishedAt: j.finishedAt, error: j.error, log: j.log, summary };
+  });
+}
+
 export async function requestLogs(workloadId: string, lines = 200) {
   const w = await load(workloadId);
   return enqueue(w, "workload.logs", { spec: await buildSpec(w.id), lines: Math.min(Math.max(lines, 10), 1000) });
@@ -811,6 +881,8 @@ export async function reportJob(nodeId: string, jobId: string, report: JobReport
   const scrubbed =
     job.type === "workload.files"
       ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), content: undefined, spec: undefined })
+      : job.type === "workload.migrate"
+        ? encryptJson({ label: decryptJson<{ label?: string }>(job.payload, {}).label })
       : job.type.startsWith("backup.") || job.type === "offsite.test"
         ? encryptJson({ ...decryptJson<Record<string, unknown>>(job.payload, {}), offsite: undefined })
         : job.payload;
@@ -853,6 +925,7 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
     case "workload.start":
     case "workload.restart":
     case "workload.update":
+    case "workload.migrate":
     case "backup.restore":
       if (ok && w.status !== "suspended") await set("running");
       else if (!ok) await db.update(workloads).set({ statusMessage: error }).where(eq(workloads.id, w.id));

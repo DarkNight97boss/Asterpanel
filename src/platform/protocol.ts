@@ -68,6 +68,8 @@ export type JobPayloads = {
   "dns.sync": { nameservers: string[]; hostmaster: string; zones: DnsZoneData[] };
   /** Database console: `tables` lists them with sizes, `query` runs one statement. */
   "workload.db": { spec: WorkloadSpec; action: "tables" | "query"; sql?: string };
+  /** Replaces a WordPress site's files and database with a copy of another site, then rewrites its URLs to `newUrl`. */
+  "workload.migrate": { spec: WorkloadSpec; source: MigrationSource; newUrl: string; label: string };
   /** With `offsite`, the archive is also copied to object storage (and fetched back from it when the local copy is gone). */
   "backup.create": { spec: WorkloadSpec; backupId: string; offsite?: OffsiteTarget };
   "backup.restore": { spec: WorkloadSpec; backupId: string; offsite?: OffsiteTarget };
@@ -75,6 +77,15 @@ export type JobPayloads = {
   /** Node-level: write, read back and delete a probe object to prove the storage settings work from this node. */
   "offsite.test": { offsite: OffsiteTarget };
 };
+
+/**
+ * Where a migration reads from. `archive`: an HTTPS link to a .zip / .tar.gz
+ * with the site's files and one SQL dump. `ssh`: the old host, from which files
+ * are rsynced and the database dumped with the credentials in its wp-config.php.
+ */
+export type MigrationSource =
+  | { type: "archive"; url: string }
+  | { type: "ssh"; host: string; port: number; user: string; password: string; path: string };
 
 /** S3-compatible object storage for off-site backups. Travels only inside the encrypted, signed job payload. */
 export type OffsiteTarget = {
