@@ -3,7 +3,7 @@ import { and, asc, desc, eq, isNotNull, lt, or, isNull } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { StripeError, stripeCall, type StripeIntent } from "@/modules/gateways/stripe";
 import { audit } from "./audit";
-import { recordPayment } from "./billing";
+import { invoiceDue, recordPayment } from "./billing";
 import { getSettings } from "./settings";
 
 /**
@@ -80,6 +80,8 @@ export async function chargeInvoice(invoiceId: string): Promise<ChargeOutcome> {
   const [pm] = await db.select().from(schema.paymentMethods).where(and(eq(schema.paymentMethods.companyId, inv.companyId), eq(schema.paymentMethods.isDefault, true), eq(schema.paymentMethods.gateway, "stripe")));
   if (!co?.autoPay || !co.stripeCustomerId || !pm) return "skipped";
 
+  const due = await invoiceDue(inv.id);
+  if (due <= 0) return "skipped";
   const attempt = inv.chargeAttempts + 1;
   // Counted before the call: a crash mid-way can never turn into an endless retry loop.
   await db.update(schema.invoices).set({ chargeAttempts: attempt, lastChargeAt: new Date() }).where(eq(schema.invoices.id, inv.id));
@@ -87,12 +89,12 @@ export async function chargeInvoice(invoiceId: string): Promise<ChargeOutcome> {
     const intent = await stripeCall<StripeIntent>(
       "POST",
       "/payment_intents",
-      { amount: String(inv.total), currency: inv.currency.toLowerCase(), customer: co.stripeCustomerId, payment_method: pm.externalId, off_session: "true", confirm: "true", "metadata[invoice_id]": inv.id, description: `Invoice ${inv.fiscalYear}/${inv.number}` },
+      { amount: String(due), currency: inv.currency.toLowerCase(), customer: co.stripeCustomerId, payment_method: pm.externalId, off_session: "true", confirm: "true", "metadata[invoice_id]": inv.id, description: `Invoice ${inv.fiscalYear}/${inv.number}` },
       // Same key for the same attempt: a retried request cannot charge twice.
       `autocharge-${inv.id}-${attempt}`,
     );
     if (intent.status !== "succeeded") throw new StripeError(intent.status === "requires_action" ? "The bank asks the cardholder to confirm this payment" : `Payment ${intent.status}`, intent.status);
-    await recordPayment({ invoiceId: inv.id, gateway: "stripe", externalId: intent.id, amount: intent.amount_received || inv.total });
+    await recordPayment({ invoiceId: inv.id, gateway: "stripe", externalId: intent.id, amount: intent.amount_received || due });
     await audit(null, "invoice.autocharged", "invoice", inv.id, { card: pm.last4 });
     return "paid";
   } catch (err) {

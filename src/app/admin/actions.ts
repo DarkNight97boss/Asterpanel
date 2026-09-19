@@ -10,7 +10,7 @@ import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type Pricing } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireArea, startImpersonation } from "@/lib/auth";
-import { activateService, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
+import { activateService, adjustCredit, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
 import { platformHomeBlocks, seedFooterColumns, seedPlatformPlans } from "@/lib/install";
@@ -149,6 +149,21 @@ export async function cancelInvoice(form: FormData) {
   await db.update(schema.invoices).set({ status: "cancelled" }).where(sql`${schema.invoices.id} = ${id} and ${schema.invoices.status} = 'unpaid'`);
   await audit(staff.id, "invoice.cancelled", "invoice", id);
   revalidatePath(`/admin/invoices/${id}`);
+}
+
+export async function addCredit(_: ActionState, form: FormData): Promise<ActionState> {
+  const staff = await requireArea("billing");
+  const raw = String(form.get("amount") ?? "").trim();
+  const cents = parseMoney(raw.replace(/^-/, ""));
+  if (cents === null || cents === 0) return { error: "Enter an amount such as 25.00" };
+  try {
+    await adjustCredit(uuid.parse(form.get("companyId")), raw.startsWith("-") ? -cents : cents, String(form.get("reason") ?? "").trim() || "Manual adjustment", staff.id);
+  } catch (err) {
+    if (err instanceof BillingError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath("/admin/clients", "layout");
+  return { ok: "Saved" };
 }
 
 export async function sendInvoiceToSdi(_: ActionState, form: FormData): Promise<ActionState> {

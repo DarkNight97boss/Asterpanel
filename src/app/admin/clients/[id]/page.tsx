@@ -9,7 +9,7 @@ import { getLocale, getT } from "@/i18n";
 import { displayName, requireArea } from "@/lib/auth";
 import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { saveClient, signInAsClient } from "../../actions";
+import { addCredit, saveClient, signInAsClient } from "../../actions";
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireArea("clients");
@@ -19,6 +19,8 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
   const client = await db.query.users.findFirst({ where: and(eq(schema.users.id, id), eq(schema.users.role, "client")), columns: { passwordHash: false } });
   if (!client) notFound();
 
+  // Companies this person owns: credit belongs to the company, not to the login.
+  const owned = await db.select({ id: schema.companies.id, name: schema.companies.name, creditBalance: schema.companies.creditBalance }).from(schema.companies).innerJoin(schema.companyMembers, and(eq(schema.companyMembers.companyId, schema.companies.id), eq(schema.companyMembers.role, "owner"))).where(eq(schema.companyMembers.userId, id));
   const [t, locale, billing, services, invoices] = await Promise.all([
     getT(),
     getLocale(),
@@ -100,6 +102,22 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
             <EmptyState title={t("No invoices yet")} />
           )}
         </Card>
+        {owned.map((co) => (
+          <Card key={co.id}>
+            <CardHeader title={`${t("Credit")} — ${co.name}`} description={t("Prepaid balance, spent on new invoices before any card is charged.")} />
+            <div className="p-5">
+              <p className="mb-4 text-2xl">{formatMoney(co.creditBalance, billing.currency, locale)}</p>
+              <ActionForm action={addCredit}>
+                <input type="hidden" name="companyId" value={co.id} />
+                <div className="grid gap-4 sm:grid-cols-[10rem_1fr]">
+                  <Field label={t("Amount")} hint={t("Negative to remove")}><Input name="amount" required inputMode="decimal" placeholder="25.00" /></Field>
+                  <Field label={t("Reason")}><Input name="reason" required maxLength={200} /></Field>
+                </div>
+                <SubmitButton variant="secondary">{t("Adjust credit")}</SubmitButton>
+              </ActionForm>
+            </div>
+          </Card>
+        ))}
       </div>
     </>
   );
