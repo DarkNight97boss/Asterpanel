@@ -137,3 +137,33 @@ export async function testOffsiteStorage(_: ActionState, form: FormData): Promis
   revalidatePath("/admin/settings/backups");
   return { ok: "Test started: the result appears below in a few seconds" };
 }
+
+// ─── Electronic invoicing ────────────────────────────────────────────────────
+
+export async function saveEinvoice(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const t = (max: number) => z.string().trim().max(max);
+  const parsed = z
+    .object({
+      name: t(80),
+      vatNumber: z.union([z.string().trim().regex(/^\d{11}$/, "11 digits"), z.literal("")]),
+      fiscalCode: z.union([z.string().trim().toUpperCase().regex(/^([A-Z0-9]{16}|\d{11})$/), z.literal("")]),
+      regime: z.string().regex(/^RF(0[1-9]|1[0-9]|20)$/),
+      iban: z.union([z.string().trim().toUpperCase().regex(/^[A-Z]{2}\d{2}[A-Z0-9 ]{11,32}$/), z.literal("")]),
+      address: t(60),
+      zip: z.union([z.string().trim().regex(/^\d{5}$/), z.literal("")]),
+      city: t(60),
+      province: z.union([z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/), z.literal("")]),
+      zeroVatNature: z.string().regex(/^N\d(\.\d)?$/),
+      zeroVatNote: t(100),
+    })
+    .safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: `${parsed.error.issues[0].path.join(".")}: ${parsed.error.issues[0].message}` };
+  const enabled = form.has("enabled");
+  const d = parsed.data;
+  if (enabled && (!d.name || !d.vatNumber || !d.address || !d.zip || !d.city)) return { error: "Name, VAT number and full address are required" };
+  await updateSettings("einvoice", { ...d, enabled, vatCountry: "IT" });
+  await audit(admin.id, "settings.updated", "settings", "einvoice");
+  revalidatePath("/admin/settings/einvoice");
+  return { ok: "Saved" };
+}

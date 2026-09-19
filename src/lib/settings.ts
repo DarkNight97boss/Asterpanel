@@ -82,6 +82,24 @@ export const settingsSchemas = {
     hostmaster: z.string().default(""),
   }),
   /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
+  /** Italian electronic invoicing (FatturaPA): the seller block of the XML. */
+  einvoice: z.object({
+    enabled: z.boolean().default(false),
+    name: z.string().default(""),
+    vatCountry: z.string().default("IT"),
+    vatNumber: z.string().default(""),
+    fiscalCode: z.string().default(""),
+    /** RF01 ordinary, RF19 flat-rate (forfettario)… */
+    regime: z.string().default("RF01"),
+    address: z.string().default(""),
+    zip: z.string().default(""),
+    city: z.string().default(""),
+    province: z.string().default(""),
+    /** Reason for 0% VAT lines, e.g. N2.2 for flat-rate sellers. */
+    zeroVatNature: z.string().default("N2.2"),
+    zeroVatNote: z.string().default(""),
+    iban: z.string().default(""),
+  }),
   registrars: z.object({
     /** Credentials per registrar module id. */
     accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),

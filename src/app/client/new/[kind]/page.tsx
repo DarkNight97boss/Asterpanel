@@ -120,7 +120,7 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
                     <>
                       <Field label={t("Port")} hint={t("The port your app listens on. Also provided as $PORT.")}><Input name="port" type="number" defaultValue={8080} /></Field>
                       <Field label={t("Environment variables")} hint="KEY=value" className="sm:col-span-2"><Textarea name="env" rows={4} className="font-mono" spellCheck={false} /></Field>
-                      <p className="text-xs text-muted sm:col-span-2">{t("The repository needs a Dockerfile in its root.")}</p>
+                      <p className="text-xs text-muted sm:col-span-2">{t("Node.js, Python, Go, PHP, Ruby and static sites are recognised automatically; anything else needs a Dockerfile in the repository root. The app must listen on $PORT.")}</p>
                     </>
                   )}
                 </>

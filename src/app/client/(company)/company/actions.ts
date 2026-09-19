@@ -26,6 +26,8 @@ const details = z.object({
   address1: text(160),
   address2: text(160),
   vatId: text(40),
+  sdiCode: z.union([z.string().trim().toUpperCase().regex(/^[A-Z0-9]{7}$/), z.literal("")]),
+  pec: z.union([z.string().trim().toLowerCase().email().max(200), z.literal("")]),
 });
 
 export async function saveCompanyDetails(_: ActionState, form: FormData): Promise<ActionState> {
