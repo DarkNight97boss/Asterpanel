@@ -468,6 +468,11 @@ export type WorkloadConfig = {
   // wordpress: PHP limits and Redis object cache
   php?: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number };
   objectCache?: boolean;
+  // web workloads: HSTS and a password in front of the whole site
+  hsts?: boolean;
+  sitePasswordUser?: string;
+  // wordpress: run WP-Cron from the server's scheduler instead of on page views
+  systemCron?: boolean;
   // wordpress: weekly integrity scan
   scanLastAt?: string;
   /** Findings of the latest scan, kept here so alerts need no extra queries. */

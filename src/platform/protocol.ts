@@ -42,10 +42,14 @@ export type WorkloadSpec = {
     php?: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number };
     /** Redis sidecar used as WordPress object cache. */
     objectCache?: boolean;
+    /** WP-Cron is triggered by the node every five minutes instead of by visitors. */
+    systemCron?: boolean;
   };
   database?: { engine: "mysql" | "postgres" | "redis"; version: string; name: string; user: string; password: string };
   source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number };
   env?: Record<string, string>;
+  /** Browser-facing extras at the proxy: HSTS, and HTTP basic auth in front of everything (`hash` is an htpasswd `{SHA}` value). */
+  edge?: { hsts?: boolean; basicAuth?: { user: string; hash: string } };
   /** Apps: commands the agent runs inside the container on a schedule. */
   crons?: { schedule: string; command: string }[];
   /** Edge rules applied by the node's proxy. `from` is a path, `to` a path or absolute URL. */

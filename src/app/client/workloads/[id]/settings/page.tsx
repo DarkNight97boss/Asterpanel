@@ -3,7 +3,7 @@ import { Card, CardHeader, Checkbox, Field, Input, Select, Textarea } from "@/co
 import { getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
 import { PHP_LIMITS, readSecrets } from "@/platform/engine";
-import { destroy, saveCronJobs, savePhp, saveSettings } from "../../../platform-actions";
+import { destroy, saveCronJobs, savePhp, saveProtection, saveSettings } from "../../../platform-actions";
 
 export default async function Settings({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -50,6 +50,24 @@ export default async function Settings({ params }: { params: Promise<{ id: strin
           </ActionForm>
         </div>
       </Card>
+
+      {w.type !== "database" && (
+        <Card>
+          <CardHeader title={t("Protection")} description={t("Extra rules applied in front of the site. Saving restarts it for a few seconds.")} />
+          <div className="p-5">
+            <ActionForm action={saveProtection}>
+              <input type="hidden" name="id" value={w.id} />
+              <Checkbox name="hsts" defaultChecked={!!c.hsts} label={t("Tell browsers to use HTTPS only for a year (HSTS). Turn it on once HTTPS works on every domain of the site.")} />
+              {w.type === "wordpress" && <Checkbox name="systemCron" defaultChecked={!!c.systemCron} label={t("Run WordPress scheduled tasks from the server every 5 minutes, instead of on visitors' page views")} />}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <Field label={t("Password-protect the whole site: user name")} hint={t("Leave empty for a public site. Useful for staging and sites under construction.")}><Input name="user" defaultValue={c.sitePasswordUser ?? ""} autoComplete="off" maxLength={40} /></Field>
+                <Field label={t("Password")} hint={c.sitePasswordUser ? t("Leave empty to keep the current one.") : undefined}><Input name="password" type="password" autoComplete="new-password" maxLength={100} /></Field>
+              </div>
+              <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
+            </ActionForm>
+          </div>
+        </Card>
+      )}
 
       {w.type === "wordpress" && (
         <Card>

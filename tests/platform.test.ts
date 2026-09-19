@@ -801,3 +801,31 @@ test("security scan: weekly, findings stored on the site and raised as an alert"
   const alerts = await accountAlerts(companyId, "developer");
   assert.deepEqual(alerts.filter((a) => a.text.startsWith("Security scan")).map((a) => [a.vars?.name, a.vars?.n, a.href]), [["Infected Shop", "3", `/client/workloads/${dirty}/security`]]);
 });
+
+test("site protection: HSTS, a password in front of the site (hashed for the proxy), server-side WP-Cron", async () => {
+  const { createHash } = await import("node:crypto");
+  const id = await engine.createWorkload({ clientId, type: "wordpress", name: "Guarded" });
+  await drain();
+  assert.equal((await engine.buildSpec(id)).edge, undefined);
+  await assert.rejects(engine.saveEdgeSecurity(id, { hsts: false, user: "bad user", password: "longenough", systemCron: false }), /user name may contain/);
+  await assert.rejects(engine.saveEdgeSecurity(id, { hsts: false, user: "preview", password: "short", systemCron: false }), /between 8 and 100/);
+  await assert.rejects(engine.saveEdgeSecurity(id, { hsts: false, user: "preview", password: "", systemCron: false }), /Enter a password/);
+
+  await engine.saveEdgeSecurity(id, { hsts: true, user: "preview", password: "let-me-in-2026", systemCron: true });
+  let spec = await engine.buildSpec(id);
+  assert.deepEqual(spec.edge, { hsts: true, basicAuth: { user: "preview", hash: `{SHA}${createHash("sha1").update("let-me-in-2026").digest("base64")}` } });
+  assert.ok(!JSON.stringify(spec.edge).includes("let-me-in"), "the proxy never gets the password itself");
+  assert.deepEqual([spec.wordpress?.systemCron, spec.crons], [true, [{ schedule: "*/5 * * * *", command: "cd /var/www/html && php wp-cron.php" }]]);
+  await drain();
+  const slug = (await workload(id)).slug;
+  assert.deepEqual((await agent.cronTick(new Date("2027-01-01T10:05:00Z"))).filter((l) => l.startsWith(slug)), [`${slug}: cd /var/www/html && php wp-cron.php`]);
+
+  await engine.saveEdgeSecurity(id, { hsts: true, user: "preview", password: "", systemCron: false });
+  spec = await engine.buildSpec(id);
+  assert.equal(spec.edge?.basicAuth?.user, "preview", "an empty password keeps the current one");
+  assert.equal(spec.crons, undefined);
+  await engine.saveEdgeSecurity(id, { hsts: false, user: "", password: "", systemCron: false });
+  assert.equal((await engine.buildSpec(id)).edge, undefined, "public again");
+  assert.equal(engine.readSecrets(await workload(id)).sitePassword, undefined);
+  await drain();
+});

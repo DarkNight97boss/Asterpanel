@@ -1653,6 +1653,17 @@ const it: Record<string, string> = {
   "Update on {n} sites": "Aggiorna su {n} siti",
   "Everything is up to date": "È tutto aggiornato",
   "Scanning. The list fills in as each site answers.": "Scansione in corso. L'elenco si riempie man mano che i siti rispondono.",
+  "Protection": "Protezione",
+  "Extra rules applied in front of the site. Saving restarts it for a few seconds.": "Regole aggiuntive applicate davanti al sito. Salvando, il sito si riavvia per qualche secondo.",
+  "Tell browsers to use HTTPS only for a year (HSTS). Turn it on once HTTPS works on every domain of the site.": "Indica ai browser di usare solo HTTPS per un anno (HSTS). Attivalo quando HTTPS funziona su tutti i domini del sito.",
+  "Run WordPress scheduled tasks from the server every 5 minutes, instead of on visitors' page views": "Esegui le attività pianificate di WordPress dal server ogni 5 minuti, invece che alle visite delle pagine",
+  "Password-protect the whole site: user name": "Proteggi tutto il sito con password: nome utente",
+  "Leave empty for a public site. Useful for staging and sites under construction.": "Lascia vuoto per un sito pubblico. Utile per staging e siti in costruzione.",
+  "Leave empty to keep the current one.": "Lascia vuoto per mantenere quella attuale.",
+  "These settings apply to web services": "Queste impostazioni valgono per i servizi web",
+  "The user name may contain letters, numbers, dots, dashes and @": "Il nome utente può contenere lettere, numeri, punti, trattini e @",
+  "The password must be between 8 and 100 characters": "La password deve avere tra 8 e 100 caratteri",
+  "Enter a password": "Inserisci una password",
 };
 
 export default it;
