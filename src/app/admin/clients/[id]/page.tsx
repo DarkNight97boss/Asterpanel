@@ -9,7 +9,7 @@ import { getLocale, getT } from "@/i18n";
 import { displayName, requireArea } from "@/lib/auth";
 import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { addCredit, saveClient, signInAsClient } from "../../actions";
+import { addCredit, saveClient, setCompanyDiscount, signInAsClient } from "../../actions";
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
   await requireArea("clients");
@@ -20,7 +20,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
   if (!client) notFound();
 
   // Companies this person owns: credit belongs to the company, not to the login.
-  const owned = await db.select({ id: schema.companies.id, name: schema.companies.name, creditBalance: schema.companies.creditBalance }).from(schema.companies).innerJoin(schema.companyMembers, and(eq(schema.companyMembers.companyId, schema.companies.id), eq(schema.companyMembers.role, "owner"))).where(eq(schema.companyMembers.userId, id));
+  const owned = await db.select({ id: schema.companies.id, name: schema.companies.name, creditBalance: schema.companies.creditBalance, discountPercent: schema.companies.discountPercent }).from(schema.companies).innerJoin(schema.companyMembers, and(eq(schema.companyMembers.companyId, schema.companies.id), eq(schema.companyMembers.role, "owner"))).where(eq(schema.companyMembers.userId, id));
   const [t, locale, billing, services, invoices] = await Promise.all([
     getT(),
     getLocale(),
@@ -114,6 +114,11 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
                   <Field label={t("Reason")}><Input name="reason" required maxLength={200} /></Field>
                 </div>
                 <SubmitButton variant="secondary">{t("Adjust credit")}</SubmitButton>
+              </ActionForm>
+              <ActionForm action={setCompanyDiscount} className="mt-6 border-t border-border pt-5">
+                <input type="hidden" name="companyId" value={co.id} />
+                <Field label={t("Price list: discount on catalogue prices (%)")} hint={t("For resellers and agencies. 0 = list prices.")} className="max-w-xs"><Input name="discountPercent" type="number" min={0} max={90} defaultValue={co.discountPercent} /></Field>
+                <SubmitButton variant="secondary">{t("Save")}</SubmitButton>
               </ActionForm>
             </div>
           </Card>

@@ -7,7 +7,7 @@ import { z } from "zod";
 import { sanitizeBlocks } from "@/cms/blocks";
 import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
-import { BILLING_CYCLES, type Pricing } from "@/db/schema";
+import { BILLING_CYCLES, type Pricing, type ProductAddon } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireArea, startImpersonation } from "@/lib/auth";
 import { activateService, adjustCredit, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
@@ -151,6 +151,17 @@ export async function cancelInvoice(form: FormData) {
   revalidatePath(`/admin/invoices/${id}`);
 }
 
+export async function setCompanyDiscount(_: ActionState, form: FormData): Promise<ActionState> {
+  const staff = await requireArea("billing");
+  const percent = z.coerce.number().int().min(0).max(90).safeParse(form.get("discountPercent"));
+  if (!percent.success) return { error: "Enter a percentage between 0 and 90" };
+  const companyId = uuid.parse(form.get("companyId"));
+  await (await getDb()).update(schema.companies).set({ discountPercent: percent.data }).where(eq(schema.companies.id, companyId));
+  await audit(staff.id, "company.discount", "company", companyId, { percent: percent.data });
+  revalidatePath("/admin/clients", "layout");
+  return { ok: "Saved. It applies to new orders and plan changes; services already active keep their price." };
+}
+
 export async function addCredit(_: ActionState, form: FormData): Promise<ActionState> {
   const staff = await requireArea("billing");
   const raw = String(form.get("amount") ?? "").trim();
@@ -283,6 +294,17 @@ export async function saveProduct(_: ActionState, form: FormData): Promise<Actio
     mod.productFields.map((f) => [f.name, String(form.get(`mc_${mod.id}_${f.name}`) ?? "").trim()]),
   );
 
+  // Add-ons, one per line: "Name | monthly price | +RAM MB | +disk GB" (the last two optional).
+  const addons: ProductAddon[] = [];
+  for (const raw of String(form.get("addons") ?? "").split(/\r?\n/)) {
+    const parts = raw.split("|").map((x) => x.trim());
+    if (!parts[0]) continue;
+    const monthly = parseMoney(parts[1] ?? "");
+    if (monthly === null || parts[0].length > 60) return { error: `Add-on lines look like “Extra 10 GB | 2.00 | 0 | 10”: ${raw.slice(0, 40)}` };
+    addons.push({ id: slugify(parts[0]).slice(0, 40) || `addon-${addons.length + 1}`, name: parts[0], monthly, memoryMb: Math.min(65_536, Math.max(0, Math.round(Number(parts[2]) || 0))) || undefined, diskGb: Math.min(2000, Math.max(0, Math.round(Number(parts[3]) || 0))) || undefined });
+  }
+  if (addons.length > 10 || new Set(addons.map((a) => a.id)).size !== addons.length) return { error: "Up to 10 add-ons, each with its own name" };
+
   const { id, features, serverId, ...rest } = parsed.data;
   const data = {
     ...rest,
@@ -291,6 +313,7 @@ export async function saveProduct(_: ActionState, form: FormData): Promise<Actio
     serverId: serverId || null,
     pricing,
     moduleConfig,
+    addons,
     requiresDomain: form.has("requiresDomain"),
     featured: form.has("featured"),
     hidden: form.has("hidden"),

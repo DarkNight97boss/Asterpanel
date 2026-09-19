@@ -41,7 +41,9 @@ export const platform: ProvisioningModule = {
 
     const request = (ctx.service.moduleData.request ?? {}) as PlatformRequest;
     const sealed = decryptJson<Sealed>(request.sealed ?? "", {});
-    const limit = (key: string, fallback: number) => Number(ctx.product.moduleConfig[key]) || fallback;
+    const bought = (Array.isArray(ctx.service.moduleData.addons) ? ctx.service.moduleData.addons : []) as { memoryMb?: number; diskGb?: number }[];
+    const extra = (key: "memoryMb" | "diskGb") => bought.reduce((sum, a) => sum + (Number(a[key]) || 0), 0);
+    const limit = (key: string, fallback: number) => (Number(ctx.product.moduleConfig[key]) || fallback) + (key === "memoryMb" || key === "diskGb" ? extra(key) : 0);
     try {
       const id = await createWorkload({
         clientId: ctx.client.id,
