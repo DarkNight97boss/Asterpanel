@@ -132,7 +132,8 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
     environment: w.environment,
     domains: w.domains.map((d) => d.hostname),
     resources: { memoryMb: c.memoryMb ?? 512, cpus: c.cpus ?? 1, diskGb: c.diskGb ?? 10 },
-    env: secrets.env,
+    // Shared groups first, the service's own variables on top: the more specific value wins.
+    env: { ...(await groupEnv(w.companyId, c.envGroupIds)), ...secrets.env },
     redirects: w.type === "database" ? undefined : c.redirects,
     denyIps: w.type === "database" ? undefined : c.denyIps,
     bots:
@@ -168,7 +169,7 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
         : undefined,
     source:
       w.type === "app" || w.type === "static"
-        ? { repoUrl: c.repoUrl ?? "", branch: c.branch ?? "main", accessToken: secrets.accessToken, buildCommand: c.buildCommand, outputDir: c.outputDir, port: c.port }
+        ? { repoUrl: c.repoUrl ?? "", branch: c.branch ?? "main", accessToken: secrets.accessToken, buildCommand: c.buildCommand, outputDir: c.outputDir, port: c.port, image: w.type === "app" ? c.image : undefined, healthPath: c.healthPath }
         : undefined,
   };
 }
@@ -232,7 +233,8 @@ export async function createWorkload(input: NewWorkload): Promise<string> {
   const name = input.name.trim().slice(0, 80);
   if (!name) throw new PlatformError("A name is required");
   const config = input.config ?? {};
-  if ((input.type === "app" || input.type === "static") && !/^https:\/\/[^\s]+$/.test(config.repoUrl ?? "")) {
+  if (input.type === "app" && config.image) config.image = cleanImage(config.image);
+  else if ((input.type === "app" || input.type === "static") && !/^https:\/\/[^\s]+$/.test(config.repoUrl ?? "")) {
     throw new PlatformError("Enter the HTTPS URL of a Git repository");
   }
 
@@ -706,6 +708,63 @@ export async function savePhpSettings(workloadId: string, input: { memoryLimitMb
   // PHP cannot be promised more memory than the container has.
   php.memoryLimitMb = Math.min(php.memoryLimitMb, Math.max(64, Math.floor((w.config.memoryMb ?? 512) / 2)));
   await updateWorkloadConfig(w.id, { php, objectCache: input.objectCache }, actorId);
+}
+
+/** `registry/name:tag` of a public image. Digests and tags allowed; no credentials, no flags. */
+export function cleanImage(input: string): string {
+  const image = input.trim();
+  if (!/^(?=.{3,200}$)[a-z0-9]([a-z0-9._-]*[a-z0-9])?(:\d{2,5})?(\/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)*(:[\w][\w.-]{0,127})?(@sha256:[0-9a-f]{64})?$/.test(image)) throw new PlatformError("Enter an image such as ghcr.io/acme/api:1.4.2");
+  return image;
+}
+
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]{0,99}$/;
+
+async function groupEnv(companyId: string | null, ids: string[] | undefined): Promise<Record<string, string>> {
+  if (!companyId || !ids?.length) return {};
+  const db = await getDb();
+  const groups = await db.select().from(schema.envGroups).where(and(eq(schema.envGroups.companyId, companyId), inArray(schema.envGroups.id, ids)));
+  // In the order they were attached, so a later group overrides an earlier one predictably.
+  return Object.assign({}, ...ids.map((id) => decryptJson<Record<string, string>>(groups.find((g) => g.id === id)?.vars ?? "", {})));
+}
+
+/** Creates or replaces a shared group, then re-applies every service that uses it. */
+export async function saveEnvGroup(companyId: string, input: { id?: string; name: string; vars: Record<string, string> }, actorId: string | null = null): Promise<string> {
+  const name = input.name.trim().slice(0, 60);
+  if (!name) throw new PlatformError("Give the group a name");
+  const entries = Object.entries(input.vars);
+  if (entries.length > 100 || entries.some(([k, v]) => !ENV_NAME.test(k) || v.length > 10_000)) throw new PlatformError("Invalid variable name, or too many variables");
+  const db = await getDb();
+  const values = { companyId, name, vars: encryptJson(input.vars) };
+  let id = input.id;
+  if (id) {
+    const [row] = await db.update(schema.envGroups).set(values).where(and(eq(schema.envGroups.id, id), eq(schema.envGroups.companyId, companyId))).returning({ id: schema.envGroups.id });
+    if (!row) throw new PlatformError("Group not found");
+  } else {
+    const [{ n }] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.envGroups).where(eq(schema.envGroups.companyId, companyId));
+    if (n >= 20) throw new PlatformError("A company can have up to 20 variable groups");
+    [{ id }] = await db.insert(schema.envGroups).values(values).returning({ id: schema.envGroups.id });
+  }
+  await audit(actorId, "envgroup.saved", "company", companyId, { name, keys: Object.keys(input.vars) });
+  for (const w of await usersOfGroup(companyId, id!)) await applyWorkload(w.id, actorId).catch(() => {});
+  return id!;
+}
+
+const usersOfGroup = async (companyId: string, groupId: string) => (await (await getDb()).select().from(schema.workloads).where(and(eq(schema.workloads.companyId, companyId), ne(schema.workloads.status, "deleted")))).filter((w) => w.config.envGroupIds?.includes(groupId));
+
+export async function deleteEnvGroup(companyId: string, groupId: string, actorId: string | null = null) {
+  if ((await usersOfGroup(companyId, groupId)).length) throw new PlatformError("Detach the group from its services first");
+  await (await getDb()).delete(schema.envGroups).where(and(eq(schema.envGroups.id, groupId), eq(schema.envGroups.companyId, companyId)));
+  await audit(actorId, "envgroup.deleted", "company", companyId);
+}
+
+/** Which of the company's groups a service uses. Groups of other companies are silently dropped. */
+export async function attachEnvGroups(workloadId: string, groupIds: string[], actorId: string | null = null) {
+  const w = await load(workloadId);
+  if (w.type !== "app" && w.type !== "static") throw new PlatformError("Variable groups are available for applications and static sites");
+  const db = await getDb();
+  const mine = w.companyId ? await db.select({ id: schema.envGroups.id }).from(schema.envGroups).where(eq(schema.envGroups.companyId, w.companyId)) : [];
+  const envGroupIds = [...new Set(groupIds)].filter((id) => mine.some((g) => g.id === id)).slice(0, 10);
+  await updateWorkloadConfig(w.id, { envGroupIds }, actorId);
 }
 
 /** Replaces the scheduled jobs of an app. `text` is one job per line, see `parseCronLines`. */

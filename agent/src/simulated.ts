@@ -121,6 +121,12 @@ export class SimulatedDriver implements Driver {
   async deploy(spec: WorkloadSpec, log: Log, ids?: { deploymentId: string; rollbackTo?: string; keepImages?: string[] }) {
     this.must(spec);
     const src = spec.source!;
+    if (spec.kind === "app" && src.image) {
+      await this.step(log, `[sim] docker pull ${src.image}`);
+      await this.step(log, `[sim] health check ${src.healthPath ?? "/"} ok, switching traffic`);
+      this.write((s) => (s.workloads[spec.slug].running = true));
+      return { ...this.runtime(spec), commitMessage: src.image };
+    }
     if (ids?.rollbackTo) {
       await this.step(log, `[sim] re-tagging image d-${ids.rollbackTo.slice(0, 8)} as current`);
       await this.step(log, "[sim] new container healthy, switching traffic");

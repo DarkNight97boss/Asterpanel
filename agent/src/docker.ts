@@ -554,7 +554,9 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     log(`cloning ${url.host}${url.pathname} (${src.branch})`);
     // The token is supplied by a credential helper reading the environment, so
     // it is never written to .git/config nor visible in the process list.
-    const auth = src.accessToken ? ["-c", "credential.helper=!f() { echo username=x-access-token; echo password=$ASTER_GIT_TOKEN; }; f"] : [];
+    // Each host wants its own user name next to a token.
+    const gitUser = /(^|\.)gitlab\./.test(url.host) ? "oauth2" : /(^|\.)bitbucket\.org$/.test(url.host) ? "x-token-auth" : "x-access-token";
+    const auth = src.accessToken ? ["-c", `credential.helper=!f() { echo username=${gitUser}; echo password=$ASTER_GIT_TOKEN; }; f`] : [];
     await this.exec("git", [...auth, "clone", "--depth", "1", "--branch", src.branch, url.toString(), dir], log, { env: { ASTER_GIT_TOKEN: src.accessToken ?? "", GIT_TERMINAL_PROMPT: "0" }, timeoutMs: 10 * 60_000 });
     const [commitSha, ...message] = (await this.exec("git", ["-C", dir, "log", "-1", "--format=%H%n%s"], undefined, { quiet: true })).trim().split("\n");
     log(`HEAD is ${commitSha.slice(0, 7)} ${message.join(" ")}`);
@@ -632,7 +634,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     await this.docker(["run", "-d", "--name", next, "--network", net, ...this.limits(spec), ...this.envArgs(env), ...this.route(spec, port), `${name}:current`], log, { env });
     await this.docker(["network", "connect", tenantNet, next]); // reach the tenant's databases by name
     try {
-      await this.waitHealthy(next, net, port, log);
+      await this.waitHealthy(next, net, port, log, spec.source?.healthPath);
     } catch (err) {
       const tail = await this.docker(["logs", "--tail", "40", next], undefined, { quiet: true }).catch(() => "");
       if (tail) log(tail);
@@ -645,13 +647,16 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
   }
 
   /** Any HTTP answer below 500 counts: an app without a "/" route is still up. */
-  private async waitHealthy(container: string, net: string, port: number, log: Log) {
-    log("waiting for the new version to answer");
+  private async waitHealthy(container: string, net: string, port: number, log: Log, healthPath?: string) {
+    // With a health path the app must really say it is fine (2xx/3xx); without one, answering at all is enough.
+    const pathOk = healthPath && /^\/[\w\-./~%]*$/.test(healthPath) ? healthPath : "";
+    const healthy = pathOk ? /^[23]\d\d$/ : /^[1-4]\d\d$/;
+    log(pathOk ? `waiting for ${pathOk} to answer OK` : "waiting for the new version to answer");
     for (let i = 0; i < 30; i++) {
       const state = await this.docker(["inspect", "-f", "{{.State.Running}}", container], undefined, { quiet: true }).catch(() => "false");
       if (state.trim() !== "true") throw new Error("The new version exited right after starting; the previous version keeps serving");
-      const code = await this.docker(["run", "--rm", "--network", net, "curlimages/curl:latest", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", `http://${container}:${port}/`], undefined, { quiet: true, timeoutMs: 20_000 }).catch(() => "000");
-      if (/^[1-4]\d\d$/.test(code.trim())) return;
+      const code = await this.docker(["run", "--rm", "--network", net, "curlimages/curl:latest", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "3", `http://${container}:${port}${pathOk || "/"}`], undefined, { quiet: true, timeoutMs: 20_000 }).catch(() => "000");
+      if (healthy.test(code.trim())) return;
       await new Promise((r) => setTimeout(r, 3000));
     }
     throw new Error(`The new version did not answer on port ${port} within 90 seconds; the previous version keeps serving`);
@@ -669,8 +674,19 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
       await this.release(spec, log);
       return { runtime: { internalHost: name } };
     }
-    const { dir, commitSha, commitMessage } = await this.checkout(spec, log);
     const src = spec.source!;
+    if (spec.kind === "app" && src.image) {
+      // A ready-made image: nothing to clone or build. Validated again here because it becomes an argument of `docker pull`.
+      if (!/^[a-z0-9][a-z0-9._\/:@-]{2,199}$/.test(src.image) || src.image.includes("..")) throw new Error("Invalid image name");
+      log(`pulling ${src.image}`);
+      await this.docker(["pull", src.image], log, { timeoutMs: 30 * 60_000 });
+      await this.docker(["tag", src.image, `${name}:current`]);
+      await this.release(spec, log);
+      if (ids && ID.test(ids.deploymentId)) await this.keepImage(name, ids.deploymentId, ids.keepImages ?? []);
+      log(`live at https://${spec.domains[0] ?? name}`);
+      return { commitMessage: src.image, runtime: { internalHost: name } };
+    }
+    const { dir, commitSha, commitMessage } = await this.checkout(spec, log);
 
     if (spec.kind === "static") {
       if (!REL_PATH.test(src.outputDir ?? "")) throw new Error("Invalid output directory");

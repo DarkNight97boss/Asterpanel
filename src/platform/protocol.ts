@@ -46,7 +46,7 @@ export type WorkloadSpec = {
     systemCron?: boolean;
   };
   database?: { engine: "mysql" | "postgres" | "redis"; version: string; name: string; user: string; password: string };
-  source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number };
+  source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number; /** Run this public image instead of building. */ image?: string; /** Must answer 2xx/3xx before the new version gets traffic. */ healthPath?: string };
   env?: Record<string, string>;
   /** Browser-facing extras at the proxy: HSTS, and HTTP basic auth in front of everything (`hash` is an htpasswd `{SHA}` value). */
   edge?: { hsts?: boolean; basicAuth?: { user: string; hash: string } };

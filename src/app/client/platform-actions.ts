@@ -39,13 +39,17 @@ function parseEnv(text: string): Record<string, string> {
   return env;
 }
 
-const sourceConfig = z.object({
-  repoUrl: z.string().trim().url().startsWith("https://", "Enter the HTTPS URL of a Git repository").max(300),
+const sourceConfig = z
+  .object({
+  repoUrl: z.union([z.string().trim().url().startsWith("https://", "Enter the HTTPS URL of a Git repository").max(300), z.literal("")]).default(""),
+  image: z.string().trim().max(200).default(""),
+  healthPath: z.union([z.string().trim().regex(/^\/[\w\-./~%]{0,200}$/, "The health check path starts with / and has no query string"), z.literal("")]).default(""),
   branch: z.string().trim().regex(/^[\w./-]{1,200}$/, "Invalid branch name").default("main"),
   buildCommand: z.string().trim().max(500).default(""),
   outputDir: z.string().trim().regex(/^(?!\/)(?!.*\.\.)[\w./-]*$/, "Invalid output directory").max(200).default(""),
   port: z.coerce.number().int().min(1).max(65535).default(8080),
-});
+  })
+  .refine((v) => v.repoUrl || v.image, "Enter a Git repository or a Docker image");
 
 export async function createFromPlan(_: ActionState, form: FormData): Promise<ActionState> {
   const { account } = await requireAccount("manage");
@@ -72,7 +76,8 @@ export async function createFromPlan(_: ActionState, form: FormData): Promise<Ac
     } else {
       const src = sourceConfig.safeParse(f);
       if (!src.success) return { error: src.error.issues[0].message };
-      config = type === "static" ? { repoUrl: src.data.repoUrl, branch: src.data.branch, buildCommand: src.data.buildCommand, outputDir: src.data.outputDir } : { repoUrl: src.data.repoUrl, branch: src.data.branch, port: src.data.port };
+      if (type === "static" && !src.data.repoUrl) return { error: "Enter the HTTPS URL of a Git repository" };
+      config = type === "static" ? { repoUrl: src.data.repoUrl, branch: src.data.branch, buildCommand: src.data.buildCommand, outputDir: src.data.outputDir } : { repoUrl: src.data.repoUrl, branch: src.data.branch, port: src.data.port, image: src.data.image || undefined, healthPath: src.data.healthPath || undefined };
     }
     let cloneFrom: string | undefined;
     if (type === "wordpress" && f.cloneFrom) {
@@ -366,8 +371,10 @@ export async function saveSettings(_: ActionState, form: FormData): Promise<Acti
     } else if (workload.type === "app" || workload.type === "static") {
       const src = sourceConfig.safeParse(f);
       if (!src.success) return { error: src.error.issues[0].message };
-      const { port, ...rest } = src.data;
-      await engine.updateWorkloadConfig(workload.id, workload.type === "app" ? { ...rest, port } : rest, user.id, parseEnv(String(f.env ?? "")));
+      const { port, image, healthPath, ...rest } = src.data;
+      if (workload.type === "static" && !rest.repoUrl) return { error: "Enter the HTTPS URL of a Git repository" };
+      await engine.updateWorkloadConfig(workload.id, workload.type === "app" ? { ...rest, port, image: image ? engine.cleanImage(image) : undefined, healthPath: healthPath || undefined } : rest, user.id, parseEnv(String(f.env ?? "")));
+      await engine.attachEnvGroups(workload.id, form.getAll("envGroup").map(String), user.id);
     }
   } catch (err) {
     if (err instanceof z.ZodError) return { error: err.issues[0].message };
