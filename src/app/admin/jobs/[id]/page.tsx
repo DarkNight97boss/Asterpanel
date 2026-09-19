@@ -5,8 +5,10 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { Alert, Card, PageHeader, StatusBadge } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
+import { requireArea } from "@/lib/auth";
 
 export default async function JobDetail({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("platform");
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();

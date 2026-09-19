@@ -6,8 +6,10 @@ import { getT } from "@/i18n";
 import { centsToInput } from "@/lib/format";
 import { loadInvoice } from "@/lib/invoices";
 import { addPayment, cancelInvoice, resendInvoiceEmail } from "../../actions";
+import { requireArea } from "@/lib/auth";
 
 export default async function AdminInvoice({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("billing");
   const invoice = await loadInvoice((await params).id);
   if (!invoice) notFound();
   const t = await getT();

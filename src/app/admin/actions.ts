@@ -9,7 +9,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type Pricing } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { requireAdmin, requireStaff } from "@/lib/auth";
+import { requireAdmin, requireArea } from "@/lib/auth";
 import { activateService, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
@@ -30,7 +30,7 @@ const isFkViolation = (err: unknown) => /foreign key|23503/i.test(`${message(err
 // ─── Clients ─────────────────────────────────────────────────────────────────
 
 export async function saveClient(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("clients");
   const parsed = z
     .object({
       id: uuid,
@@ -53,6 +53,9 @@ export async function saveClient(_: ActionState, form: FormData): Promise<Action
 
   const { id, ...data } = parsed.data;
   const db = await getDb();
+  // Staff edit clients only: changing a colleague's email would be a way to take over their account.
+  const [target] = await db.select({ role: schema.users.role }).from(schema.users).where(eq(schema.users.id, id));
+  if (!target || (target.role !== "client" && staff.role !== "admin")) return { error: "Only an administrator can edit staff accounts" };
   try {
     await db.update(schema.users).set(data).where(eq(schema.users.id, id));
   } catch {
@@ -67,7 +70,7 @@ export async function saveClient(_: ActionState, form: FormData): Promise<Action
 // ─── Services ────────────────────────────────────────────────────────────────
 
 export async function serviceCommand(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const parsed = z
     .object({ id: uuid, command: z.enum(["activate", "suspend", "unsuspend", "terminate"]), reason: text(200) })
     .safeParse(fields(form));
@@ -88,7 +91,7 @@ export async function serviceCommand(_: ActionState, form: FormData): Promise<Ac
 }
 
 export async function saveService(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const parsed = z
     .object({
       id: uuid,
@@ -118,7 +121,7 @@ export async function saveService(_: ActionState, form: FormData): Promise<Actio
 // ─── Invoices ────────────────────────────────────────────────────────────────
 
 export async function addPayment(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const parsed = z.object({ invoiceId: uuid, amount: z.string(), reference: text(100) }).safeParse(fields(form));
   if (!parsed.success) return { error: "Invalid request" };
   const amount = parseMoney(parsed.data.amount);
@@ -134,13 +137,13 @@ export async function addPayment(_: ActionState, form: FormData): Promise<Action
 }
 
 export async function resendInvoiceEmail(_: ActionState, form: FormData): Promise<ActionState> {
-  await requireStaff();
+  await requireArea("billing");
   const result = await resendInvoice(uuid.parse(form.get("invoiceId")));
   return result.ok ? { ok: "Email sent" } : { error: result.error ?? "Email could not be sent" };
 }
 
 export async function cancelInvoice(form: FormData) {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const id = uuid.parse(form.get("invoiceId"));
   const db = await getDb();
   await db.update(schema.invoices).set({ status: "cancelled" }).where(sql`${schema.invoices.id} = ${id} and ${schema.invoices.status} = 'unpaid'`);
@@ -151,7 +154,7 @@ export async function cancelInvoice(form: FormData) {
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
 export async function staffReply(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("support");
   const parsed = z.object({ ticketId: uuid, body: z.string().trim().min(2).max(20_000) }).safeParse(fields(form));
   if (!parsed.success) return { error: "Message is empty" };
   const db = await getDb();
@@ -162,7 +165,7 @@ export async function staffReply(_: ActionState, form: FormData): Promise<Action
 }
 
 export async function setTicketStatus(form: FormData) {
-  await requireStaff();
+  await requireArea("support");
   const parsed = z.object({ ticketId: uuid, status: z.enum(["open", "closed"]) }).parse(fields(form));
   const db = await getDb();
   await db.update(schema.tickets).set({ status: parsed.status }).where(eq(schema.tickets.id, parsed.ticketId));
@@ -172,7 +175,7 @@ export async function setTicketStatus(form: FormData) {
 // ─── Catalog ─────────────────────────────────────────────────────────────────
 
 export async function saveGroup(_: ActionState, form: FormData): Promise<ActionState> {
-  await requireStaff();
+  await requireArea("billing");
   const parsed = z
     .object({ id: z.union([uuid, z.literal("")]).default(""), name: z.string().trim().min(1).max(100), slug: text(80), description: text(500), position: z.coerce.number().int().default(0) })
     .safeParse(fields(form));
@@ -191,7 +194,7 @@ export async function saveGroup(_: ActionState, form: FormData): Promise<ActionS
 }
 
 export async function deleteGroup(form: FormData) {
-  await requireStaff();
+  await requireArea("billing");
   const db = await getDb();
   // FK is RESTRICT: a group that still has products is left untouched.
   await db.delete(schema.productGroups).where(eq(schema.productGroups.id, uuid.parse(form.get("id")))).catch(() => {});
@@ -199,7 +202,7 @@ export async function deleteGroup(form: FormData) {
 }
 
 export async function saveProduct(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const parsed = z
     .object({
       id: z.union([uuid, z.literal("")]).default(""),
@@ -258,7 +261,7 @@ export async function saveProduct(_: ActionState, form: FormData): Promise<Actio
 }
 
 export async function deleteProduct(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("billing");
   const id = uuid.parse(form.get("id"));
   const db = await getDb();
   try {
@@ -339,7 +342,7 @@ export async function deleteServer(form: FormData) {
 // ─── Site builder ────────────────────────────────────────────────────────────
 
 export async function savePage(_: ActionState, form: FormData): Promise<ActionState> {
-  const staff = await requireStaff();
+  const staff = await requireArea("content");
   const parsed = z
     .object({
       id: z.union([uuid, z.literal("")]).default(""),
@@ -379,7 +382,7 @@ export async function savePage(_: ActionState, form: FormData): Promise<ActionSt
 
 /** Replaces the home page and footer menu with the platform template (plans are created if missing). */
 export async function installPlatformHome() {
-  const staff = await requireStaff();
+  const staff = await requireArea("content");
   await seedPlatformPlans();
   const blocks = await platformHomeBlocks((await getSettings("general")).siteName);
   const db = await getDb();
@@ -393,7 +396,7 @@ export async function installPlatformHome() {
 }
 
 export async function deletePage(form: FormData) {
-  const staff = await requireStaff();
+  const staff = await requireArea("content");
   const id = uuid.parse(form.get("id"));
   const db = await getDb();
   await db.delete(schema.pages).where(eq(schema.pages.id, id));
@@ -402,7 +405,7 @@ export async function deletePage(form: FormData) {
 }
 
 export async function saveMenuItem(_: ActionState, form: FormData): Promise<ActionState> {
-  await requireStaff();
+  await requireArea("content");
   const parsed = z
     .object({
       id: z.union([uuid, z.literal("")]).default(""),
@@ -423,7 +426,7 @@ export async function saveMenuItem(_: ActionState, form: FormData): Promise<Acti
 }
 
 export async function deleteMenuItem(form: FormData) {
-  await requireStaff();
+  await requireArea("content");
   const db = await getDb();
   await db.delete(schema.menuItems).where(eq(schema.menuItems.id, uuid.parse(form.get("id"))));
   revalidatePath("/", "layout");
@@ -567,7 +570,7 @@ export async function sendTestEmail(_: ActionState, form: FormData): Promise<Act
 // ─── Automation ──────────────────────────────────────────────────────────────
 
 export async function runAutomationNow(): Promise<ActionState> {
-  await requireStaff();
+  await requireArea("billing");
   const r = await runAutomation();
   revalidatePath("/admin/automation");
   const summary = `Invoices: ${r.invoiced} · Reminders: ${r.reminded} · Suspended: ${r.suspended} · Terminated: ${r.terminated}`;

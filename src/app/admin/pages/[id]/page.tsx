@@ -6,8 +6,10 @@ import { Button, ButtonLink, Card, CardHeader, Field, Input, PageHeader, Select,
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { deletePage, savePage } from "../../actions";
+import { requireArea } from "@/lib/auth";
 
 export default async function PageEditor({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("content");
   const { id } = await params;
   const isNew = id === "new";
   if (!isNew && !/^[0-9a-f-]{36}$/i.test(id)) notFound();

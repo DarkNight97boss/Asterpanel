@@ -1,17 +1,23 @@
+import { redirect } from "next/navigation";
 import Link from "next/link";
 import { and, count, desc, eq, gte, inArray, isNotNull, ne, sum } from "drizzle-orm";
 import { Badge, Card, CardHeader, EmptyState, Stat, StatusBadge, STATUS_LABEL, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireStaff } from "@/lib/auth";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { nodeIsOnline } from "@/platform/engine";
+import { AREA_HOME, staffAreas, staffCan } from "@/lib/staff";
 
 /** Server components render once per request: reading the clock here is fine. */
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000);
 
 export default async function AdminDashboard() {
+  const me = await requireStaff();
+  // The dashboard shows revenue and operations: roles with neither start in their own area.
+  if (!staffCan(me, "billing") && !staffCan(me, "platform")) redirect(AREA_HOME[staffAreas(me)[0]]);
+  const showMoney = staffCan(me, "billing");
   const db = await getDb();
   const [t, locale, billing] = await Promise.all([getT(), getLocale(), getSettings("billing")]);
   const monthStart = new Date(Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), 1));
@@ -25,6 +31,7 @@ export default async function AdminDashboard() {
     db.select({ n: count() }).from(schema.tickets).where(inArray(schema.tickets.status, ["open", "customer_reply"])),
     db.query.orders.findMany({ with: { client: { columns: { passwordHash: false } } }, orderBy: desc(schema.orders.createdAt), limit: 8 }),
   ]);
+  if (!showMoney) orders.length = 0;
   // ── Platform operations ──
   const dayAgo = hoursAgo(24);
   const [nodes, workloadCounts, failedJobs, stuckServices] = await Promise.all([
@@ -49,9 +56,9 @@ export default async function AdminDashboard() {
     <>
       <h1 className="mb-6 text-2xl tracking-tight">{t("Dashboard")}</h1>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <Stat label={t("Revenue this month")} value={money(revenue.total)} />
+        <Stat label={t("Revenue this month")} value={showMoney ? money(revenue.total) : "—"} />
         <Stat label={t("Active services")} value={active.n} hint={pending.n ? t("{n} pending activation", { n: pending.n }) : undefined} />
-        <Stat label={t("Unpaid invoices")} value={unpaid.n} hint={money(unpaid.total)} />
+        <Stat label={t("Unpaid invoices")} value={unpaid.n} hint={showMoney ? money(unpaid.total) : undefined} />
         <Stat label={t("Tickets awaiting reply")} value={tickets.n} hint={t("{n} clients", { n: clients.n })} />
       </div>
       <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

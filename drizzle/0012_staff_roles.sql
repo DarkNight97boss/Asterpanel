@@ -1,0 +1,1 @@
+ALTER TABLE "users" ADD COLUMN "staff_role" text DEFAULT '' NOT NULL;

@@ -3,11 +3,12 @@ import { desc } from "drizzle-orm";
 import { Card, EmptyState, PageHeader, StatusBadge, STATUS_LABEL, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDateTime, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 
 export default async function Orders() {
+  await requireArea("billing");
   const db = await getDb();
   const [t, locale, billing, orders] = await Promise.all([
     getT(),

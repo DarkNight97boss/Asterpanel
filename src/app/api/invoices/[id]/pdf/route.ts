@@ -1,4 +1,5 @@
-import { getUser, isStaff } from "@/lib/auth";
+import { getUser } from "@/lib/auth";
+import { staffCan } from "@/lib/staff";
 import { renderInvoicePdf } from "@/lib/invoice-pdf";
 import { loadInvoice } from "@/lib/invoices";
 import { listAccounts, roleCan } from "@/lib/roles";
@@ -13,7 +14,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const invoice = await loadInvoice((await params).id);
   // Same answer for "missing" and "not yours": ids must not be probeable.
   const mine = invoice && (invoice.clientId === user.id || (await listAccounts(user)).some((a) => a.id === invoice.companyId && roleCan(a.role, "billing")));
-  if (!invoice || (!mine && !isStaff(user))) return new Response("Not found", { status: 404 });
+  if (!invoice || (!mine && !staffCan(user, "billing"))) return new Response("Not found", { status: 404 });
 
   const { filename, bytes } = await renderInvoicePdf(invoice);
   const disposition = new URL(request.url).searchParams.has("download") ? "attachment" : "inline";

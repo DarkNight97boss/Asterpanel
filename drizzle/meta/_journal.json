@@ -85,6 +85,13 @@
       "when": 1789820743209,
       "tag": "0011_offsite_backups",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1789821176501,
+      "tag": "0012_staff_roles",
+      "breakpoints": true
     }
   ]
 }

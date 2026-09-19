@@ -3,10 +3,11 @@ import { and, desc, eq, ilike, or } from "drizzle-orm";
 import { Card, EmptyState, Input, PageHeader, StatusBadge, STATUS_LABEL, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDate } from "@/lib/format";
 
 export default async function Clients({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
+  await requireArea("clients");
   const q = ((await searchParams).q ?? "").trim().slice(0, 100);
   const like = `%${q.replace(/[%_\\]/g, "\\$&")}%`;
   const db = await getDb();

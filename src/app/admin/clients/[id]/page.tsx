@@ -6,12 +6,13 @@ import { ProfileFields } from "@/components/profile-fields";
 import { Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, StatusBadge, STATUS_LABEL, Table, Td, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { displayName } from "@/lib/auth";
+import { displayName, requireArea } from "@/lib/auth";
 import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { saveClient } from "../../actions";
 
 export default async function ClientDetail({ params }: { params: Promise<{ id: string }> }) {
+  await requireArea("clients");
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
