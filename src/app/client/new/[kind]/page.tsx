@@ -127,6 +127,7 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
               )}
             </div>
           </Card>
+          <Field label={t("Discount code")} className="max-w-xs"><Input name="coupon" maxLength={40} autoComplete="off" className="uppercase" /></Field>
           <SubmitButton size="lg">{t("Create")}</SubmitButton>
         </ActionForm>
       )}

@@ -48,6 +48,8 @@ export async function placeOrder(input: {
   cycle: BillingCycle;
   domain: string;
   ip?: string;
+  /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
+  coupon?: string;
   /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
   pricing?: { first: number; recurring: number; label: string };
   /** Module-specific order options, stored as `service.moduleData.request`. */
@@ -65,11 +67,19 @@ export async function placeOrder(input: {
   if (product.requiresDomain && !input.domain) throw new BillingError("A domain is required");
 
   const setup = input.pricing ? 0 : (product.pricing.setup ?? 0);
-  const subtotal = price + setup;
+  const code = (input.coupon ?? "").trim().toUpperCase();
+  const coupon = code ? await usableCoupon(code) : null;
+  const discount = coupon ? Math.min(price + setup, coupon.kind === "percent" ? Math.round(((price + setup) * coupon.value) / 100) : coupon.value) : 0;
+  const subtotal = price + setup - discount;
   const tax = taxOn(subtotal, billing.taxRate);
   const total = subtotal + tax;
 
   const result = await db.transaction(async (tx) => {
+    if (coupon) {
+      // Claimed inside the order transaction: the last use cannot be taken twice, and a failed order gives it back.
+      const [claimed] = await tx.update(schema.coupons).set({ used: sql`${schema.coupons.used} + 1` }).where(and(eq(schema.coupons.id, coupon.id), or(eq(schema.coupons.maxUses, 0), lt(schema.coupons.used, schema.coupons.maxUses)))).returning({ id: schema.coupons.id });
+      if (!claimed) throw new BillingError("This discount code has been used up");
+    }
     const [order] = await tx
       .insert(schema.orders)
       .values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" })
@@ -110,6 +120,7 @@ export async function placeOrder(input: {
       ...(setup > 0
         ? [{ invoiceId: invoice.id, serviceId: service.id, kind: "setup" as const, description: `${product.name} — ${t("Setup fee")}`, amount: setup }]
         : []),
+      ...(discount > 0 ? [{ invoiceId: invoice.id, serviceId: null, kind: "discount" as const, description: `${t("Discount code")} ${coupon!.code}`, amount: -discount }] : []),
     ]);
     await tx.update(schema.orders).set({ invoiceId: invoice.id }).where(eq(schema.orders.id, order.id));
     return { orderId: order.id, invoiceId: invoice.id, serviceId: service.id };
@@ -207,6 +218,16 @@ export async function issueCreditNote(invoiceId: string, reason: string, actorId
   });
   await audit(actorId, "invoice.credited", "invoice", invoiceId, { creditNoteId: creditId });
   return creditId;
+}
+
+/** The coupon behind a code if it can be used right now; throws a message for the customer otherwise. */
+export async function usableCoupon(code: string) {
+  const db = await getDb();
+  const [c] = await db.select().from(schema.coupons).where(eq(schema.coupons.code, code.trim().toUpperCase()));
+  if (!c || !c.enabled) throw new BillingError("This discount code is not valid");
+  if (c.expiresAt && c.expiresAt < new Date()) throw new BillingError("This discount code has expired");
+  if (c.maxUses > 0 && c.used >= c.maxUses) throw new BillingError("This discount code has been used up");
+  return c;
 }
 
 /** Applies the effects of a paid invoice to the services it bills. */

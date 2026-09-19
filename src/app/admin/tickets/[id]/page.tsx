@@ -7,6 +7,7 @@ import { Button, Card, PageHeader, StatusBadge, STATUS_LABEL, Textarea } from "@
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
 import { displayName, requireArea } from "@/lib/auth";
+import { CannedPicker } from "@/components/canned-picker";
 import { setTicketStatus, staffReply } from "../../actions";
 
 export default async function AdminTicket({ params }: { params: Promise<{ id: string }> }) {
@@ -14,6 +15,7 @@ export default async function AdminTicket({ params }: { params: Promise<{ id: st
   const { id } = await params;
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
+  const canned = await db.select({ title: schema.cannedReplies.title, body: schema.cannedReplies.body }).from(schema.cannedReplies).orderBy(schema.cannedReplies.title);
   const ticket = await db.query.tickets.findFirst({
     where: eq(schema.tickets.id, id),
     with: {
@@ -48,7 +50,8 @@ export default async function AdminTicket({ params }: { params: Promise<{ id: st
       <Card className="mt-6 p-5">
         <ActionForm action={staffReply}>
           <input type="hidden" name="ticketId" value={ticket.id} />
-          <Textarea name="body" rows={6} required placeholder={t("Write a reply…")} />
+          <CannedPicker target="reply-body" replies={canned} placeholder={t("Insert a canned reply…")} />
+          <Textarea id="reply-body" name="body" rows={6} required placeholder={t("Write a reply…")} />
           <SubmitButton>{t("Send reply")}</SubmitButton>
         </ActionForm>
       </Card>
