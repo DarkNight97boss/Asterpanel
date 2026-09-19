@@ -848,6 +848,8 @@ export const domainNames = pgTable(
     expiresAt: timestamp("expires_at", { withTimezone: true }),
     nameservers: jsonb("nameservers").$type<string[]>().notNull().default([]),
     locked: boolean("locked").notNull().default(true),
+    /** Registrant details hidden from public WHOIS. */
+    privacy: boolean("privacy").notNull().default(false),
     /** Registrant snapshot used for the registration. */
     contact: jsonb("contact").$type<Record<string, string>>().notNull().default({}),
     syncedAt: timestamp("synced_at", { withTimezone: true }),

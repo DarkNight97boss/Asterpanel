@@ -8,7 +8,7 @@ import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { refresh, revealAuthCode, saveContact, saveNameservers, toggleLock } from "../actions";
+import { refresh, revealAuthCode, saveContact, saveNameservers, toggleLock, togglePrivacy } from "../actions";
 
 export default async function DomainDetail({ params }: { params: Promise<{ id: string }> }) {
   const { account, can } = await requireAccount("hosting");
@@ -77,6 +77,12 @@ export default async function DomainDetail({ params }: { params: Promise<{ id: s
               <Card>
                 <CardHeader title={t("Transfer away")} description={t("The lock stops anyone from moving the domain to another registrar. Unlock it and get the transfer code only when you really want to move it.")} />
                 <div className="space-y-4 p-5">
+                  <DataField label={t("WHOIS privacy")}>{d.privacy ? t("Your details are hidden from public WHOIS") : t("Your details are public, where the registry publishes them")}</DataField>
+                  <ActionForm action={togglePrivacy}>
+                    <input type="hidden" name="id" value={d.id} />
+                    <input type="hidden" name="privacy" value={d.privacy ? "0" : "1"} />
+                    <SubmitButton variant="secondary">{d.privacy ? t("Show my details") : t("Hide my details")}</SubmitButton>
+                  </ActionForm>
                   <DataField label={t("Transfer lock")}>{d.locked ? `🔒 ${t("Locked")}` : t("Unlocked")}</DataField>
                   <ActionForm action={toggleLock}>
                     <input type="hidden" name="id" value={d.id} />

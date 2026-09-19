@@ -8,7 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { requireAccount } from "@/lib/account";
 import { BillingError } from "@/lib/billing";
-import { domainAuthCode, DomainError, orderDomain, setDomainLock, setDomainNameservers, syncDomain, updateDomainContact } from "@/lib/domains";
+import { domainAuthCode, DomainError, orderDomain, setDomainLock, setDomainNameservers, setDomainPrivacy, syncDomain, updateDomainContact } from "@/lib/domains";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 
@@ -68,6 +68,17 @@ export async function saveContact(_: ActionState, form: FormData): Promise<Actio
     return fail(err);
   }
   return { ok: "Saved. The registry may email the old and the new address to confirm the change." };
+}
+
+export async function togglePrivacy(_: ActionState, form: FormData): Promise<ActionState> {
+  try {
+    const { user, id } = await mine(form, "manage");
+    await setDomainPrivacy(id, form.get("privacy") === "1", user.id);
+    revalidatePath(`/client/domains/${id}`);
+  } catch (err) {
+    return fail(err);
+  }
+  return { ok: "Saved" };
 }
 
 export async function toggleLock(_: ActionState, form: FormData): Promise<ActionState> {

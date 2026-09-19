@@ -1,0 +1,1 @@
+ALTER TABLE "domain_names" ADD COLUMN "privacy" boolean DEFAULT false NOT NULL;

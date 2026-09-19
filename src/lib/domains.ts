@@ -336,6 +336,14 @@ export async function setDomainLock(domainId: string, locked: boolean, actorId: 
   await audit(actorId, locked ? "domain.locked" : "domain.unlocked", "domain", d.id);
 }
 
+/** Hides or shows the registrant in public WHOIS. Registries that already hide personal data (.it, most of the EU) need nothing. */
+export async function setDomainPrivacy(domainId: string, enabled: boolean, actorId: string | null = null) {
+  const { d, mod, creds } = await manageable(domainId);
+  await wrap(() => mod.setPrivacy(creds, d.name, enabled, http));
+  await (await getDb()).update(schema.domainNames).set({ privacy: enabled }).where(eq(schema.domainNames.id, d.id));
+  await audit(actorId, enabled ? "domain.privacy_on" : "domain.privacy_off", "domain", d.id);
+}
+
 /** New registrant and contact details, sent to the registry and kept as the domain's snapshot. */
 export async function updateDomainContact(domainId: string, input: Record<string, unknown>, actorId: string | null = null) {
   const { d, mod, creds } = await manageable(domainId);

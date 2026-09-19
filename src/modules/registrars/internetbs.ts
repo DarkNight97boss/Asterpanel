@@ -97,6 +97,10 @@ export const internetbs: RegistrarModule = {
     await call(c, http, "/Domain/Update", { Domain: domain, Ns_list: nameservers.join(",") });
   },
 
+  async setPrivacy(c, domain, enabled, http) {
+    await call(c, http, `/Domain/PrivateWhois/${enabled ? "Enable" : "Disable"}`, { Domain: domain });
+  },
+
   async updateContact(c, domain, contact, http) {
     await call(c, http, "/Domain/Update", { Domain: domain, ...contactParams(contact, domain) });
   },
