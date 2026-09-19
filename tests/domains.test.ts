@@ -263,7 +263,7 @@ test("Openprovider: token login, {name, extension} domains, customer handles, nu
   calls.length = 0;
   await domains.setDomainPrivacy(domainId, true);
   const put = calls.find((c) => c.params.__method === "PUT")!;
-  assert.ok(put.url.endsWith("/domains/555") && put.params.is_private_whois_enabled === true);
+  assert.ok(put.url.endsWith("/domains/555") && (put.params as Record<string, unknown>).is_private_whois_enabled === true);
   assert.equal((await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, domainId)))[0].privacy, true);
 
   await updateSettings("registrars", { ...current, accounts: { ...current.accounts, openprovider: { username: "reseller", password: "wrong", sandbox: "1" } } });
