@@ -505,6 +505,23 @@ export const ipLeases = pgTable(
   (t) => [index("ip_leases_pool_idx").on(t.poolId)],
 );
 
+/** Address blocks leased on a marketplace (IPXO): what the company pays for, its LOA, and the pool that hands it out. */
+export const ipBlocks = pgTable("ip_blocks", {
+  id: id(),
+  source: text("source").notNull().default("ipxo"),
+  cidr: text("cidr").notNull().unique(),
+  /** The marketplace's subscription, to follow renewals and the end of the lease. */
+  subscriptionRef: text("subscription_ref").notNull().default(""),
+  status: text("status").$type<"active" | "ended">().notNull().default("active"),
+  /** The AS number the letter of authorisation was asked for. */
+  asn: integer("asn"),
+  loaStatus: text("loa_status").$type<"none" | "requested" | "active">().notNull().default("none"),
+  renewsAt: timestamp("renews_at", { withTimezone: true }),
+  poolId: uuid("pool_id").references(() => ipPools.id, { onDelete: "set null" }),
+  syncedAt: timestamp("synced_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
 export const WORKLOAD_TYPES = ["wordpress", "app", "database", "static"] as const;
 export type WorkloadType = (typeof WORKLOAD_TYPES)[number];
 export type WorkloadStatus = "creating" | "running" | "stopped" | "suspended" | "error" | "deleting" | "deleted";

@@ -160,6 +160,19 @@ export const settingsSchemas = {
     privateKey: z.string().default(""),
     webhookSecret: z.string().default(""),
   }),
+  /** Encrypted: the IPXO marketplace account address blocks are leased from. */
+  ipxo: z.object({
+    enabled: z.boolean().default(false),
+    clientId: z.string().default(""),
+    clientSecret: z.string().default(""),
+    tenantUuid: z.string().default(""),
+    /** OAuth scopes the app key was granted, space separated. */
+    scopes: z.string().default("billing"),
+    /** The AS number that announces the leased blocks (yours, or your provider's for BYOIP). */
+    asn: z.string().default(""),
+    /** Company name written on letters of authorisation. */
+    companyName: z.string().default(""),
+  }),
   /** Hours within which staff should answer a waiting ticket, by priority. */
   support: z.object({ slaLow: z.number().int().min(1).max(720).default(48), slaMedium: z.number().int().min(1).max(720).default(24), slaHigh: z.number().int().min(1).max(720).default(4) }),
   registrars: z.object({
@@ -189,7 +202,7 @@ export const settingsSchemas = {
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud", "github"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud", "github", "ipxo"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

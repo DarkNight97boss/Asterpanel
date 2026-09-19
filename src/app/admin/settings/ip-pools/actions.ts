@@ -7,7 +7,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAdmin } from "@/lib/auth";
-import { createIpPool, deleteIpPool, IpPoolError, releaseAddress } from "@/lib/ip-pools";
+import { assignAddress, createIpPool, deleteIpPool, IpPoolError, releaseAddress } from "@/lib/ip-pools";
 
 const PATH = "/admin/settings/ip-pools";
 const fail = (err: unknown): ActionState => {
@@ -58,4 +58,15 @@ export async function removePool(_: ActionState, form: FormData): Promise<Action
   }
   revalidatePath(PATH);
   return { ok: "Removed" };
+}
+
+export async function assignIp(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  try {
+    await assignAddress(z.string().uuid().parse(form.get("poolId")), z.string().uuid().parse(form.get("nodeId")), admin.id);
+  } catch (err) {
+    return fail(err);
+  }
+  revalidatePath(PATH);
+  return { ok: "Saved" };
 }

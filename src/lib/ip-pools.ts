@@ -15,18 +15,23 @@ import { blockCapacity, cidrContains, isPublicCidr, nextFreeAddress } from "./ip
 
 export class IpPoolError extends Error {}
 
+/** Pool "provider" for servers the company owns: nothing to call, addresses are assigned by hand. */
+export const OWN_SERVERS = "own";
+
 /** A pool serves a server when the provider matches and the server's region lies in the pool's (GCP zones sit inside regions). */
 const serves = (pool: { provider: string; region: string }, provider: string, region: string) => pool.provider === provider && (region === pool.region || region.startsWith(`${pool.region}-`));
 
 export async function createIpPool(input: { name: string; provider: string; region: string; mode: "block" | "reserved"; cidr: string; autoLease: boolean }, actorId: string | null = null): Promise<string> {
-  const provider = getCloudProvider(input.provider);
-  if (!provider?.reserveIp) throw new IpPoolError("This provider cannot reserve addresses");
+  // "own": the company's own servers. The panel keeps the books; the administrator routes the block to them.
+  const own = input.provider === OWN_SERVERS;
+  if (own && input.mode !== "block") throw new IpPoolError("On your own servers a pool is a block of yours");
+  if (!own && !getCloudProvider(input.provider)?.reserveIp) throw new IpPoolError("This provider cannot reserve addresses");
   const name = input.name.trim().slice(0, 60);
   const region = input.region.trim().toLowerCase();
   if (!name || !/^[a-z0-9][a-z0-9-]{1,40}$/.test(region)) throw new IpPoolError("Give the pool a name and a region");
   const cidr = input.mode === "block" ? input.cidr.trim() : "";
   if (input.mode === "block") {
-    if (input.provider === "hetzner") throw new IpPoolError("Hetzner Cloud cannot host your own block: use a pool of reserved addresses there");
+    if (input.provider === "hetzner") throw new IpPoolError("Hetzner does not announce customers' own or leased blocks: use a pool of reserved addresses there");
     if (!isPublicCidr(cidr)) throw new IpPoolError("Enter a public IPv4 block such as 203.0.113.0/28 (between /16 and /32, on its boundary)");
     const db = await getDb();
     const others = await db.select().from(schema.ipPools).where(eq(schema.ipPools.mode, "block"));
@@ -34,7 +39,7 @@ export async function createIpPool(input: { name: string; provider: string; regi
     const clash = others.find((o) => cidrContains(o.cidr, cidr.split("/")[0]) || cidrContains(cidr, o.cidr.split("/")[0]));
     if (clash) throw new IpPoolError(`This block overlaps the pool “${clash.name}”`);
   }
-  const [row] = await (await getDb()).insert(schema.ipPools).values({ name, provider: input.provider, region, mode: input.mode, cidr, autoLease: input.autoLease }).returning({ id: schema.ipPools.id });
+  const [row] = await (await getDb()).insert(schema.ipPools).values({ name, provider: input.provider, region, mode: input.mode, cidr, autoLease: own ? false : input.autoLease }).returning({ id: schema.ipPools.id });
   await audit(actorId, "ippool.created", "ip_pool", row.id, { provider: input.provider, region, mode: input.mode, cidr });
   return row.id;
 }
@@ -77,6 +82,28 @@ export async function leaseAddress(providerId: string, region: string, nodeId: s
   return null;
 }
 
+/** The next free address of a block on the company's own servers, booked for one of them. Configuring it on the machine stays with the administrator. */
+export async function assignAddress(poolId: string, nodeId: string, actorId: string | null = null): Promise<string> {
+  const db = await getDb();
+  const [pool] = await db.select().from(schema.ipPools).where(eq(schema.ipPools.id, poolId));
+  const [node] = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId));
+  if (!pool || pool.provider !== OWN_SERVERS || !pool.enabled) throw new IpPoolError("Pool not found");
+  if (!node || node.provider) throw new IpPoolError("Choose one of your own servers");
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const taken = (await db.select({ address: schema.ipLeases.address }).from(schema.ipLeases).where(eq(schema.ipLeases.poolId, pool.id))).map((l) => l.address);
+    const address = nextFreeAddress(pool.cidr, taken);
+    if (!address) throw new IpPoolError("This block has no free addresses left");
+    try {
+      await db.insert(schema.ipLeases).values({ poolId: pool.id, address, nodeId, leasedAt: new Date() });
+    } catch {
+      continue; // taken a moment ago (unique index): try the next one
+    }
+    await audit(actorId, "ippool.address_assigned", "ip_pool", pool.id, { address, node: node.name });
+    return address;
+  }
+  throw new IpPoolError("Could not book an address, try again");
+}
+
 /** The server was not created after all: the address goes back to the pool, still reserved. */
 export async function unlease(nodeId: string) {
   await (await getDb()).update(schema.ipLeases).set({ nodeId: null, leasedAt: null }).where(eq(schema.ipLeases.nodeId, nodeId));
@@ -87,14 +114,17 @@ export async function releaseAddress(leaseId: string, actorId: string | null = n
   const db = await getDb();
   const [row] = await db.select({ lease: schema.ipLeases, pool: schema.ipPools }).from(schema.ipLeases).innerJoin(schema.ipPools, eq(schema.ipPools.id, schema.ipLeases.poolId)).where(eq(schema.ipLeases.id, leaseId));
   if (!row) throw new IpPoolError("Address not found");
-  if (row.lease.nodeId) throw new IpPoolError("This address is in use by a server");
-  const { provider, creds } = await cloudAccount(row.pool.provider).catch(() => {
-    throw new IpPoolError("Enable the provider again to release its addresses");
-  });
-  try {
-    await provider.releaseIp?.(creds, row.lease.providerRef, row.pool.region, cloudHttp());
-  } catch (err) {
-    throw new IpPoolError(err instanceof CloudError ? err.message : "The cloud provider could not be reached");
+  // On own servers nothing is attached by the panel, so an assignment can simply be taken back.
+  if (row.lease.nodeId && row.pool.provider !== OWN_SERVERS) throw new IpPoolError("This address is in use by a server");
+  if (row.pool.provider !== OWN_SERVERS) {
+    const { provider, creds } = await cloudAccount(row.pool.provider).catch(() => {
+      throw new IpPoolError("Enable the provider again to release its addresses");
+    });
+    try {
+      await provider.releaseIp?.(creds, row.lease.providerRef, row.pool.region, cloudHttp());
+    } catch (err) {
+      throw new IpPoolError(err instanceof CloudError ? err.message : "The cloud provider could not be reached");
+    }
   }
   await db.delete(schema.ipLeases).where(eq(schema.ipLeases.id, row.lease.id));
   await audit(actorId, "ippool.address_released", "ip_pool", row.pool.id, { address: row.lease.address });
