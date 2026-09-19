@@ -195,6 +195,17 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   return { ok: "Migration started. A safety backup is taken first." };
 }
 
+export async function saveCronJobs(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload } = await requireWorkload(String(form.get("id")));
+  try {
+    await engine.saveCrons(workload.id, String(form.get("crons") ?? "").slice(0, 5000), user.id);
+  } catch (err) {
+    return fail(err);
+  }
+  refresh(workload.id);
+  return { ok: "Saved" };
+}
+
 export async function wpLogin(form: FormData) {
   const { user, workload } = await requireWorkload(String(form.get("id")));
   let jobId: string;

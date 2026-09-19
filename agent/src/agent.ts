@@ -183,9 +183,23 @@ export class Agent {
     }
   }
 
+  private lastCronMinute = -1;
+
+  /** At most once per wall-clock minute, whatever the polling interval is. */
+  async cronTick(now = new Date()): Promise<string[]> {
+    const minute = Math.floor(now.getTime() / 60_000);
+    if (minute === this.lastCronMinute) return [];
+    this.lastCronMinute = minute;
+    return this.opts.driver.runDueCrons(now).catch((err) => {
+      this.opts.onError?.(err);
+      return [];
+    });
+  }
+
   async run() {
     let delay = 3000;
     while (!this.stopped) {
+      void this.cronTick();
       try {
         delay = (await this.tick()).pollIntervalMs;
       } catch (err) {
