@@ -1,15 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { notFound } from "next/navigation";
-import { and, asc, eq } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Badge, Button, Card, CardHeader, DataField, EmptyState, Field, Input, PageHeader, Select, Table, Td } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, DataField, EmptyState, Field, Input, PageHeader, Select, Table, Td, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { DNS_TYPES } from "@/db/schema";
-import { getT } from "@/i18n";
+import { getLocale, getT } from "@/i18n";
+import { formatDateTime } from "@/lib/format";
+import { DNS_TEMPLATES } from "@/platform/dns-tools";
 import { requireAccount } from "@/lib/account";
 import { getSettings } from "@/lib/settings";
-import { addRecord, deleteRecord, deleteZone } from "../actions";
+import { addRecord, applyTemplate, deleteRecord, deleteZone, importZoneFile, restoreSnapshot } from "../actions";
 
 const ttlLabel = (s: number) => (s % 86400 === 0 ? `${s / 86400} d` : s % 3600 === 0 ? `${s / 3600} h` : s % 60 === 0 ? `${s / 60} min` : `${s} s`);
 
@@ -21,7 +23,7 @@ export default async function DnsZone({ params }: { params: Promise<{ zone: stri
   const db = await getDb();
   const [zone] = await db.select().from(schema.dnsZones).where(and(eq(schema.dnsZones.id, zoneId), eq(schema.dnsZones.companyId, account.id)));
   if (!zone) notFound();
-  const [t, dns, records] = await Promise.all([getT(), getSettings("dns"), db.select().from(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zone.id)).orderBy(asc(schema.dnsRecords.type), asc(schema.dnsRecords.name))]);
+  const [t, locale, snapshots, dns, records] = await Promise.all([getT(), getLocale(), db.select().from(schema.dnsSnapshots).where(eq(schema.dnsSnapshots.zoneId, zone.id)).orderBy(desc(schema.dnsSnapshots.createdAt)).limit(10), getSettings("dns"), db.select().from(schema.dnsRecords).where(eq(schema.dnsRecords.zoneId, zone.id)).orderBy(asc(schema.dnsRecords.type), asc(schema.dnsRecords.name))]);
 
   return (
     <>
@@ -79,6 +81,50 @@ export default async function DnsZone({ params }: { params: Promise<{ zone: stri
             <EmptyState title={t("No records yet")} description={t("Start with an A record for @ and one for www pointing to your server.")} />
           )}
         </Card>
+
+        <div className="grid items-start gap-6 xl:grid-cols-2">
+          <Card>
+            <CardHeader title={t("Ready-made records")} description={t("Adds the records a service needs. What is already there is left alone.")} />
+            <div className="p-6 pt-4">
+              <ActionForm action={applyTemplate}>
+                <input type="hidden" name="zoneId" value={zone.id} />
+                <Select name="template" defaultValue="">
+                  <option value="" disabled>{t("Choose a template")}</option>
+                  {DNS_TEMPLATES.map((tpl) => <option key={tpl.id} value={tpl.id}>{t(tpl.name)} — {t(tpl.description)}</option>)}
+                </Select>
+                <SubmitButton variant="secondary">{t("Add records")}</SubmitButton>
+              </ActionForm>
+            </div>
+          </Card>
+          <Card>
+            <CardHeader title={t("Import a zone file")} description={t("Paste the export of your current DNS provider (BIND format). SOA and NS records are skipped: those are set by us.")} />
+            <div className="p-6 pt-4">
+              <ActionForm action={importZoneFile}>
+                <input type="hidden" name="zoneId" value={zone.id} />
+                <Textarea name="zonefile" rows={5} required className="font-mono text-xs" placeholder={"www 3600 IN A 203.0.113.10\n@ IN MX 10 mail.example.com."} />
+                <SubmitButton variant="secondary">{t("Import")}</SubmitButton>
+              </ActionForm>
+            </div>
+          </Card>
+        </div>
+
+        {snapshots.length > 0 && (
+          <Card>
+            <CardHeader title={t("History")} description={t("The zone as it was before each change. Restoring can itself be undone.")} />
+            <ul className="divide-y divide-border border-t border-border">
+              {snapshots.map((sn) => (
+                <li key={sn.id} className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 text-sm">
+                  <span>{formatDateTime(sn.createdAt, locale)} <span className="ml-2 text-muted">{sn.reason} · {t("{n} records", { n: sn.records.length })}</span></span>
+                  <ActionForm action={restoreSnapshot} className="">
+                    <input type="hidden" name="zoneId" value={zone.id} />
+                    <input type="hidden" name="snapshotId" value={sn.id} />
+                    <SubmitButton size="sm" variant="ghost">{t("Restore this version")}</SubmitButton>
+                  </ActionForm>
+                </li>
+              ))}
+            </ul>
+          </Card>
+        )}
 
         <Card className="border-danger/40">
           <CardHeader title={t("Remove this domain")} description={t("All its records stop resolving as soon as the name servers update.")} />
