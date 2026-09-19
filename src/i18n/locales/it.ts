@@ -1868,6 +1868,15 @@ const it: Record<string, string> = {
   "Available for applications": "Disponibile per le applicazioni",
   "Up to 3 workers per app": "Fino a 3 worker per app",
   "Up to 3 persistent folders per app": "Fino a 3 cartelle persistenti per app",
+  "Add-ons": "Add-on",
+  "One per line: Name | price per month | extra RAM in MB | extra disk in GB (the last two optional).": "Uno per riga: Nome | prezzo al mese | RAM extra in MB | disco extra in GB (gli ultimi due facoltativi).",
+  "Price list: discount on catalogue prices (%)": "Listino: sconto sui prezzi di catalogo (%)",
+  "For resellers and agencies. 0 = list prices.": "Per rivenditori e agenzie. 0 = prezzi di listino.",
+  "Saved. It applies to new orders and plan changes; services already active keep their price.": "Salvato. Vale per nuovi ordini e cambi piano; i servizi già attivi mantengono il loro prezzo.",
+  "Enter a percentage between 0 and 90": "Inserisci una percentuale tra 0 e 90",
+  "An add-on is no longer available": "Un add-on non è più disponibile",
+  "Up to 10 add-ons, each with its own name": "Fino a 10 add-on, ciascuno con un nome diverso",
+  "{name} is over its disk quota ({used} of {quota} GB)": "{name} ha superato la quota disco ({used} di {quota} GB)",
 };
 
 export default it;

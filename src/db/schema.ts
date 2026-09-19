@@ -133,6 +133,8 @@ export const companies = pgTable("companies", {
   vatValidatedName: text("vat_validated_name").notNull().default(""),
   /** Customer object at Stripe that holds this company's saved cards. */
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
+  /** Reseller / agency price list: percentage taken off catalogue prices, first invoice and renewals alike. */
+  discountPercent: integer("discount_percent").notNull().default(0),
   /** Code other people sign up with to credit this company (created on first use). */
   referralCode: text("referral_code").unique(),
   /** The company whose code brought this one in. */
@@ -251,6 +253,8 @@ export type BillingCycle = (typeof BILLING_CYCLES)[number];
 /** Price in cents per enabled cycle, plus an optional one-off setup fee. */
 export type Pricing = Partial<Record<BillingCycle, number>> & { setup?: number };
 
+export type ProductAddon = { id: string; name: string; monthly: number; memoryMb?: number; diskGb?: number };
+
 export const products = pgTable(
   "products",
   {
@@ -269,6 +273,8 @@ export const products = pgTable(
     module: text("module").notNull().default("manual"),
     /** Module-specific product options (e.g. the WHM package name). */
     moduleConfig: jsonb("module_config").$type<Record<string, string>>().notNull().default({}),
+    /** Optional extras sold with the plan, priced per month; resource extras are added to the plan's limits. */
+    addons: jsonb("addons").$type<ProductAddon[]>().notNull().default([]),
     serverId: uuid("server_id").references(() => servers.id, { onDelete: "set null" }),
     featured: boolean("featured").notNull().default(false),
     hidden: boolean("hidden").notNull().default(false),

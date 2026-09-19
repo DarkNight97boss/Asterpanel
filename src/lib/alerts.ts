@@ -28,10 +28,13 @@ export async function accountAlerts(accountId: string, role: AccountRole, now = 
   }
 
   if (roleCan(role, "hosting")) {
-    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt, config: schema.workloads.config }).from(schema.workloads).where(eq(schema.workloads.companyId, accountId))).filter((w) => !only || only.includes(w.id));
+    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt, config: schema.workloads.config, runtime: schema.workloads.runtime }).from(schema.workloads).where(eq(schema.workloads.companyId, accountId))).filter((w) => !only || only.includes(w.id));
     for (const w of mine) {
       if (w.status === "error") alerts.push({ kind: "workload", text: "{name} needs attention", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
       if (w.status !== "deleted" && (w.config.scanFindings ?? 0) > 0) alerts.push({ kind: "workload", text: "Security scan: {n} findings on {name}", vars: { name: w.name, n: String(w.config.scanFindings) }, href: `/client/workloads/${w.id}/security`, at: new Date(w.config.scanLastAt ?? w.updatedAt) });
+      // Soft quota: nothing is cut off, but someone has to clean up or buy more room.
+      const quotaMb = (w.config.diskGb ?? 0) * 1024;
+      if (w.status !== "deleted" && quotaMb > 0 && (w.runtime.diskUsedMb ?? 0) > quotaMb) alerts.push({ kind: "workload", text: "{name} is over its disk quota ({used} of {quota} GB)", vars: { name: w.name, used: ((w.runtime.diskUsedMb ?? 0) / 1024).toFixed(1), quota: String(w.config.diskGb) }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
       if (w.status === "suspended") alerts.push({ kind: "workload", text: "{name} is suspended", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
     }
     const live = mine.filter((w) => w.status !== "deleted");

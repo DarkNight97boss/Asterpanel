@@ -135,3 +135,27 @@ test("referrals: commission as credit, once per invoice, on real money only, ins
   assert.equal((await balance()) - before, 600);
   await updateSettings("billing", { ...(await getSettings("billing")), referralPercent: 0 });
 });
+
+test("price lists and add-ons: discounted catalogue prices, extras billed with the plan, resources follow", async () => {
+  const db = await dbm.getDb();
+  const [g] = await db.select().from(dbm.schema.productGroups).limit(1);
+  const [plan] = await db.insert(dbm.schema.products).values({ groupId: g.id, slug: "addon-plan", name: "Addon Plan", requiresDomain: false, pricing: { monthly: 2000, annually: 20_000 }, addons: [{ id: "disk", name: "Extra 10 GB", monthly: 200, diskGb: 10 }, { id: "ram", name: "Extra RAM", monthly: 400, memoryMb: 1024 }] }).returning();
+  const [agency] = await db.insert(dbm.schema.companies).values({ name: "Agency", discountPercent: 25 }).returning();
+  const [plain] = await db.insert(dbm.schema.companies).values({ name: "Plain" }).returning();
+  const order = async (companyId: string, cycle: "monthly" | "annually", addonIds: string[]) => {
+    const r = await billing.placeOrder({ clientId, companyId, productId: plan.id, cycle, domain: "", addonIds });
+    const [inv] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, r.invoiceId));
+    const [svc] = await db.select().from(dbm.schema.services).where(eq(dbm.schema.services.id, r.serviceId));
+    const [item] = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, r.invoiceId));
+    return { inv, svc, item };
+  };
+  const a = await order(plain.id, "monthly", ["disk"]);
+  assert.deepEqual([a.inv.subtotal, a.svc.amount], [2200, 2200], "the add-on renews with the plan");
+  assert.match(a.item.description, /Addon Plan \+ Extra 10 GB/);
+  const b = await order(plain.id, "annually", ["disk", "ram"]);
+  assert.equal(b.inv.subtotal, 20_000 + 12 * 600, "monthly add-on prices times the cycle");
+  const c = await order(agency.id, "monthly", ["ram"]);
+  assert.deepEqual([c.inv.subtotal, c.svc.amount], [1800, 1800], "25% off list price and add-on alike");
+  await assert.rejects(billing.placeOrder({ clientId, companyId: plain.id, productId: plan.id, cycle: "monthly", domain: "", addonIds: ["nope"] }), /no longer available/);
+  assert.deepEqual((a.svc.moduleData.addons as { id: string }[]).map((x) => x.id), ["disk"]);
+});

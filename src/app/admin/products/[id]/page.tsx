@@ -48,6 +48,9 @@ export default async function ProductEditor({ params }: { params: Promise<{ id: 
             <Field label={t("Features")} hint={t("One per line.")} className="sm:col-span-2">
               <Textarea name="features" defaultValue={product?.features.join("\n")} rows={6} />
             </Field>
+            <Field label={t("Add-ons")} hint={t("One per line: Name | price per month | extra RAM in MB | extra disk in GB (the last two optional).")} className="sm:col-span-2">
+              <Textarea name="addons" rows={3} className="font-mono text-xs" defaultValue={(product?.addons ?? []).map((a) => `${a.name} | ${(a.monthly / 100).toFixed(2)} | ${a.memoryMb ?? 0} | ${a.diskGb ?? 0}`).join("\n")} placeholder={"Extra 10 GB disk | 2.00 | 0 | 10\nExtra 1 GB RAM | 4.00 | 1024 | 0"} />
+            </Field>
             <Field label={t("Sort order")}><Input name="position" type="number" defaultValue={product?.position ?? 0} /></Field>
             <div className="flex flex-wrap items-end gap-x-6 gap-y-2 pb-2">
               <Checkbox name="requiresDomain" defaultChecked={product?.requiresDomain ?? true} label={t("Requires a domain")} />

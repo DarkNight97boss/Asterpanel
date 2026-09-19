@@ -68,6 +68,17 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
                     <span className="mt-2 block text-xs text-muted">
                       {p.moduleConfig.memoryMb} MB RAM · {p.moduleConfig.cpus} vCPU · {p.moduleConfig.diskGb} GB
                     </span>
+                    {/* Shown only for the plan that is ticked: each plan sells its own extras. */}
+                    {p.addons.length > 0 && (
+                      <span className="mt-3 hidden space-y-1.5 border-t border-border pt-3 text-sm [label:has(input[type=radio]:checked)_&]:block">
+                        {p.addons.map((a) => (
+                          <span key={a.id} className="flex items-center justify-between gap-3">
+                            <span className="flex items-center gap-2"><input type="checkbox" name="addon" value={`${p.id}:${a.id}`} className="accent-(--accent)" />{a.name}</span>
+                            <span className="text-xs text-muted">+{formatMoney(a.monthly, billing.currency, locale)}{t(CYCLE_SUFFIX.monthly)}</span>
+                          </span>
+                        ))}
+                      </span>
+                    )}
                   </label>
                 );
               })}

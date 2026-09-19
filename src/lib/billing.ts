@@ -49,6 +49,8 @@ export async function placeOrder(input: {
   cycle: BillingCycle;
   domain: string;
   ip?: string;
+  /** Ids of the product's add-ons chosen with the order. */
+  addonIds?: string[];
   /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
   coupon?: string;
   /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
@@ -63,8 +65,16 @@ export async function placeOrder(input: {
   const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
   // Hidden products are system entries, only orderable with a price from the caller.
   if (!product || (product.hidden && !input.pricing)) throw new BillingError("Product not available");
-  const price = input.pricing?.first ?? product.pricing[input.cycle];
-  if (typeof price !== "number") throw new BillingError("Billing cycle not available for this product");
+  const listPrice = input.pricing?.first ?? product.pricing[input.cycle];
+  if (typeof listPrice !== "number") throw new BillingError("Billing cycle not available for this product");
+  // Add-ons are priced per month and billed with the plan's cycle.
+  const addons = input.pricing ? [] : product.addons.filter((a) => input.addonIds?.includes(a.id));
+  if (addons.length !== new Set(input.addonIds ?? []).size && !input.pricing) throw new BillingError("An add-on is no longer available");
+  const months = CYCLE_MONTHS[input.cycle] || 1;
+  const addonsPrice = addons.reduce((sum, a) => sum + a.monthly * months, 0);
+  // A company's own price list (resellers, agencies) applies to catalogue prices, never to caller-decided ones (domains).
+  const listDiscount = input.pricing || !input.companyId ? 0 : ((await db.select({ p: schema.companies.discountPercent }).from(schema.companies).where(eq(schema.companies.id, input.companyId)))[0]?.p ?? 0);
+  const price = Math.round(((listPrice + addonsPrice) * (100 - Math.min(90, Math.max(0, listDiscount)))) / 100);
   if (product.requiresDomain && !input.domain) throw new BillingError("A domain is required");
 
   const setup = input.pricing ? 0 : (product.pricing.setup ?? 0);
@@ -97,7 +107,7 @@ export async function placeOrder(input: {
         domain: input.domain.toLowerCase(),
         billingCycle: input.cycle,
         amount: input.pricing?.recurring ?? price,
-        moduleData: input.request ? { request: input.request } : {},
+        moduleData: { ...(input.request ? { request: input.request } : {}), ...(addons.length ? { addons } : {}) },
       })
       .returning();
     const [invoice] = await tx
@@ -117,7 +127,8 @@ export async function placeOrder(input: {
       .returning();
 
     // Invoice lines are a legal record: written once, in the site language.
-    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t(input.pricing.period ?? "1 year")})` : `${product.name}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
+    const extras = addons.length ? ` + ${addons.map((a) => a.name).join(", ")}` : "";
+    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t(input.pricing.period ?? "1 year")})` : `${product.name}${extras}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
     await tx.insert(schema.invoiceItems).values([
       { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: label, amount: price },
       ...(setup > 0
@@ -306,7 +317,11 @@ export async function changePlan(serviceId: string, productId: string, actorId: 
     if (open?.status === "unpaid") throw new BillingError("A plan change is already waiting for payment");
   }
 
-  const price = target.pricing[svc.billingCycle]!;
+  // Same rules as at order time: the add-ons the service carries, then the company's price list.
+  const carried = (Array.isArray(svc.moduleData.addons) ? svc.moduleData.addons : []) as { monthly?: number }[];
+  const months = CYCLE_MONTHS[svc.billingCycle] || 1;
+  const listDiscount = svc.companyId ? ((await db.select({ p: schema.companies.discountPercent }).from(schema.companies).where(eq(schema.companies.id, svc.companyId)))[0]?.p ?? 0) : 0;
+  const price = Math.round(((target.pricing[svc.billingCycle]! + carried.reduce((sum, a) => sum + (Number(a.monthly) || 0) * months, 0)) * (100 - Math.min(90, Math.max(0, listDiscount)))) / 100);
   const prorated = Math.round((price - svc.amount) * remainingFraction(svc.nextDueDate, svc.billingCycle, now));
   if (prorated <= 0) {
     await applyPlan(svc.id, target.id, price, actorId);
