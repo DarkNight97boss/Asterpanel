@@ -903,6 +903,31 @@ export const paymentMethods = pgTable(
   (t) => [index("payment_methods_company_idx").on(t.companyId)],
 );
 
+/** An offer staff writes for a customer. Accepting it turns it into an invoice. */
+export const quotes = pgTable(
+  "quotes",
+  {
+    id: id(),
+    number: serial("number").notNull(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    status: text("status").$type<"sent" | "accepted" | "declined" | "withdrawn">().notNull().default("sent"),
+    title: text("title").notNull(),
+    items: jsonb("items").$type<{ description: string; amount: number }[]>().notNull().default([]),
+    notes: text("notes").notNull().default(""),
+    validUntil: timestamp("valid_until", { withTimezone: true }).notNull(),
+    invoiceId: uuid("invoice_id"),
+    createdBy: uuid("created_by"),
+    decidedAt: timestamp("decided_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("quotes_company_idx").on(t.companyId)],
+);
+
 // ─── Coupons, canned replies, incidents ──────────────────────────────────────
 
 /** A discount on the first invoice of an order. Renewals stay at list price. */

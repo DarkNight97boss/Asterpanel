@@ -180,3 +180,32 @@ test("coupons: discount the first invoice only, are claimed atomically and refus
   const [zero] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, free.invoiceId));
   assert.deepEqual([zero.total, zero.status], [0, "paid"]);
 });
+
+test("quotes: parsed strictly, accepted once into an invoice, never after expiry or by another company", async () => {
+  const db = await dbm.getDb();
+  const quotes = await import("../src/lib/quotes");
+  const roles = await import("../src/lib/roles");
+  assert.deepEqual(quotes.parseQuoteLines("Migration | 12 sites | 600.00\n\nAudit|250,5"), [{ description: "Migration | 12 sites", amount: 60_000 }, { description: "Audit", amount: 25_050 }]);
+  for (const bad of ["no amount here", "Free | 0", " | 10.00", "Negative | -5", ""]) assert.throws(() => quotes.parseQuoteLines(bad), billing.BillingError, bad);
+
+  const [user] = await db.select().from(dbm.schema.users).where(eq(dbm.schema.users.id, clientId));
+  const companyId = await roles.createCompany(user, "Quoted Ltd");
+  const other = await roles.createCompany(user, "Nosy Ltd");
+  const id = await quotes.createQuote({ companyId, title: "Migration", lines: "Migration | 600.00\nAudit | 250.00", notes: "", validDays: 30, actorId: null });
+
+  await assert.rejects(quotes.acceptQuote(id, other, null), /no longer open/, "another company cannot accept it");
+  const invoiceId = await quotes.acceptQuote(id, companyId, null);
+  const [inv] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  assert.deepEqual([inv.subtotal, inv.companyId, inv.status], [85_000, companyId, "unpaid"]);
+  assert.match(inv.notes, /Migration — quote #\d+/);
+  await assert.rejects(quotes.acceptQuote(id, companyId, null), /no longer open/, "only once");
+  assert.equal((await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.companyId, companyId))).length, 1);
+
+  const old = await quotes.createQuote({ companyId, title: "Old offer", lines: "Work | 100.00", notes: "", validDays: 1, actorId: null });
+  await db.update(dbm.schema.quotes).set({ validUntil: new Date(Date.now() - 1000) }).where(eq(dbm.schema.quotes.id, old));
+  await assert.rejects(quotes.acceptQuote(old, companyId, null), /expired/);
+  assert.equal((await db.select().from(dbm.schema.quotes).where(eq(dbm.schema.quotes.id, old)))[0].status, "sent", "an expired quote is not marked accepted");
+  await quotes.closeQuote(old, "withdrawn", null, null);
+  await assert.rejects(quotes.acceptQuote(old, companyId, null), /no longer open/);
+  await assert.rejects(billing.createCustomInvoice({ clientId, companyId, items: [{ description: "x", amount: 0 }] }), /at least one line/);
+});

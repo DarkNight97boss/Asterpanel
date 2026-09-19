@@ -228,6 +228,30 @@ export async function issueCreditNote(invoiceId: string, reason: string, actorId
   return creditId;
 }
 
+// ─── One-off invoices ────────────────────────────────────────────────────────
+
+/** An invoice for work that is not a catalogue service (a migration, an hour of consulting, an accepted quote). */
+export async function createCustomInvoice(input: { clientId: string; companyId: string | null; items: { description: string; amount: number }[]; notes?: string; dueInDays?: number; actorId?: string | null }): Promise<string> {
+  const items = input.items.filter((i) => i.description.trim() && Number.isInteger(i.amount) && i.amount !== 0).slice(0, 50);
+  const subtotal = items.reduce((sum, i) => sum + i.amount, 0);
+  if (!items.length || subtotal <= 0) throw new BillingError("Add at least one line with an amount");
+  const db = await getDb();
+  const billing = await getSettings("billing");
+  // Before the transaction: see taxFor's note about the single database connection.
+  const vat = await taxFor(input.companyId);
+  const tax = taxOn(subtotal, vat.rate);
+  const invoiceId = await db.transaction(async (tx) => {
+    const [inv] = await tx.insert(schema.invoices).values({ ...(await nextInvoiceNumber(tx)), clientId: input.clientId, companyId: input.companyId, currency: billing.currency, subtotal, taxRate: vat.rate, tax, total: subtotal + tax, notes: [input.notes?.trim(), vat.note].filter(Boolean).join("\n\n"), dueDate: new Date(Date.now() + (input.dueInDays ?? 0) * 86_400_000) }).returning({ id: schema.invoices.id });
+    await tx.insert(schema.invoiceItems).values(items.map((i) => ({ invoiceId: inv.id, kind: "custom" as const, description: i.description.trim().slice(0, 500), amount: i.amount })));
+    return inv.id;
+  });
+  await audit(input.actorId ?? null, "invoice.created", "invoice", invoiceId, { subtotal });
+  await applyCredit(invoiceId);
+  if ((await invoiceDue(invoiceId)) > 0) notify.invoiceCreated(invoiceId);
+  emitEvent(input.companyId, "invoice.created", { invoiceId, total: subtotal + tax, currency: billing.currency });
+  return invoiceId;
+}
+
 // ─── Plan changes ────────────────────────────────────────────────────────────
 
 /** Share of the current billing period that is still ahead, between 0 and 1. */

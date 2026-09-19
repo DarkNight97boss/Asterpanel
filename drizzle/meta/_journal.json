@@ -225,6 +225,13 @@
       "when": 1789853823323,
       "tag": "0031_tld_promos",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1789854872394,
+      "tag": "0032_quotes",
+      "breakpoints": true
     }
   ]
 }
