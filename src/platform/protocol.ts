@@ -117,7 +117,10 @@ export type OffsiteTarget = {
 
 export type JobType = keyof JobPayloads;
 
-export const TOOLS = ["cache.purge", "wp.cache_flush", "wp.search_replace", "wp.debug_on", "wp.debug_off", "wp.inventory", "wp.update"] as const;
+export const TOOLS = ["cache.purge", "wp.cache_flush", "wp.search_replace", "wp.debug_on", "wp.debug_off", "wp.inventory", "wp.update", "wp.scan"] as const;
+
+/** Result of `wp.scan`: what differs from the official releases, and what looks planted. Paths are relative to the site root. */
+export type WpScan = { core: string[]; plugins: string[]; uploadsPhp: string[]; suspicious: string[]; truncated: boolean };
 
 export type DnsZoneData = { name: string; serial: number; records: { name: string; type: string; value: string; ttl: number; priority: number }[] };
 

@@ -468,6 +468,10 @@ export type WorkloadConfig = {
   // wordpress: PHP limits and Redis object cache
   php?: { memoryLimitMb: number; uploadMaxMb: number; maxExecutionTime: number; maxInputVars: number };
   objectCache?: boolean;
+  // wordpress: weekly integrity scan
+  scanLastAt?: string;
+  /** Findings of the latest scan, kept here so alerts need no extra queries. */
+  scanFindings?: number;
   // wordpress: automatic updates
   autoUpdate?: "off" | "minor" | "all";
   autoUpdateLastAt?: string;

@@ -28,9 +28,10 @@ export async function accountAlerts(accountId: string, role: AccountRole, now = 
   }
 
   if (roleCan(role, "hosting")) {
-    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt }).from(schema.workloads).where(eq(schema.workloads.companyId, accountId))).filter((w) => !only || only.includes(w.id));
+    const mine = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, status: schema.workloads.status, updatedAt: schema.workloads.updatedAt, config: schema.workloads.config }).from(schema.workloads).where(eq(schema.workloads.companyId, accountId))).filter((w) => !only || only.includes(w.id));
     for (const w of mine) {
       if (w.status === "error") alerts.push({ kind: "workload", text: "{name} needs attention", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
+      if (w.status !== "deleted" && (w.config.scanFindings ?? 0) > 0) alerts.push({ kind: "workload", text: "Security scan: {n} findings on {name}", vars: { name: w.name, n: String(w.config.scanFindings) }, href: `/client/workloads/${w.id}/security`, at: new Date(w.config.scanLastAt ?? w.updatedAt) });
       if (w.status === "suspended") alerts.push({ kind: "workload", text: "{name} is suspended", vars: { name: w.name }, href: `/client/workloads/${w.id}`, at: w.updatedAt });
     }
     const live = mine.filter((w) => w.status !== "deleted");

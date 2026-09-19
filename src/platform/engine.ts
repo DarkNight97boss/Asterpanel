@@ -24,6 +24,7 @@ import {
   type SignedJob,
   type ToolName,
   type WorkloadSpec,
+  type WpScan,
 } from "./protocol";
 
 /**
@@ -657,6 +658,38 @@ export async function listMigrations(workloadId: string): Promise<MigrationRun[]
   });
 }
 
+/** The newest finished integrity scan of a site. */
+export async function latestScan(workloadId: string): Promise<{ at: Date; scan: WpScan; findings: number } | null> {
+  const db = await getDb();
+  const jobs = await db.select().from(schema.jobs).where(and(eq(schema.jobs.workloadId, workloadId), eq(schema.jobs.type, "workload.tool"), eq(schema.jobs.status, "succeeded"))).orderBy(desc(schema.jobs.createdAt)).limit(40);
+  for (const j of jobs) {
+    const out = String(j.result.output ?? "");
+    if (!out.startsWith('{"scan"')) continue;
+    try {
+      const { scan } = JSON.parse(out) as { scan: WpScan };
+      return { at: j.finishedAt ?? j.createdAt, scan, findings: scan.core.length + scan.plugins.length + scan.uploadsPhp.length + scan.suspicious.length };
+    } catch {}
+  }
+  return null;
+}
+
+/** Cron: every live WordPress site is scanned once a week, a few per run so nodes are not flooded. */
+export async function runWpScans(now = new Date(), limit = 10): Promise<number> {
+  const db = await getDb();
+  const sites = await db.select().from(schema.workloads).where(and(eq(schema.workloads.type, "wordpress"), eq(schema.workloads.environment, "live"), eq(schema.workloads.status, "running")));
+  let started = 0;
+  for (const w of sites) {
+    if (started >= limit) break;
+    if (w.config.scanLastAt && now.getTime() - new Date(w.config.scanLastAt).getTime() < 7 * 24 * 60 * MINUTE) continue;
+    const node = await db.query.nodes.findFirst({ where: eq(schema.nodes.id, w.nodeId) });
+    if (!node || !nodeIsOnline(node)) continue;
+    await db.update(schema.workloads).set({ config: { ...w.config, scanLastAt: now.toISOString() } }).where(eq(schema.workloads.id, w.id));
+    await enqueue(w, "workload.tool", { spec: await buildSpec(w.id), tool: "wp.scan", args: {} });
+    started++;
+  }
+  return started;
+}
+
 export const PHP_LIMITS = { memoryLimitMb: [64, 1024], uploadMaxMb: [2, 1024], maxExecutionTime: [30, 600], maxInputVars: [1000, 20000] } as const;
 
 /** PHP limits and the Redis object cache of a WordPress site. Values outside the allowed ranges are pulled back in. */
@@ -1136,6 +1169,14 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   }
   if (!w) return;
 
+  if (job.type === "workload.tool" && ok && String(result.output ?? "").startsWith('{"scan"')) {
+    try {
+      const { scan } = JSON.parse(String(result.output)) as { scan: WpScan };
+      const scanFindings = scan.core.length + scan.plugins.length + scan.uploadsPhp.length + scan.suspicious.length;
+      await db.update(workloads).set({ config: { ...w.config, scanFindings } }).where(eq(workloads.id, w.id));
+      if (scanFindings > 0) await audit(null, "wp.scan_findings", "workload", w.id, { findings: scanFindings });
+    } catch {}
+  }
   if (job.type === "workload.tool" && !ok && /^SITE_UNHEALTHY/.test(error)) {
     // An automatic update broke the site: put back the backup taken right before it.
     const { tool, args } = decryptJson<{ tool?: string; args?: { backupId?: string } }>(job.payload, {});

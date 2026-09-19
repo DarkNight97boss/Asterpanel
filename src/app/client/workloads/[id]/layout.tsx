@@ -56,6 +56,7 @@ export default async function WorkloadLayout({ children, params }: { children: R
     ...(w.type === "wordpress" || (w.type === "database" && w.config.engine !== "redis") ? [{ href: `${base}/database`, label: t("Database") }] : []),
     ...(w.type !== "database" ? [{ href: `${base}/redirects`, label: t("Redirects") }] : []),
     ...(w.type === "wordpress" ? [{ href: `${base}/plugins`, label: t("Plugins and themes") }] : []),
+    ...(w.type === "wordpress" ? [{ href: `${base}/security`, label: t("Security scan") }] : []),
     ...(w.type !== "database" ? [{ href: `${base}/ip-deny`, label: t("IP deny") }] : []),
     ...(w.type !== "database" ? [{ href: `${base}/bot-protection`, label: t("Bot protection") }] : []),
     ...(w.type === "wordpress" ? [{ href: `${base}/cdn`, label: "CDN" }] : []),

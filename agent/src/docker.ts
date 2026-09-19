@@ -4,7 +4,7 @@ import { createReadStream, existsSync, readFileSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, stat, truncate, writeFile } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import path from "node:path";
-import type { ApmReport, JobPayloads, JobResult, MigrationSource, OffsiteTarget, ToolName, WorkloadSpec, WpInventory } from "../../src/platform/protocol";
+import type { ApmReport, JobPayloads, JobResult, MigrationSource, OffsiteTarget, ToolName, WorkloadSpec, WpInventory, WpScan } from "../../src/platform/protocol";
 import { cronMatches, parseCron } from "../../src/platform/cron";
 import { detectBuildpack } from "./buildpack";
 import type { Driver, Log } from "./driver";
@@ -727,6 +727,21 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         if (kind === "core") return { output: await this.wp(spec, ["core", "update"], log) };
         if (args.name && !/^[\w.-]{1,100}$/.test(args.name)) throw new Error("Invalid name");
         return { output: await this.wp(spec, [kind, "update", args.name || "--all"], log) };
+      }
+      case "wp.scan": {
+        // Checksums against wordpress.org: a changed core or plugin file is the clearest sign of a compromise.
+        const lines = (out: string) => out.split("\n").map((l) => l.trim()).filter(Boolean);
+        const changed = (out: string) => lines(out).filter((l) => /^Warning: /.test(l)).map((l) => l.replace(/^Warning: /, "").slice(0, 200));
+        const core = changed(await this.wp(spec, ["core", "verify-checksums"]).then(() => "", (err: Error) => err.message));
+        const plugins = changed(await this.wp(spec, ["plugin", "verify-checksums", "--all"]).then(() => "", (err: Error) => err.message));
+        const { name } = this.check(spec);
+        // Read-only, no network: PHP inside uploads (it has no business there), and the classic obfuscation idioms.
+        const find = (script: string) => this.docker(["run", "--rm", "--network", "none", "--memory", "256m", "-v", `${name}-files:/site:ro`, "alpine:3", "sh", "-c", script], undefined, { quiet: true, timeoutMs: 10 * 60_000 }).catch(() => "");
+        const uploadsPhp = lines(await find("cd /site && find wp-content/uploads -type f \\( -name '*.php' -o -name '*.phtml' -o -name '*.phar' \\) 2>/dev/null | head -n 101"));
+        const suspicious = lines(await find("cd /site && grep -rlE --include='*.php' 'eval\\s*\\(\\s*(base64_decode|gzinflate|gzuncompress|str_rot13)|(base64_decode|gzinflate)\\s*\\(\\s*(base64_decode|gzinflate|str_rot13)|assert\\s*\\(\\s*\\$_(POST|GET|REQUEST|COOKIE)|\\$_(POST|GET|REQUEST|COOKIE)\\[[^]]+\\]\\s*\\(' wp-content wp-includes wp-admin 2>/dev/null | head -n 101"));
+        const cap = (list: string[]) => list.slice(0, 100);
+        const scan: WpScan = { core: cap(core), plugins: cap(plugins), uploadsPhp: cap(uploadsPhp), suspicious: cap(suspicious), truncated: [core, plugins, uploadsPhp, suspicious].some((l) => l.length > 100) };
+        return { output: JSON.stringify({ scan }) };
       }
       case "wp.login": {
         // A single-use, 60-second link into wp-admin. WordPress only ever sees the hash of the token.
