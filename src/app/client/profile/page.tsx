@@ -3,15 +3,15 @@ import { ProfileFields } from "@/components/profile-fields";
 import { Button, Card, CardHeader, Field, Input, PageHeader } from "@/components/ui";
 import QRCode from "qrcode";
 import { getLocale, getT } from "@/i18n";
-import { formatDate } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { otpauthUrl, pendingSecret } from "@/lib/totp";
-import { requireUser } from "@/lib/auth";
-import { changePassword, confirmTwoFactor, disableTwoFactor, startTwoFactor, updateProfile } from "../actions";
+import { listSessions, requireUser } from "@/lib/auth";
+import { changePassword, confirmTwoFactor, disableTwoFactor, signOutSession, startTwoFactor, updateProfile } from "../actions";
 
 export default async function Profile() {
   const [user, t, locale, general] = await Promise.all([requireUser(), getT(), getLocale(), getSettings("general")]);
-  const secret = await pendingSecret(user.id);
+  const [secret, sessions] = await Promise.all([pendingSecret(user.id), listSessions(user.id)]);
   // The QR is rendered on the server: the secret never reaches a third-party QR service.
   const enrolling = secret ? { secret, qr: await QRCode.toString(otpauthUrl(general.siteName, user.email, secret), { type: "svg", margin: 0 }) } : null;
   return (
@@ -69,7 +69,33 @@ export default async function Profile() {
             )}
           </div>
         </Card>
+        <Card>
+          <CardHeader title={t("Active sessions")} description={t("Devices signed in to your account. Sign out the ones you do not recognise, then change your password.")} />
+          <ul className="divide-y divide-border">
+            {sessions.map((s) => (
+              <li key={s.handle} className="flex flex-wrap items-center justify-between gap-3 px-5 py-3 text-sm">
+                <div className="min-w-0">
+                  <p className="truncate font-medium">{device(s.userAgent)} {s.current && <span className="ml-2 text-xs font-normal text-success">● {t("This device")}</span>}</p>
+                  <p className="text-xs text-muted">{s.ip || "—"} · {formatDateTime(s.createdAt, locale)}</p>
+                </div>
+                {!s.current && (
+                  <form action={signOutSession}>
+                    <input type="hidden" name="handle" value={s.handle} />
+                    <Button size="sm" variant="ghost">{t("Sign out")}</Button>
+                  </form>
+                )}
+              </li>
+            ))}
+          </ul>
+        </Card>
       </div>
     </>
   );
+}
+
+/** "Chrome on macOS" from a user agent; the raw string when nothing matches. */
+function device(ua: string) {
+  const browser = /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox" : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : "";
+  const os = /Windows/.test(ua) ? "Windows" : /iPhone|iPad/.test(ua) ? "iOS" : /Mac OS X/.test(ua) ? "macOS" : /Android/.test(ua) ? "Android" : /Linux/.test(ua) ? "Linux" : "";
+  return browser && os ? `${browser} · ${os}` : ua.slice(0, 60) || "—";
 }

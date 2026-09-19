@@ -9,7 +9,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { requireAccount } from "@/lib/account";
-import { createSession, destroyAllSessions, requireUser } from "@/lib/auth";
+import { createSession, destroyAllSessions, requireUser, revokeSession } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
@@ -142,6 +142,13 @@ export async function changePassword(_: ActionState, form: FormData): Promise<Ac
 }
 
 // ─── Two-factor authentication ───────────────────────────────────────────────
+
+export async function signOutSession(form: FormData) {
+  const user = await requireUser();
+  await revokeSession(user.id, String(form.get("handle") ?? ""));
+  await audit(user.id, "session.revoked", "user", user.id);
+  revalidatePath("/client/profile");
+}
 
 export async function startTwoFactor() {
   const user = await requireUser();

@@ -5,6 +5,7 @@ import { makeT } from "@/i18n/shared";
 import type { BillingCycle } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
+import { emitEvent } from "./webhooks";
 import { decryptJson } from "./crypto";
 import { addCycle, CYCLE_LABEL, invoiceLabel } from "./format";
 import { mailConfigured } from "./mail/transport";
@@ -117,6 +118,7 @@ export async function placeOrder(input: {
   await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total });
   if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
   else notify.invoiceCreated(result.invoiceId);
+  emitEvent(input.companyId, "invoice.created", { invoiceId: result.invoiceId, total, currency: billing.currency });
   return result;
 }
 
@@ -173,6 +175,8 @@ export async function recordPayment(input: {
   if (outcome.becamePaid) {
     await audit(input.actorId ?? null, "invoice.paid", "invoice", input.invoiceId, { gateway: input.gateway });
     if (input.gateway !== "free") notify.invoicePaid(input.invoiceId);
+    const [paid] = await db.select({ companyId: schema.invoices.companyId, total: schema.invoices.total, currency: schema.invoices.currency }).from(schema.invoices).where(eq(schema.invoices.id, input.invoiceId));
+    emitEvent(paid?.companyId, "invoice.paid", { invoiceId: input.invoiceId, total: paid?.total, currency: paid?.currency });
     await fulfilInvoice(input.invoiceId);
   }
   return { paid: outcome.paid, duplicate: outcome.duplicate };
@@ -376,6 +380,7 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
         return invoice.id;
       });
       notify.invoiceCreated(invoiceId);
+      emitEvent(list[0].companyId, "invoice.created", { invoiceId, renewal: true });
       report.invoiced++;
     } catch (err) {
       report.errors.push(`invoice client ${clientId}: ${err instanceof Error ? err.message : err}`);
