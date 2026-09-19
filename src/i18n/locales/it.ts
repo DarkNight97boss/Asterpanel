@@ -1847,6 +1847,15 @@ const it: Record<string, string> = {
   "Cards with date (blog)": "Schede con data (blog)",
   "Plain list (help centre)": "Elenco semplice (centro assistenza)",
   "How many (newest first)": "Quante (dalla più recente)",
+  "Referrals": "Referral",
+  "Bring a customer and get {percent}% of what they pay for {months} months, as credit on your next invoices.": "Porta un cliente e ricevi il {percent}% di ciò che paga per {months} mesi, come credito sulle tue prossime fatture.",
+  "Your link": "Il tuo link",
+  "Whoever signs up through it is linked to {account}.": "Chi si registra da questo link viene collegato a {account}.",
+  "Customers referred": "Clienti portati",
+  "Credit earned": "Credito guadagnato",
+  "Referral commission (%)": "Commissione referral (%)",
+  "Share of each paid invoice credited to who brought the customer. 0 = programme off.": "Quota di ogni fattura pagata accreditata a chi ha portato il cliente. 0 = programma spento.",
+  "Commission lasts (months)": "Durata della commissione (mesi)",
 };
 
 export default it;

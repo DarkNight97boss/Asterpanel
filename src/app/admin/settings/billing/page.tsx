@@ -23,6 +23,8 @@ export default async function BillingSettings() {
             <Field label={t("Overdue reminders (days after due)")} hint={t("Comma separated. Leave empty to disable.")}>
               <Input name="overdueReminderDays" defaultValue={s.overdueReminderDays.join(", ")} placeholder="3, 7, 14" />
             </Field>
+            <Field label={t("Referral commission (%)")} hint={t("Share of each paid invoice credited to who brought the customer. 0 = programme off.")}><Input name="referralPercent" type="number" min={0} max={50} defaultValue={s.referralPercent} /></Field>
+            <Field label={t("Commission lasts (months)")}><Input name="referralMonths" type="number" min={1} max={60} defaultValue={s.referralMonths} /></Field>
             <Field label={t("Terminate (days after due)")} hint={t("0 = never")}><Input name="terminateDaysAfterDue" type="number" min={0} max={365} defaultValue={s.terminateDaysAfterDue} /></Field>
           </div>
           <Field label={t("Bank transfer instructions")} hint={t("Shown to clients who choose to pay by bank transfer.")}>

@@ -3,13 +3,15 @@ import { NavLink } from "@/components/nav-link";
 import { ShellSlot } from "@/components/portal";
 import { getT } from "@/i18n";
 import { getAccount, roleCan } from "@/lib/account";
+import { getSettings } from "@/lib/settings";
 
 /** "Company settings": its own context, with its own menu in place of the main one. */
 export default async function CompanyLayout({ children }: { children: React.ReactNode }) {
   const [{ account }, t] = await Promise.all([getAccount(), getT()]);
   const billing = roleCan(account.role, "billing");
+  const referrals = (await getSettings("billing")).referralPercent > 0;
   const sections = [
-    ...(billing ? [{ href: "/client/services", label: t("My plan") }, { href: "/client/invoices", label: t("Invoices") }, { href: "/client/quotes", label: t("Quotes") }, { href: "/client/company/payment-methods", label: t("Payment methods") }, { href: "/client/company/details", label: t("Billing details") }] : []),
+    ...(billing ? [{ href: "/client/services", label: t("My plan") }, { href: "/client/invoices", label: t("Invoices") }, { href: "/client/quotes", label: t("Quotes") }, ...(referrals ? [{ href: "/client/company/referrals", label: t("Referrals") }] : []), { href: "/client/company/payment-methods", label: t("Payment methods") }, { href: "/client/company/details", label: t("Billing details") }] : []),
     { href: "/client/team", label: t("Users") },
     ...(roleCan(account.role, "manage") ? [{ href: "/client/company/api", label: t("API & webhooks") }, { href: "/client/company/variables", label: t("Variable groups") }] : []),
     { href: "/client/company/activity", label: t("User activity") },

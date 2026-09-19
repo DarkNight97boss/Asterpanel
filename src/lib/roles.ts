@@ -55,7 +55,8 @@ export const listAccounts = cache(async (user: SessionUser): Promise<Account[]> 
       .orderBy(asc(schema.companyMembers.invitedAt));
   let rows = await load();
   if (!rows.length) {
-    await createCompany(user, personName(user), { orgType: user.company ? "company" : "individual", billingName: user.company, vatId: user.vatId, address1: user.address, city: user.city, zip: user.zip, state: user.state, country: user.country });
+    const firstId = await createCompany(user, personName(user), { orgType: user.company ? "company" : "individual", billingName: user.company, vatId: user.vatId, address1: user.address, city: user.city, zip: user.zip, state: user.state, country: user.country });
+    if (user.referralCode) await (await import("./referrals")).linkReferral(firstId, user.id, user.referralCode);
     rows = await load();
   }
   const owners = await db.select({ companyId: schema.companyMembers.companyId, userId: schema.companyMembers.userId }).from(schema.companyMembers).where(eq(schema.companyMembers.role, "owner"));

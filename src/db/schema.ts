@@ -43,6 +43,8 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     role: text("role").$type<UserRole>().notNull().default("client"),
     staffRole: text("staff_role").$type<StaffRole | "">().notNull().default(""),
+    /** Referral code typed or followed at sign-up; resolved when the user's first company is created. */
+    referralCode: text("referral_code").notNull().default(""),
     status: text("status").$type<UserStatus>().notNull().default("active"),
     firstName: text("first_name").notNull().default(""),
     lastName: text("last_name").notNull().default(""),
@@ -131,6 +133,10 @@ export const companies = pgTable("companies", {
   vatValidatedName: text("vat_validated_name").notNull().default(""),
   /** Customer object at Stripe that holds this company's saved cards. */
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
+  /** Code other people sign up with to credit this company (created on first use). */
+  referralCode: text("referral_code").unique(),
+  /** The company whose code brought this one in. */
+  referredBy: uuid("referred_by"),
   /** Members without two-factor authentication are sent to set it up before anything else. */
   require2fa: boolean("require_2fa").notNull().default(false),
   /** Charge renewal invoices on the default saved card. */

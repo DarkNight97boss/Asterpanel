@@ -10,9 +10,9 @@ import { register } from "../actions";
 
 export const metadata = { title: "Create an account" };
 
-export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
+export default async function RegisterPage({ searchParams }: { searchParams: Promise<{ next?: string; ref?: string }> }) {
   await ensureInstalled();
-  const { next } = await searchParams;
+  const { next, ref } = await searchParams;
   if (await getUser()) redirect(safeNext(next, "/client"));
   const [t, general] = await Promise.all([getT(), getSettings("general")]);
 
@@ -22,6 +22,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: Pro
       {general.allowRegistration ? (
         <ActionForm action={register}>
           <input type="hidden" name="next" value={next ?? ""} />
+          <input type="hidden" name="referralCode" value={/^[A-Za-z0-9]{6,12}$/.test(ref ?? "") ? ref : ""} />
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("First name")}>
               <Input name="firstName" autoComplete="given-name" required />

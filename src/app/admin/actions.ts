@@ -526,6 +526,8 @@ export async function saveBilling(_: ActionState, form: FormData): Promise<Actio
     invoiceDaysBeforeDue: Number(f.invoiceDaysBeforeDue),
     suspendDaysAfterDue: Number(f.suspendDaysAfterDue),
     terminateDaysAfterDue: Number(f.terminateDaysAfterDue),
+    referralPercent: Number(f.referralPercent) || 0,
+    referralMonths: Number(f.referralMonths) || 12,
     overdueReminderDays: [...new Set(String(f.overdueReminderDays ?? "").split(/[\s,;]+/).filter(Boolean).map(Number))].sort((a, b) => a - b),
   });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
