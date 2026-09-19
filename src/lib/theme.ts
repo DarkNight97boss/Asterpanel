@@ -1,8 +1,9 @@
 import type { Settings } from "./settings";
 
-const RADIUS = { none: "0", sm: "0.25rem", md: "0.625rem", lg: "1rem", full: "1.5rem" } as const;
+const RADIUS = { none: "0", sm: "0.25rem", md: "0.5rem", lg: "0.75rem", full: "1rem" } as const;
 
 const FONT = {
+  editorial: "var(--font-pathway), ui-sans-serif, system-ui, sans-serif",
   geist: "var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif",
   system: "ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
   serif: "ui-serif, Georgia, Cambria, 'Times New Roman', serif",
@@ -26,7 +27,11 @@ export function themeCss(theme: Settings<"theme">): string {
     `--accent:${theme.accent}`,
     `--radius:${RADIUS[theme.radius]}`,
     `--font-body:${FONT[theme.font]}`,
+    // Only the editorial pairing uses a serif for headings.
+    // The editorial pairing: serif headings, and Inter inside the app screens.
+    ...(theme.font === "editorial" ? [] : [`--font-heading:${FONT[theme.font]}`, `--font-app:${FONT[theme.font]}`]),
   ].join(";");
   // Custom CSS is admin-authored; stripping "<" keeps it inside the <style> tag.
-  return `:root{${vars}}\n${theme.customCss.replace(/</g, "")}`;
+  const custom = theme.primary.toLowerCase() !== "#1c1819";
+  return `${custom ? ":root,:root[data-theme]" : ":root"}{${custom ? vars : vars.split(";").filter((v) => !v.startsWith("--primary")).join(";")}}\n${theme.customCss.replace(/</g, "")}`;
 }

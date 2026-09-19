@@ -7,8 +7,10 @@ import { z } from "zod";
 import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
+import { requireAccount } from "@/lib/account";
 import { createSession, destroyAllSessions, requireUser } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
+import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
 import { baseUrl } from "@/lib/url";
 import { enabledGateways } from "@/modules/gateways";
@@ -16,7 +18,7 @@ import { enabledGateways } from "@/modules/gateways";
 // Every action re-checks ownership: ids come from the browser.
 
 export async function payInvoice(_: ActionState, form: FormData): Promise<ActionState> {
-  const user = await requireUser();
+  const { user: me, account: user } = await requireAccount("billing");
   const db = await getDb();
   const invoice = await db.query.invoices.findFirst({
     where: and(eq(schema.invoices.id, String(form.get("invoiceId"))), eq(schema.invoices.clientId, user.id)),
@@ -31,7 +33,7 @@ export async function payInvoice(_: ActionState, form: FormData): Promise<Action
   try {
     const result = await gateway.start({
       invoice,
-      email: user.email,
+      email: me.email,
       returnUrl: `${await baseUrl()}/client/invoices/${invoice.id}`,
       label: `${billing.invoicePrefix}${invoice.number}`,
     });
@@ -44,7 +46,7 @@ export async function payInvoice(_: ActionState, form: FormData): Promise<Action
 }
 
 export async function openTicket(_: ActionState, form: FormData): Promise<ActionState> {
-  const user = await requireUser();
+  const { user, account } = await requireAccount("support");
   const parsed = z
     .object({
       subject: z.string().trim().min(3, "Subject is too short").max(200),
@@ -58,31 +60,33 @@ export async function openTicket(_: ActionState, form: FormData): Promise<Action
   const db = await getDb();
   const { body, ...ticket } = parsed.data;
   const id = await db.transaction(async (tx) => {
-    const [row] = await tx.insert(schema.tickets).values({ ...ticket, clientId: user.id }).returning();
+    const [row] = await tx.insert(schema.tickets).values({ ...ticket, clientId: account.id }).returning();
     await tx.insert(schema.ticketMessages).values({ ticketId: row.id, authorId: user.id, body });
     return row.id;
   });
+  notify.ticketOpened(id, body);
   redirect(`/client/tickets/${id}`);
 }
 
 export async function replyTicket(_: ActionState, form: FormData): Promise<ActionState> {
-  const user = await requireUser();
+  const { user, account } = await requireAccount("support");
   const body = String(form.get("body") ?? "").trim();
   if (body.length < 2 || body.length > 20_000) return { error: "Message is empty" };
 
   const db = await getDb();
   const ticket = await db.query.tickets.findFirst({
-    where: and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.clientId, user.id)),
+    where: and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.clientId, account.id)),
   });
   if (!ticket) return { error: "Ticket not found" };
 
   await db.insert(schema.ticketMessages).values({ ticketId: ticket.id, authorId: user.id, body });
   await db.update(schema.tickets).set({ status: "customer_reply", lastReplyAt: new Date() }).where(eq(schema.tickets.id, ticket.id));
+  notify.ticketClientReply(ticket.id, body);
   revalidatePath(`/client/tickets/${ticket.id}`);
 }
 
 export async function closeTicket(form: FormData) {
-  const user = await requireUser();
+  const { account: user } = await requireAccount("support");
   const db = await getDb();
   await db
     .update(schema.tickets)
@@ -131,5 +135,6 @@ export async function changePassword(_: ActionState, form: FormData): Promise<Ac
   await destroyAllSessions(user.id);
   await createSession(user.id);
   await audit(user.id, "auth.password.changed", "user", user.id);
+  notify.passwordChanged(user.id);
   return { ok: "Password updated" };
 }

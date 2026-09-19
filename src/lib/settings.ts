@@ -23,14 +23,19 @@ export const settingsSchemas = {
     companyAddress: z.string().default(""),
     companyVatId: z.string().default(""),
     allowRegistration: z.boolean().default(true),
+    /** Public origin used for links in emails (no request to read it from). */
+    siteUrl: z.string().default(""),
   }),
   theme: z.object({
     logoUrl: z.string().default(""),
-    primary: hex.default("#4f46e5"),
-    accent: hex.default("#06b6d4"),
-    mode: z.enum(["light", "dark", "auto"]).default("auto"),
+    primary: hex.default("#1c1819"),
+    accent: hex.default("#ff6728"),
+    mode: z.enum(["light", "dark", "auto"]).default("light"),
     radius: z.enum(["none", "sm", "md", "lg", "full"]).default("md"),
-    font: z.enum(["geist", "system", "serif", "mono"]).default("geist"),
+    font: z.enum(["editorial", "geist", "system", "serif", "mono"]).default("editorial"),
+    /** Thin strip above the site header, e.g. a promotion. Empty = hidden. */
+    announcement: z.string().max(200).default(""),
+    announcementHref: z.string().max(300).default(""),
     footerText: z.string().default(""),
     customCss: z.string().max(20_000).default(""),
   }),
@@ -42,6 +47,8 @@ export const settingsSchemas = {
     invoiceDaysBeforeDue: z.number().int().min(0).max(60).default(14),
     suspendDaysAfterDue: z.number().int().min(0).max(90).default(5),
     terminateDaysAfterDue: z.number().int().min(0).max(365).default(30),
+    /** Days after the due date on which an overdue reminder is emailed. */
+    overdueReminderDays: z.array(z.number().int().min(1).max(365)).max(10).default([3, 7, 14]),
     invoicePrefix: z.string().max(10).default("INV-"),
     bankTransferInstructions: z.string().default(""),
   }),
@@ -56,9 +63,32 @@ export const settingsSchemas = {
       })
       .default({ enabled: false, secretKey: "", webhookSecret: "" }),
   }),
+  /** Encrypted at rest: holds the SMTP password. */
+  mail: z.object({
+    enabled: z.boolean().default(false),
+    host: z.string().default(""),
+    port: z.number().int().min(1).max(65535).default(587),
+    security: z.enum(["starttls", "ssl", "none"]).default("starttls"),
+    username: z.string().default(""),
+    password: z.string().default(""),
+    fromName: z.string().default(""),
+    fromEmail: z.string().default(""),
+    /** Where staff notifications go; falls back to the support email. */
+    staffEmail: z.string().default(""),
+  }),
+  dns: z.object({
+    /** Hostnames customers set at their registrar, e.g. ns1.example.com. They must resolve to your nodes. */
+    nameservers: z.array(z.string()).max(8).default([]),
+    hostmaster: z.string().default(""),
+  }),
+  /** Encrypted at rest: holds the Ed25519 key that signs agent jobs. */
+  platform: z.object({
+    signingPrivateKey: z.string().default(""),
+    signingPublicKey: z.string().default(""),
+  }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

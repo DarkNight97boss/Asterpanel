@@ -1,9 +1,10 @@
 import { notFound } from "next/navigation";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { InvoiceView, loadInvoice } from "@/components/invoice-view";
-import { Alert, Card } from "@/components/ui";
+import { InvoiceView } from "@/components/invoice-view";
+import { Alert, buttonClass, Card } from "@/components/ui";
 import { getT } from "@/i18n";
-import { requireUser } from "@/lib/auth";
+import { loadInvoice } from "@/lib/invoices";
+import { requireAccount } from "@/lib/account";
 import { enabledGateways } from "@/modules/gateways";
 import { payInvoice } from "../../actions";
 
@@ -14,7 +15,7 @@ export default async function ClientInvoice({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ paid?: string }>;
 }) {
-  const user = await requireUser();
+  const { account: user } = await requireAccount("billing");
   const invoice = await loadInvoice((await params).id);
   if (!invoice || invoice.clientId !== user.id) notFound();
   const [t, gateways, { paid }] = await Promise.all([getT(), enabledGateways(), searchParams]);
@@ -25,6 +26,10 @@ export default async function ClientInvoice({
         {paid && invoice.status === "unpaid" && <Alert tone="info">{t("Thanks! Your payment is being confirmed — this page updates within a minute.")}</Alert>}
         <InvoiceView invoice={invoice} />
       </div>
+      <div className="space-y-4">
+        <a href={`/api/invoices/${invoice.id}/pdf`} target="_blank" rel="noopener" className={buttonClass("secondary", "md", "w-full")}>
+          {t("Download PDF")}
+        </a>
       {invoice.status === "unpaid" && (
         <Card className="h-fit p-5">
           <h2 className="mb-3 font-semibold">{t("Pay this invoice")}</h2>
@@ -45,6 +50,7 @@ export default async function ClientInvoice({
           )}
         </Card>
       )}
+      </div>
     </div>
   );
 }

@@ -5,12 +5,12 @@ import { AUTHOR_COLUMNS, TicketThread } from "@/components/ticket-thread";
 import { Button, Card, PageHeader, STATUS_LABEL, StatusBadge, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getT } from "@/i18n";
-import { requireUser } from "@/lib/auth";
+import { requireAccount } from "@/lib/account";
 import { closeTicket, replyTicket } from "../../actions";
 
 export default async function ClientTicket({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireUser();
+  const { account: user } = await requireAccount("support");
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
   const ticket = await db.query.tickets.findFirst({

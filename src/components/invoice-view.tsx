@@ -1,21 +1,9 @@
-import { eq } from "drizzle-orm";
-import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { displayName } from "@/lib/auth";
 import { formatDate, formatMoney } from "@/lib/format";
+import type { LoadedInvoice } from "@/lib/invoices";
 import { getSettings } from "@/lib/settings";
 import { Card, StatusBadge, STATUS_LABEL } from "./ui";
-
-export async function loadInvoice(id: string) {
-  if (!/^[0-9a-f-]{36}$/i.test(id)) return undefined;
-  const db = await getDb();
-  return db.query.invoices.findFirst({
-    where: eq(schema.invoices.id, id),
-    with: { items: true, transactions: true, client: { columns: { passwordHash: false } } },
-  });
-}
-
-export type LoadedInvoice = NonNullable<Awaited<ReturnType<typeof loadInvoice>>>;
 
 /** The printable invoice document, shared by the client area and the admin. */
 export async function InvoiceView({ invoice }: { invoice: LoadedInvoice }) {

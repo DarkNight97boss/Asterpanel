@@ -1,60 +1,106 @@
 import Link from "next/link";
 import { logout } from "@/app/(auth)/actions";
+import { switchAccount } from "@/app/client/team/actions";
 import { getT } from "@/i18n";
+import { ROLE_LABEL, type Account } from "@/lib/account";
 import { displayName, type SessionUser } from "@/lib/auth";
+import { getSettings } from "@/lib/settings";
 import { Brand } from "./brand";
 import { NavLink } from "./nav-link";
 
 export type NavSection = { title?: string; items: { href: string; label: string; icon: string; exact?: boolean }[] };
 
-/** Sidebar layout shared by the client area and the admin panel. */
+/**
+ * App chrome: a floating dark top bar (brand · breadcrumb · user) over a light
+ * sidebar and the content. Nested layouts can fill `#shell-crumbs` and replace
+ * the main navigation through `#shell-context-nav` (see ShellSlot).
+ */
 export async function PanelShell({
   home,
   badge,
   nav,
   user,
+  account,
+  accounts = [],
   children,
 }: {
   home: string;
   badge?: string;
   nav: NavSection[];
   user: SessionUser;
+  /** Client area only: the active account and the ones the user can switch to. */
+  account?: Account;
+  accounts?: Account[];
   children: React.ReactNode;
 }) {
-  const t = await getT();
+  const [t, general] = await Promise.all([getT(), getSettings("general")]);
+  const name = displayName(user);
   return (
-    <div className="min-h-dvh bg-subtle lg:grid lg:grid-cols-[15rem_1fr]">
-      <aside className="border-b border-border bg-surface lg:sticky lg:top-0 lg:h-dvh lg:overflow-y-auto lg:border-r lg:border-b-0">
-        <div className="flex h-16 items-center gap-2 px-4">
-          <Brand href={home} />
-          {badge && <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-semibold tracking-wide text-primary uppercase">{badge}</span>}
+    <div className="app mx-auto min-h-dvh max-w-[90rem] px-3 sm:px-5">
+      <header className="sticky top-0 z-30 pt-4">
+        <div className="flex h-14 items-center gap-4 rounded-theme bg-primary px-4 text-white shadow-[0_10px_30px_-18px_rgba(0,0,0,0.55)] sm:px-5">
+          <div className="flex shrink-0 items-center gap-2 lg:w-[13.5rem]">
+            <Brand href={home} variant="ink" />
+            {badge && <span className="rounded-full bg-white/15 px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">{badge}</span>}
+          </div>
+          <nav aria-label="Breadcrumb" className="flex min-w-0 flex-1 items-center gap-3 text-sm">
+            <Link href={home} aria-label={t("Dashboard")} className="text-white/90 hover:text-white">⌂</Link>
+            {account && accounts.length > 1 ? (
+              <details className="relative min-w-0">
+                <summary className="flex cursor-pointer list-none items-center gap-1.5 truncate">{account.name} <span aria-hidden className="text-xs">⌄</span></summary>
+                <form action={switchAccount} className="absolute left-0 z-10 mt-3 w-64 rounded-theme border border-border bg-surface p-1.5 text-fg shadow-xl">
+                  {accounts.map((a) => (
+                    <button key={a.id} name="accountId" value={a.id} className="flex w-full cursor-pointer items-center justify-between gap-3 rounded-md px-3 py-2 text-left hover:bg-subtle">
+                      <span className="truncate">{a.name}</span>
+                      <span className="shrink-0 text-xs text-muted">{a.id === account.id ? "✓" : t(ROLE_LABEL[a.role])}</span>
+                    </button>
+                  ))}
+                </form>
+              </details>
+            ) : (
+              <span className="truncate">{account?.name || user.company || general.companyName || general.siteName}</span>
+            )}
+            <span id="shell-crumbs" className="flex min-w-0 items-center gap-3 empty:hidden" />
+          </nav>
+          <div className="flex shrink-0 items-center gap-4 text-sm">
+            <Link href="/" className="hidden text-white/80 hover:text-white md:inline">{t("View site")} ↗</Link>
+            <Link href="/client/tickets" aria-label={t("Support")} className="grid size-6 place-items-center rounded-full border border-white/70 text-xs hover:bg-white/10">?</Link>
+            <details className="relative">
+              <summary className="flex cursor-pointer list-none items-center gap-2">
+                <span className="grid size-7 place-items-center rounded-full bg-accent text-xs font-semibold text-white">{name.slice(0, 1).toUpperCase()}</span>
+                <span className="hidden max-w-40 truncate sm:inline">{name}</span>
+                <span aria-hidden className="text-xs">⌄</span>
+              </summary>
+              <div className="absolute right-0 mt-3 w-52 rounded-theme border border-border bg-surface p-1.5 text-fg shadow-xl">
+                <Link href="/client/profile" className="block rounded-md px-3 py-2 hover:bg-subtle">{t("Profile")}</Link>
+                <form action={logout}>
+                  <button className="block w-full cursor-pointer rounded-md px-3 py-2 text-left hover:bg-subtle">{t("Sign out")}</button>
+                </form>
+              </div>
+            </details>
+          </div>
         </div>
-        <nav className="flex gap-1 overflow-x-auto px-3 pb-3 lg:block lg:space-y-5 lg:overflow-visible">
-          {nav.map((section, i) => (
-            <div key={i} className="flex gap-1 lg:block lg:space-y-0.5">
-              {section.title && <p className="hidden px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase lg:block">{section.title}</p>}
-              {section.items.map((item) => (
-                <NavLink key={item.href} href={item.href} exact={item.exact}>
-                  <span aria-hidden>{item.icon}</span>
-                  {item.label}
-                </NavLink>
-              ))}
-            </div>
-          ))}
-        </nav>
-      </aside>
+      </header>
 
-      <div className="min-w-0">
-        <header className="flex h-16 items-center justify-end gap-4 border-b border-border bg-surface px-4 sm:px-8">
-          <Link href="/" className="text-sm text-muted hover:text-fg">
-            {t("View site")} ↗
-          </Link>
-          <span className="hidden text-sm font-medium sm:inline">{displayName(user)}</span>
-          <form action={logout}>
-            <button className="cursor-pointer text-sm text-muted hover:text-fg">{t("Sign out")}</button>
-          </form>
-        </header>
-        <main className="mx-auto max-w-6xl px-4 py-8 sm:px-8">{children}</main>
+      <div className="gap-4 pt-8 lg:grid lg:grid-cols-[15rem_1fr]">
+        <aside className="mb-6 lg:sticky lg:top-24 lg:mb-0 lg:h-[calc(100dvh-7rem)] lg:overflow-y-auto lg:pr-2">
+          {/* A nested layout may portal its own menu here; the main one then hides. */}
+          <div id="shell-context-nav" className="peer flex gap-1 overflow-x-auto empty:hidden lg:block lg:space-y-1" />
+          <nav className="flex gap-1 overflow-x-auto peer-[:not(:empty)]:hidden lg:block lg:space-y-5">
+            {nav.map((section, i) => (
+              <div key={i} className="flex gap-1 lg:block lg:space-y-1">
+                {section.title && <p className="hidden px-4 pt-1 pb-1 text-xs text-muted lg:block">{section.title}</p>}
+                {section.items.map((item) => (
+                  <NavLink key={item.href} href={item.href} exact={item.exact}>
+                    <span aria-hidden className="w-[1.125rem] text-center text-[0.95rem] leading-none">{item.icon}</span>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </nav>
+        </aside>
+        <main className="min-w-0 pb-20">{children}</main>
       </div>
     </div>
   );

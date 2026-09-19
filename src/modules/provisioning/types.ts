@@ -15,7 +15,8 @@ import type { schema } from "@/db";
 export type ModuleField = {
   name: string;
   label: string;
-  type: "text" | "password" | "number";
+  type: "text" | "password" | "number" | "select";
+  options?: { value: string; label: string }[];
   placeholder?: string;
   help?: string;
   required?: boolean;

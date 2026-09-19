@@ -85,8 +85,7 @@ export async function requireAdmin(): Promise<SessionUser> {
   return user;
 }
 
-export const displayName = (u: Pick<SessionUser, "firstName" | "lastName" | "email">) =>
-  `${u.firstName} ${u.lastName}`.trim() || u.email;
+export { displayName } from "./format";
 
 /** Only allow same-site relative redirects. */
 export function safeNext(next: unknown, fallback: string): string {

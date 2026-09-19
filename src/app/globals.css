@@ -1,55 +1,73 @@
 @import "tailwindcss";
 
 /*
- * Design tokens. Brand values (--primary, --accent, --radius, --font-body) are
- * overridden at runtime from Admin → Appearance; see src/lib/theme.ts.
+ * Look: warm, editorial, light by default — cream paper, near-black ink, one
+ * orange accent, light serif headings. `--primary` paints solid buttons,
+ * `--accent` paints highlights; both come from Admin → Appearance.
  */
 :root {
-  --primary: #4f46e5;
+  --primary: #1c1819;
   --primary-fg: #ffffff;
-  --accent: #06b6d4;
-  --radius: 0.625rem;
-  --font-body: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --accent: #ff6728;
+  --radius: 0.5rem;
+  --font-body: var(--font-pathway), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-fraunces), "Iowan Old Style", Georgia, serif;
 
-  --bg: #ffffff;
-  --bg-subtle: #f6f7f9;
+  --bg: #f9f5f3;
+  --bg-subtle: #f5ede9;
   --surface: #ffffff;
-  --fg: #0f172a;
-  --muted: #5b6577;
-  --border: #e3e6ec;
-  --success: #15803d;
+  --fg: #1c1819;
+  --body: #4c4243;
+  --muted: #7d6665;
+  --border: #eaddd5;
+  --border-strong: #cab2aa;
+  --font-app: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --ink: #181516; /* dark chrome: site nav bar, panel sidebar, terminal panels */
+  --ink-raised: #252122;
+  --ink-fg: #dac6bd;
+  --ink-muted: #ad928c;
+  --link: color-mix(in srgb, var(--accent) 78%, #000);
+  --success: #0a8f3c;
   --warning: #b45309;
-  --danger: #b91c1c;
-  --info: #1d4ed8;
+  --danger: #c2260c;
+  --info: #6a5858;
   color-scheme: light;
 }
 
 :root[data-theme="dark"] {
-  --bg: #0b0d12;
-  --bg-subtle: #11141b;
-  --surface: #151922;
-  --fg: #e8ebf1;
-  --muted: #98a2b3;
-  --border: #252b38;
+  --primary: #f9f5f3;
+  --primary-fg: #181516;
+  --bg: #0e0d0e;
+  --bg-subtle: #181516;
+  --surface: #1c1819;
+  --fg: #f9f5f3;
+  --body: #dac6bd;
+  --muted: #ad928c;
+  --border: #363132;
+  --link: var(--accent);
   --success: #4ade80;
   --warning: #fbbf24;
-  --danger: #f87171;
-  --info: #60a5fa;
+  --danger: #ff8a6b;
+  --info: #dac6bd;
   color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
   :root[data-theme="auto"] {
-    --bg: #0b0d12;
-    --bg-subtle: #11141b;
-    --surface: #151922;
-    --fg: #e8ebf1;
-    --muted: #98a2b3;
-    --border: #252b38;
+    --primary: #f9f5f3;
+    --primary-fg: #181516;
+    --bg: #0e0d0e;
+    --bg-subtle: #181516;
+    --surface: #1c1819;
+    --fg: #f9f5f3;
+    --body: #dac6bd;
+    --muted: #ad928c;
+    --border: #363132;
+    --link: var(--accent);
     --success: #4ade80;
     --warning: #fbbf24;
-    --danger: #f87171;
-    --info: #60a5fa;
+    --danger: #ff8a6b;
+    --info: #dac6bd;
     color-scheme: dark;
   }
 }
@@ -58,61 +76,161 @@
   --color-primary: var(--primary);
   --color-primary-fg: var(--primary-fg);
   --color-accent: var(--accent);
+  --color-link: var(--link);
   --color-bg: var(--bg);
   --color-subtle: var(--bg-subtle);
   --color-surface: var(--surface);
   --color-fg: var(--fg);
+  --color-body: var(--body);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-raised: var(--ink-raised);
+  --color-ink-fg: var(--ink-fg);
+  --color-ink-muted: var(--ink-muted);
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
   --radius-theme: var(--radius);
+  --radius-card: calc(var(--radius) * 2);
+  --radius-panel: calc(var(--radius) * 3);
   --font-sans: var(--font-body);
+  --font-serif: var(--font-heading);
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
 body {
   background: var(--bg);
-  color: var(--fg);
+  color: var(--body);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
 }
 
 :focus-visible {
-  outline: 2px solid var(--primary);
+  outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
 
-/* Form controls share one look everywhere. */
+/*
+ * App screens (sign-in, dashboard, backoffice): denser UI type and green
+ * links, while the public site keeps the editorial body font and accent links.
+ */
+.app {
+  font-family: var(--font-app);
+  font-size: 0.875rem;
+  --link: #0b4e2b;
+}
+:root[data-theme="dark"] .app {
+  --link: #7ddba3;
+}
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="auto"] .app {
+    --link: #7ddba3;
+  }
+}
+.app .btn {
+  font-weight: 500;
+}
+.app .btn-secondary {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.app .btn-secondary:hover {
+  background: var(--bg-subtle);
+}
+.app .card {
+  border-radius: var(--radius);
+}
+.app h1 {
+  font-weight: 400;
+}
+
+/* Form controls share one look everywhere: 40px tall, 8px radius. */
 .input {
   width: 100%;
-  border: 1px solid var(--border);
+  min-height: 2.5rem;
+  border: 1px solid var(--border-strong);
   background: var(--surface);
   color: var(--fg);
   border-radius: var(--radius);
   padding: 0.5rem 0.75rem;
   font-size: 0.875rem;
   line-height: 1.25rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
 }
 .input::placeholder {
-  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  color: var(--muted);
 }
 .input:focus {
-  outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent);
-  outline-offset: 0;
-  border-color: var(--primary);
+  outline: none;
+  border-color: color-mix(in srgb, var(--fg) 65%, var(--muted));
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--muted) 30%, transparent);
 }
+
+/*
+ * Sign-in backdrop: staggered columns of gradient tiles that fade towards the
+ * centre. Pure CSS, tinted with the brand accent.
+ */
+.auth-backdrop {
+  --night: #221413;
+  background: var(--night);
+}
+.auth-backdrop::before,
+.auth-backdrop::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* One tile: hot at the top, sinking into the night below. */
+  --tile: linear-gradient(180deg, color-mix(in srgb, var(--accent) 45%, #f01414) 0%, color-mix(in srgb, var(--accent) 20%, #8f0d0d) 40%, var(--night) 100%);
+  /* Everything but a soft-edged diamond around the card. */
+  --hole: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100' preserveAspectRatio='none'%3E%3Cfilter id='b' x='-50%25' y='-50%25' width='200%25' height='200%25'%3E%3CfeGaussianBlur stdDeviation='5'/%3E%3C/filter%3E%3Cpath filter='url(%23b)' fill-rule='evenodd' d='M-20-20H120V120H-20Z M50-42 L93 50 L50 142 L7 50Z'/%3E%3C/svg%3E");
+  background:
+    repeating-linear-gradient(180deg, transparent 0 60px, var(--night) 60px 64px),
+    repeating-linear-gradient(90deg, transparent 0 44px, var(--night) 44px 48px),
+    var(--tile);
+  background-size: auto, auto, 100% 64px;
+  -webkit-mask-image: repeating-linear-gradient(90deg, #000 0 48px, transparent 48px 96px), var(--hole);
+  mask-image: repeating-linear-gradient(90deg, #000 0 48px, transparent 48px 96px), var(--hole);
+  -webkit-mask-size: auto, 100% 100%;
+  mask-size: auto, 100% 100%;
+  -webkit-mask-composite: source-in;
+  mask-composite: intersect;
+}
+.auth-backdrop::after {
+  background-position: 0 32px, 0 0, 0 32px;
+  -webkit-mask-image: repeating-linear-gradient(90deg, transparent 0 48px, #000 48px 96px), var(--hole);
+  mask-image: repeating-linear-gradient(90deg, transparent 0 48px, #000 48px 96px), var(--hole);
+}
+
 textarea.input {
   min-height: 5rem;
   resize: vertical;
 }
 
 /* Typography for Markdown content. */
+/* Editorial headings: light serif, tight leading. */
+h1,
+.font-display {
+  font-family: var(--font-heading);
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--fg);
+}
+h2,
+h3,
+h4,
+strong,
+dt,
+th {
+  color: var(--fg);
+}
+
 .prose {
   line-height: 1.75;
-  color: var(--fg);
+  color: var(--body);
 }
 .prose > * + * {
   margin-top: 1.1em;
@@ -136,7 +254,7 @@ textarea.input {
   margin-top: 0;
 }
 .prose a {
-  color: var(--primary);
+  color: var(--link);
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -152,7 +270,7 @@ textarea.input {
   margin-top: 0.35em;
 }
 .prose blockquote {
-  border-left: 3px solid var(--primary);
+  border-left: 3px solid var(--accent);
   padding-left: 1em;
   color: var(--muted);
 }

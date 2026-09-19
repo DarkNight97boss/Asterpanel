@@ -18,7 +18,7 @@ export async function TicketThread({ messages }: { messages: Message[] }) {
       {messages.map((m) => {
         const staff = isStaff(m.author);
         return (
-          <li key={m.id} className={cn("rounded-theme border bg-surface p-5", staff ? "border-primary/40" : "border-border")}>
+          <li key={m.id} className={cn("rounded-theme border bg-surface p-5", staff ? "border-accent/40" : "border-border")}>
             <div className="mb-2 flex flex-wrap items-center gap-2 text-sm">
               <span className="font-semibold">{displayName(m.author)}</span>
               {staff && <Badge tone="info">{t("Staff")}</Badge>}

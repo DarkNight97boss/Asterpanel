@@ -27,7 +27,7 @@ export default async function Servers() {
           <Table head={[t("Name"), t("Hostname"), t("Module"), t("Accounts"), ""]}>
             {servers.map(({ server: s, accounts }) => (
               <tr key={s.id}>
-                <Td><Link href={`/admin/servers/${s.id}`} className="font-medium hover:text-primary">{s.name}</Link></Td>
+                <Td><Link href={`/admin/servers/${s.id}`} className="font-medium hover:text-link">{s.name}</Link></Td>
                 <Td className="font-mono text-xs">{s.hostname}</Td>
                 <Td>{getProvisioningModule(s.module).name}</Td>
                 <Td>{accounts}{s.maxAccounts > 0 && ` / ${s.maxAccounts}`}</Td>

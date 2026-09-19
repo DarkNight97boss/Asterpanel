@@ -3,14 +3,14 @@ import { and, eq } from "drizzle-orm";
 import { Alert, ButtonLink, Card, PageHeader, StatusBadge, STATUS_LABEL } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { requireUser } from "@/lib/auth";
+import { requireAccount } from "@/lib/account";
 import { CYCLE_LABEL, formatDate, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { getProvisioningModule } from "@/modules/provisioning";
 
 export default async function ClientService({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const user = await requireUser();
+  const { user: me, account: user } = await requireAccount("billing");
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
   const service = await db.query.services.findFirst({
@@ -26,7 +26,7 @@ export default async function ClientService({ params }: { params: Promise<{ id: 
       ? getProvisioningModule(product.module).loginUrl?.({
           service: row,
           product,
-          client: user,
+          client: me,
           server: { id: server.id, name: server.name, hostname: server.hostname, credentials: {} },
         })
       : null;

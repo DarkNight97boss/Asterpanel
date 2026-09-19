@@ -74,6 +74,41 @@ export const sessions = pgTable(
   (t) => [index("sessions_user_idx").on(t.userId)],
 );
 
+export const passwordResets = pgTable(
+  "password_resets",
+  {
+    /** SHA-256 of the emailed token. */
+    id: text("id").primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("password_resets_user_idx").on(t.userId)],
+);
+
+export type TeamRole = "admin" | "developer" | "billing";
+
+/** Access to someone else's account. `memberId` is set when the invite is accepted. */
+export const teamMembers = pgTable(
+  "team_members",
+  {
+    id: id(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    memberId: uuid("member_id").references(() => users.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    role: text("role").$type<TeamRole>().notNull(),
+    /** SHA-256 of the emailed invite token; cleared once accepted. */
+    inviteTokenHash: text("invite_token_hash").notNull().default(""),
+    invitedAt: createdAt(),
+    acceptedAt: timestamp("accepted_at", { withTimezone: true }),
+  },
+  (t) => [uniqueIndex("team_owner_email_idx").on(t.ownerId, t.email), index("team_member_idx").on(t.memberId)],
+);
+
 // ─── Settings & CMS ──────────────────────────────────────────────────────────
 
 export const settings = pgTable("settings", {
@@ -108,6 +143,8 @@ export const menuItems = pgTable("menu_items", {
   location: text("location").$type<MenuLocation>().notNull(),
   label: text("label").notNull(),
   href: text("href").notNull(),
+  /** Footer column heading; empty = the bottom row of small links. */
+  columnTitle: text("column_title").notNull().default(""),
   position: integer("position").notNull().default(0),
 });
 
@@ -251,6 +288,8 @@ export const invoices = pgTable(
     total: integer("total").notNull().default(0),
     dueDate: timestamp("due_date", { withTimezone: true }).notNull(),
     paidAt: timestamp("paid_at", { withTimezone: true }),
+    /** How many overdue reminders were already emailed (dedupes the cron). */
+    remindersSent: integer("reminders_sent").notNull().default(0),
     notes: text("notes").notNull().default(""),
     createdAt: createdAt(),
   },
@@ -293,6 +332,252 @@ export const transactions = pgTable(
   (t) => [index("transactions_invoice_idx").on(t.invoiceId)],
 );
 
+// ─── Platform: nodes, workloads, jobs ─────────────────────────────────────────
+
+export type NodeStatus = "pending" | "online" | "offline" | "disabled";
+export type NodeStats = { cpuPercent?: number; memTotalMb?: number; memUsedMb?: number; diskTotalGb?: number; diskUsedGb?: number; workloads?: number };
+
+/** A server running the Aster agent. */
+export const nodes = pgTable("nodes", {
+  id: id(),
+  name: text("name").notNull(),
+  region: text("region").notNull().default(""),
+  /** Wildcard domain pointing at this node: workloads get `<slug>.<baseDomain>`. */
+  baseDomain: text("base_domain").notNull().default(""),
+  publicIp: text("public_ip").notNull().default(""),
+  /** SHA-256 of the agent's bearer token. */
+  tokenHash: text("token_hash").notNull(),
+  status: text("status").$type<NodeStatus>().notNull().default("pending"),
+  driver: text("driver").notNull().default(""),
+  agentVersion: text("agent_version").notNull().default(""),
+  stats: jsonb("stats").$type<NodeStats>().notNull().default({}),
+  maxWorkloads: integer("max_workloads").notNull().default(0),
+  lastSeenAt: timestamp("last_seen_at", { withTimezone: true }),
+  createdAt: createdAt(),
+});
+
+export const WORKLOAD_TYPES = ["wordpress", "app", "database", "static"] as const;
+export type WorkloadType = (typeof WORKLOAD_TYPES)[number];
+export type WorkloadStatus = "creating" | "running" | "stopped" | "suspended" | "error" | "deleting" | "deleted";
+
+/** Type-specific, non-secret settings. */
+export type WorkloadConfig = {
+  // wordpress
+  phpVersion?: string;
+  adminEmail?: string;
+  adminUser?: string;
+  // database
+  engine?: "mysql" | "postgres" | "redis";
+  version?: string;
+  // app & static
+  repoUrl?: string;
+  branch?: string;
+  buildCommand?: string;
+  outputDir?: string;
+  port?: number;
+  // edge rules (web workloads)
+  redirects?: { from: string; to: string; code: 301 | 302 }[];
+  denyIps?: string[];
+  // bot protection (web workloads)
+  botsBlockBad?: boolean;
+  botsBlockAi?: boolean;
+  botsRatePerMinute?: number;
+  botsProtectLogin?: boolean;
+  // static asset acceleration (WordPress)
+  cdnEnabled?: boolean;
+  cdnMaxAgeDays?: number;
+  // edge page cache (WordPress)
+  cacheEnabled?: boolean;
+  cacheTtlMinutes?: number;
+  cacheBypass?: string[];
+  // file access (WordPress)
+  sftpEnabled?: boolean;
+  sftpPort?: number;
+  // plan limits
+  memoryMb?: number;
+  cpus?: number;
+  diskGb?: number;
+};
+
+/** What the agent reports back about the running workload. */
+export type WorkloadRuntime = {
+  internalHost?: string;
+  dbName?: string;
+  dbUser?: string;
+  diskUsedMb?: number;
+  version?: string;
+};
+
+export const workloads = pgTable(
+  "workloads",
+  {
+    id: id(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "restrict" }),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "restrict" }),
+    serviceId: uuid("service_id").references(() => services.id, { onDelete: "set null" }),
+    /** Staging environments point at their live workload. */
+    parentId: uuid("parent_id"),
+    type: text("type").$type<WorkloadType>().notNull(),
+    environment: text("environment").$type<"live" | "staging">().notNull().default("live"),
+    name: text("name").notNull(),
+    /** DNS-safe unique id: container names and the default hostname derive from it. */
+    slug: text("slug").notNull(),
+    status: text("status").$type<WorkloadStatus>().notNull().default("creating"),
+    statusMessage: text("status_message").notNull().default(""),
+    config: jsonb("config").$type<WorkloadConfig>().notNull().default({}),
+    /** AES-256-GCM JSON: generated passwords, env vars, deploy tokens. */
+    secrets: text("secrets").notNull().default(""),
+    runtime: jsonb("runtime").$type<WorkloadRuntime>().notNull().default({}),
+    /** Secret in the push-to-deploy webhook URL. */
+    deployHookToken: text("deploy_hook_token").notNull().default(""),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [uniqueIndex("workloads_slug_idx").on(t.slug), index("workloads_client_idx").on(t.clientId), index("workloads_node_idx").on(t.nodeId)],
+);
+
+export const domains = pgTable(
+  "domains",
+  {
+    id: id(),
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    hostname: text("hostname").notNull(),
+    isPrimary: boolean("is_primary").notNull().default(false),
+    /** Generated `<slug>.<node base domain>` hostname: cannot be removed. */
+    isSystem: boolean("is_system").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("domains_hostname_idx").on(t.hostname), index("domains_workload_idx").on(t.workloadId)],
+);
+
+export type BackupStatus = "creating" | "ready" | "failed" | "restoring";
+
+export const backups = pgTable(
+  "backups",
+  {
+    id: id(),
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    kind: text("kind").$type<"manual" | "scheduled" | "system">().notNull().default("manual"),
+    status: text("status").$type<BackupStatus>().notNull().default("creating"),
+    note: text("note").notNull().default(""),
+    sizeBytes: integer("size_bytes").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("backups_workload_idx").on(t.workloadId)],
+);
+
+export type DeploymentStatus = "queued" | "building" | "live" | "failed";
+
+export const deployments = pgTable(
+  "deployments",
+  {
+    id: id(),
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    status: text("status").$type<DeploymentStatus>().notNull().default("queued"),
+    trigger: text("trigger").$type<"manual" | "push" | "create">().notNull().default("manual"),
+    commitSha: text("commit_sha").notNull().default(""),
+    commitMessage: text("commit_message").notNull().default(""),
+    createdAt: createdAt(),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("deployments_workload_idx").on(t.workloadId)],
+);
+
+// ─── DNS ─────────────────────────────────────────────────────────────────────
+
+export const DNS_TYPES = ["A", "AAAA", "CNAME", "MX", "TXT", "CAA", "SRV"] as const;
+export type DnsType = (typeof DNS_TYPES)[number];
+
+export const dnsZones = pgTable(
+  "dns_zones",
+  {
+    id: id(),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** Apex domain, lowercase, no trailing dot. */
+    name: text("name").notNull(),
+    /** SOA serial, bumped on every change. */
+    serial: integer("serial").notNull().default(1),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex("dns_zones_name_idx").on(t.name), index("dns_zones_client_idx").on(t.clientId)],
+);
+
+export const dnsRecords = pgTable(
+  "dns_records",
+  {
+    id: id(),
+    zoneId: uuid("zone_id")
+      .notNull()
+      .references(() => dnsZones.id, { onDelete: "cascade" }),
+    /** Relative to the zone: "@" for the apex, "www", "*.dev"… */
+    name: text("name").notNull(),
+    type: text("type").$type<DnsType>().notNull(),
+    value: text("value").notNull(),
+    ttl: integer("ttl").notNull().default(3600),
+    priority: integer("priority").notNull().default(0),
+    createdAt: createdAt(),
+  },
+  (t) => [index("dns_records_zone_idx").on(t.zoneId)],
+);
+
+/** Resource samples reported by agents, one row per workload every few minutes. */
+export const workloadMetrics = pgTable(
+  "workload_metrics",
+  {
+    id: id(),
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    cpuPercent: integer("cpu_percent").notNull().default(0),
+    memMb: integer("mem_mb").notNull().default(0),
+    /** Cumulative network counters of the container, in MB. */
+    rxMb: integer("rx_mb").notNull().default(0),
+    txMb: integer("tx_mb").notNull().default(0),
+  },
+  (t) => [index("workload_metrics_idx").on(t.workloadId, t.at)],
+);
+
+export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
+
+/** Unit of work executed by a node agent. See src/platform/protocol.ts. */
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: id(),
+    nodeId: uuid("node_id")
+      .notNull()
+      .references(() => nodes.id, { onDelete: "cascade" }),
+    workloadId: uuid("workload_id").references(() => workloads.id, { onDelete: "set null" }),
+    backupId: uuid("backup_id"),
+    deploymentId: uuid("deployment_id"),
+    type: text("type").notNull(),
+    /** Self-contained instructions for the agent. May embed secrets, so it is encrypted. */
+    payload: text("payload").notNull(),
+    status: text("status").$type<JobStatus>().notNull().default("queued"),
+    actorId: uuid("actor_id"),
+    error: text("error").notNull().default(""),
+    log: text("log").notNull().default(""),
+    result: jsonb("result").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: createdAt(),
+    startedAt: timestamp("started_at", { withTimezone: true }),
+    finishedAt: timestamp("finished_at", { withTimezone: true }),
+  },
+  (t) => [index("jobs_node_status_idx").on(t.nodeId, t.status), index("jobs_workload_idx").on(t.workloadId)],
+);
+
 // ─── Support ─────────────────────────────────────────────────────────────────
 
 export type TicketStatus = "open" | "answered" | "customer_reply" | "closed";
@@ -332,6 +617,36 @@ export const ticketMessages = pgTable(
   },
   (t) => [index("ticket_messages_ticket_idx").on(t.ticketId)],
 );
+
+// ─── Email log ───────────────────────────────────────────────────────────────
+
+export type EmailStatus = "sent" | "failed";
+
+export const emailLog = pgTable(
+  "email_log",
+  {
+    id: id(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    recipient: text("recipient").notNull(),
+    subject: text("subject").notNull(),
+    template: text("template").notNull(),
+    status: text("status").$type<EmailStatus>().notNull(),
+    error: text("error").notNull().default(""),
+    createdAt: createdAt(),
+  },
+  (t) => [index("email_log_created_idx").on(t.createdAt), index("email_log_user_idx").on(t.userId)],
+);
+
+/** Admin overrides of the built-in email templates (see src/lib/mail/templates.ts). */
+export const emailTemplates = pgTable("email_templates", {
+  id: text("id").primaryKey(),
+  enabled: boolean("enabled").notNull().default(true),
+  /** Empty string = use the built-in, translated default. */
+  subject: text("subject").notNull().default(""),
+  heading: text("heading").notNull().default(""),
+  body: text("body").notNull().default(""),
+  updatedAt: updatedAt(),
+});
 
 // ─── Audit ───────────────────────────────────────────────────────────────────
 
@@ -385,6 +700,37 @@ export const invoiceItemsRelations = relations(invoiceItems, ({ one }) => ({
 
 export const transactionsRelations = relations(transactions, ({ one }) => ({
   invoice: one(invoices, { fields: [transactions.invoiceId], references: [invoices.id] }),
+}));
+
+export const nodesRelations = relations(nodes, ({ many }) => ({ workloads: many(workloads) }));
+
+export const workloadsRelations = relations(workloads, ({ one, many }) => ({
+  client: one(users, { fields: [workloads.clientId], references: [users.id] }),
+  node: one(nodes, { fields: [workloads.nodeId], references: [nodes.id] }),
+  service: one(services, { fields: [workloads.serviceId], references: [services.id] }),
+  parent: one(workloads, { fields: [workloads.parentId], references: [workloads.id], relationName: "staging" }),
+  staging: many(workloads, { relationName: "staging" }),
+  domains: many(domains),
+  backups: many(backups),
+  deployments: many(deployments),
+  jobs: many(jobs),
+}));
+
+export const domainsRelations = relations(domains, ({ one }) => ({
+  workload: one(workloads, { fields: [domains.workloadId], references: [workloads.id] }),
+}));
+export const backupsRelations = relations(backups, ({ one }) => ({
+  workload: one(workloads, { fields: [backups.workloadId], references: [workloads.id] }),
+}));
+export const deploymentsRelations = relations(deployments, ({ one }) => ({
+  workload: one(workloads, { fields: [deployments.workloadId], references: [workloads.id] }),
+}));
+export const dnsZonesRelations = relations(dnsZones, ({ many }) => ({ records: many(dnsRecords) }));
+export const dnsRecordsRelations = relations(dnsRecords, ({ one }) => ({ zone: one(dnsZones, { fields: [dnsRecords.zoneId], references: [dnsZones.id] }) }));
+
+export const jobsRelations = relations(jobs, ({ one }) => ({
+  node: one(nodes, { fields: [jobs.nodeId], references: [nodes.id] }),
+  workload: one(workloads, { fields: [jobs.workloadId], references: [workloads.id] }),
 }));
 
 export const ticketsRelations = relations(tickets, ({ one, many }) => ({

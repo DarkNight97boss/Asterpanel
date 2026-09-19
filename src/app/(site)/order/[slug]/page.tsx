@@ -1,4 +1,4 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ButtonLink, Card, Field, Input } from "@/components/ui";
@@ -7,6 +7,8 @@ import { getLocale, getT } from "@/i18n";
 import { getUser } from "@/lib/auth";
 import { CYCLE_LABEL, enabledCycles, formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
+import { planType } from "@/modules/provisioning/platform";
+import { WORKLOAD_LABEL } from "@/platform/ui";
 import { submitOrder } from "../actions";
 
 export const metadata = { title: "Order" };
@@ -18,6 +20,8 @@ export default async function OrderPage({ params }: { params: Promise<{ slug: st
     where: and(eq(schema.products.slug, slug), eq(schema.products.hidden, false)),
   });
   if (!product) notFound();
+  // Platform plans are configured in the dashboard wizard, not here.
+  if (product.module === "platform") redirect(`${WORKLOAD_LABEL[planType(product.moduleConfig)].path.replace("/client/", "/client/new/")}?plan=${product.slug}`);
 
   const [user, t, locale, billing] = await Promise.all([getUser(), getT(), getLocale(), getSettings("billing")]);
   const cycles = enabledCycles(product.pricing);
@@ -27,13 +31,13 @@ export default async function OrderPage({ params }: { params: Promise<{ slug: st
   return (
     <div className="mx-auto grid max-w-5xl gap-8 px-4 py-14 lg:grid-cols-[1fr_22rem]">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">{product.name}</h1>
+        <h1 className="text-3xl tracking-tight">{product.name}</h1>
         {product.tagline && <p className="mt-2 text-lg text-muted">{product.tagline}</p>}
         {product.description && <p className="mt-5 leading-relaxed whitespace-pre-line">{product.description}</p>}
         <ul className="mt-6 grid gap-2.5 text-sm sm:grid-cols-2">
           {product.features.map((f, i) => (
             <li key={i} className="flex gap-2.5">
-              <span aria-hidden className="font-bold text-primary">✓</span>
+              <span aria-hidden className="font-bold text-link">✓</span>
               {f}
             </li>
           ))}
@@ -60,9 +64,9 @@ export default async function OrderPage({ params }: { params: Promise<{ slug: st
             <fieldset className="space-y-2">
               <legend className="mb-1.5 text-sm font-medium">{t("Billing cycle")}</legend>
               {cycles.map((c, i) => (
-                <label key={c} className="flex cursor-pointer items-center justify-between gap-3 rounded-theme border border-border px-3 py-2.5 text-sm has-checked:border-primary has-checked:bg-primary/5">
+                <label key={c} className="flex cursor-pointer items-center justify-between gap-3 rounded-theme border border-border px-3 py-2.5 text-sm has-checked:border-accent has-checked:bg-accent/5">
                   <span className="flex items-center gap-2.5">
-                    <input type="radio" name="cycle" value={c} defaultChecked={i === 0} className="accent-(--primary)" required />
+                    <input type="radio" name="cycle" value={c} defaultChecked={i === 0} className="accent-(--accent)" required />
                     {t(CYCLE_LABEL[c])}
                   </span>
                   <span className="font-semibold">{formatMoney(product.pricing[c]!, billing.currency, locale)}</span>

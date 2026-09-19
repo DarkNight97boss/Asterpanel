@@ -77,7 +77,7 @@ export const centsToInput = (cents: number | undefined) => (cents == null ? "" :
 export function slugify(input: string): string {
   return input
     .normalize("NFKD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
@@ -85,3 +85,6 @@ export function slugify(input: string): string {
 }
 
 export const DOMAIN_RE = /^(?=.{1,253}$)(?!-)([a-z0-9-]{1,63}(?<!-)\.)+[a-z]{2,63}$/i;
+
+export const displayName = (u: { firstName: string; lastName: string; email: string }) =>
+  `${u.firstName} ${u.lastName}`.trim() || u.email;

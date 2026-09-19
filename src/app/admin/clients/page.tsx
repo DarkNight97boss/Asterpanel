@@ -42,7 +42,7 @@ export default async function Clients({ searchParams }: { searchParams: Promise<
             {clients.map((c) => (
               <tr key={c.id}>
                 <Td>
-                  <Link href={`/admin/clients/${c.id}`} className="font-medium hover:text-primary">{displayName(c)}</Link>
+                  <Link href={`/admin/clients/${c.id}`} className="font-medium hover:text-link">{displayName(c)}</Link>
                 </Td>
                 <Td className="text-muted">{c.email}</Td>
                 <Td>{c.company || "—"}</Td>

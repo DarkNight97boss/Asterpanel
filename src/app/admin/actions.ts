@@ -13,6 +13,9 @@ import { requireAdmin, requireStaff } from "@/lib/auth";
 import { activateService, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
 import { decryptJson, encryptJson } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
+import { platformHomeBlocks, seedFooterColumns, seedPlatformPlans } from "@/lib/install";
+import { templateDef } from "@/lib/mail/templates";
+import { notify, resendInvoice, sendTestMail } from "@/lib/notify";
 import { settingsSchemas, updateSettings, getSettings } from "@/lib/settings";
 import { getProvisioningModule, provisioningModules } from "@/modules/provisioning";
 
@@ -130,6 +133,12 @@ export async function addPayment(_: ActionState, form: FormData): Promise<Action
   return { ok: "Payment recorded" };
 }
 
+export async function resendInvoiceEmail(_: ActionState, form: FormData): Promise<ActionState> {
+  await requireStaff();
+  const result = await resendInvoice(uuid.parse(form.get("invoiceId")));
+  return result.ok ? { ok: "Email sent" } : { error: result.error ?? "Email could not be sent" };
+}
+
 export async function cancelInvoice(form: FormData) {
   const staff = await requireStaff();
   const id = uuid.parse(form.get("invoiceId"));
@@ -148,6 +157,7 @@ export async function staffReply(_: ActionState, form: FormData): Promise<Action
   const db = await getDb();
   await db.insert(schema.ticketMessages).values({ ticketId: parsed.data.ticketId, authorId: staff.id, body: parsed.data.body });
   await db.update(schema.tickets).set({ status: "answered", lastReplyAt: new Date() }).where(eq(schema.tickets.id, parsed.data.ticketId));
+  notify.ticketStaffReply(parsed.data.ticketId, parsed.data.body);
   revalidatePath(`/admin/tickets/${parsed.data.ticketId}`);
 }
 
@@ -342,7 +352,7 @@ export async function savePage(_: ActionState, form: FormData): Promise<ActionSt
     })
     .safeParse(fields(form));
   if (!parsed.success) return { error: firstIssue(parsed.error) };
-  if (/^(admin|client|api|login|register|install|order)(\/|$)/.test(parsed.data.slug)) return { error: "This slug is reserved" };
+  if (/^(admin|client|api|login|register|install|order|forgot-password|reset-password|invite|agent)(\/|$)/.test(parsed.data.slug)) return { error: "This slug is reserved" };
 
   let blocks: unknown;
   try {
@@ -367,6 +377,21 @@ export async function savePage(_: ActionState, form: FormData): Promise<ActionSt
   return { ok: "Saved" };
 }
 
+/** Replaces the home page and footer menu with the platform template (plans are created if missing). */
+export async function installPlatformHome() {
+  const staff = await requireStaff();
+  await seedPlatformPlans();
+  const blocks = await platformHomeBlocks((await getSettings("general")).siteName);
+  const db = await getDb();
+  await db
+    .insert(schema.pages)
+    .values({ slug: "", title: "Home", status: "published", blocks })
+    .onConflictDoUpdate({ target: schema.pages.slug, set: { blocks, status: "published", updatedAt: new Date() } });
+  await seedFooterColumns();
+  await audit(staff.id, "page.template_installed", "page", "home");
+  revalidatePath("/", "layout");
+}
+
 export async function deletePage(form: FormData) {
   const staff = await requireStaff();
   const id = uuid.parse(form.get("id"));
@@ -384,6 +409,7 @@ export async function saveMenuItem(_: ActionState, form: FormData): Promise<Acti
       location: z.enum(["header", "footer"]),
       label: z.string().trim().min(1).max(60),
       href: z.string().trim().max(500).regex(/^(\/|#|https?:\/\/|mailto:|tel:)/i, "Link must start with /, #, http(s)://, mailto: or tel:"),
+      columnTitle: text(40),
       position: z.coerce.number().int().default(0),
     })
     .safeParse(fields(form));
@@ -412,6 +438,9 @@ export async function saveGeneral(_: ActionState, form: FormData): Promise<Actio
   const parsed = settingsSchemas.general.partial().safeParse({ ...fields(form), allowRegistration: checkbox(form, "allowRegistration") });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   delete parsed.data.installed;
+  if (parsed.data.siteUrl && !/^https?:\/\/[^\s/]+$/.test((parsed.data.siteUrl = parsed.data.siteUrl.replace(/\/+$/, "")))) {
+    return { error: "Site URL must look like https://example.com" };
+  }
   await updateSettings("general", parsed.data);
   await audit(admin.id, "settings.updated", "settings", "general");
   revalidatePath("/", "layout");
@@ -443,6 +472,7 @@ export async function saveBilling(_: ActionState, form: FormData): Promise<Actio
     invoiceDaysBeforeDue: Number(f.invoiceDaysBeforeDue),
     suspendDaysAfterDue: Number(f.suspendDaysAfterDue),
     terminateDaysAfterDue: Number(f.terminateDaysAfterDue),
+    overdueReminderDays: [...new Set(String(f.overdueReminderDays ?? "").split(/[\s,;]+/).filter(Boolean).map(Number))].sort((a, b) => a - b),
   });
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   await updateSettings("billing", parsed.data);
@@ -466,12 +496,80 @@ export async function saveGateways(_: ActionState, form: FormData): Promise<Acti
   return { ok: "Saved" };
 }
 
+export async function saveMail(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("mail");
+  const f = fields(form);
+  const optionalEmail = z.union([z.string().trim().email(), z.literal("")]);
+  const parsed = z
+    .object({
+      host: z.string().trim().max(253),
+      port: z.coerce.number().int().min(1).max(65535),
+      security: z.enum(["starttls", "ssl", "none"]),
+      username: text(200),
+      fromName: text(100),
+      fromEmail: optionalEmail,
+      staffEmail: optionalEmail,
+    })
+    .safeParse(f);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const enabled = checkbox(form, "enabled");
+  if (enabled && (!parsed.data.host || !parsed.data.fromEmail)) return { error: "SMTP host and sender address are required" };
+
+  await updateSettings("mail", { ...parsed.data, enabled, password: String(f.password ?? "") || current.password });
+  await audit(admin.id, "settings.updated", "settings", "mail");
+  return { ok: "Saved" };
+}
+
+export async function saveEmailTemplate(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const parsed = z
+    .object({
+      id: z.string().refine((id) => !!templateDef(id), "Unknown template"),
+      subject: text(200),
+      heading: text(200),
+      body: z.string().max(5000).default(""),
+    })
+    .safeParse(fields(form));
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+
+  const { id, ...wording } = parsed.data;
+  const values = { ...wording, body: wording.body.replace(/\r\n?/g, "\n").trim(), enabled: checkbox(form, "enabled") };
+  const db = await getDb();
+  await db
+    .insert(schema.emailTemplates)
+    .values({ id, ...values })
+    .onConflictDoUpdate({ target: schema.emailTemplates.id, set: { ...values, updatedAt: new Date() } });
+  await audit(admin.id, "mail.template.updated", "email_template", id, { enabled: values.enabled });
+  revalidatePath("/admin/settings/mail/templates", "layout");
+  return { ok: "Saved" };
+}
+
+export async function resetEmailTemplate(form: FormData) {
+  const admin = await requireAdmin();
+  const id = String(form.get("id") ?? "");
+  const db = await getDb();
+  await db.delete(schema.emailTemplates).where(eq(schema.emailTemplates.id, id));
+  await audit(admin.id, "mail.template.reset", "email_template", id);
+  revalidatePath("/admin/settings/mail/templates", "layout");
+}
+
+export async function sendTestEmail(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const to = z.string().trim().email().safeParse(form.get("to"));
+  if (!to.success) return { error: "Enter a valid email address" };
+  const result = await sendTestMail(to.data);
+  await audit(admin.id, "mail.test", "settings", "mail", { to: to.data, ok: result.ok });
+  revalidatePath("/admin/settings/mail");
+  return result.ok ? { ok: "Test email sent" } : { error: result.error ?? "Email could not be sent" };
+}
+
 // ─── Automation ──────────────────────────────────────────────────────────────
 
 export async function runAutomationNow(): Promise<ActionState> {
   await requireStaff();
   const r = await runAutomation();
   revalidatePath("/admin/automation");
-  const summary = `Invoices: ${r.invoiced} · Suspended: ${r.suspended} · Terminated: ${r.terminated}`;
+  const summary = `Invoices: ${r.invoiced} · Reminders: ${r.reminded} · Suspended: ${r.suspended} · Terminated: ${r.terminated}`;
   return r.errors.length ? { error: `${summary}\n${r.errors.join("\n")}` } : { ok: summary };
 }

@@ -36,6 +36,7 @@ export default async function Appearance() {
             </Field>
             <Field label={t("Font")}>
               <Select name="font" defaultValue={s.font}>
+                <option value="editorial">{t("Editorial (serif headings)")}</option>
                 <option value="geist">Geist</option>
                 <option value="system">{t("System UI")}</option>
                 <option value="serif">Serif</option>
@@ -43,6 +44,10 @@ export default async function Appearance() {
               </Select>
             </Field>
             <Field label={t("Footer text")}><Input name="footerText" defaultValue={s.footerText} /></Field>
+          </div>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label={t("Announcement bar")} hint={t("Shown above the site header. Leave empty to hide.")}><Input name="announcement" defaultValue={s.announcement} maxLength={200} /></Field>
+            <Field label={t("Announcement link")}><Input name="announcementHref" defaultValue={s.announcementHref} placeholder="/register" /></Field>
           </div>
           <Field label={t("Custom CSS")} hint={t("Loaded on every page after the theme.")}>
             <Textarea name="customCss" defaultValue={s.customCss} rows={6} className="font-mono" spellCheck={false} />

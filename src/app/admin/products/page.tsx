@@ -50,7 +50,7 @@ export default async function Products() {
                   return (
                     <tr key={p.id}>
                       <Td>
-                        <Link href={`/admin/products/${p.id}`} className="font-medium hover:text-primary">{p.name}</Link>
+                        <Link href={`/admin/products/${p.id}`} className="font-medium hover:text-link">{p.name}</Link>
                         <span className="block text-xs text-muted">/order/{p.slug}</span>
                       </Td>
                       <Td>{cycle ? `${formatMoney(p.pricing[cycle]!, billing.currency, locale)}${t(CYCLE_SUFFIX[cycle])}` : "—"}</Td>

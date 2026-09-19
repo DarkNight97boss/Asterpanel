@@ -20,6 +20,9 @@ export default async function BillingSettings() {
             <Field label={t("Tax rate (%)")}><Input name="taxPercent" inputMode="decimal" defaultValue={s.taxRate / 100} /></Field>
             <Field label={t("Invoice renewals (days before due)")}><Input name="invoiceDaysBeforeDue" type="number" min={0} max={60} defaultValue={s.invoiceDaysBeforeDue} /></Field>
             <Field label={t("Suspend (days after due)")}><Input name="suspendDaysAfterDue" type="number" min={0} max={90} defaultValue={s.suspendDaysAfterDue} /></Field>
+            <Field label={t("Overdue reminders (days after due)")} hint={t("Comma separated. Leave empty to disable.")}>
+              <Input name="overdueReminderDays" defaultValue={s.overdueReminderDays.join(", ")} placeholder="3, 7, 14" />
+            </Field>
             <Field label={t("Terminate (days after due)")} hint={t("0 = never")}><Input name="terminateDaysAfterDue" type="number" min={0} max={365} defaultValue={s.terminateDaysAfterDue} /></Field>
           </div>
           <Field label={t("Bank transfer instructions")} hint={t("Shown to clients who choose to pay by bank transfer.")}>

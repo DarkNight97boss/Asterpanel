@@ -3,12 +3,12 @@ import { desc, eq } from "drizzle-orm";
 import { ButtonLink, Card, EmptyState, PageHeader, StatusBadge, Table, Td } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
-import { requireUser } from "@/lib/auth";
+import { requireAccount } from "@/lib/account";
 import { formatDateTime } from "@/lib/format";
 import { STATUS_LABEL } from "@/components/ui";
 
 export default async function ClientTickets() {
-  const user = await requireUser();
+  const { account: user } = await requireAccount("support");
   const db = await getDb();
   const [t, locale, tickets] = await Promise.all([
     getT(),
@@ -26,7 +26,7 @@ export default async function ClientTickets() {
               <tr key={tk.id}>
                 <Td className="text-muted">{tk.number}</Td>
                 <Td>
-                  <Link href={`/client/tickets/${tk.id}`} className="font-medium hover:text-primary">{tk.subject}</Link>
+                  <Link href={`/client/tickets/${tk.id}`} className="font-medium hover:text-link">{tk.subject}</Link>
                 </Td>
                 <Td>{formatDateTime(tk.lastReplyAt, locale)}</Td>
                 <Td><StatusBadge status={tk.status} label={t(STATUS_LABEL[tk.status])} /></Td>
