@@ -484,7 +484,6 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return { dir, commitSha, commitMessage: message.join(" ") };
   }
 
-  /** (Re)starts the serving container of an app or static site from what is already built. */
   /** Tags what just went live so it can be rolled back to, and drops the oldest kept builds. */
   private async keepImage(name: string, deploymentId: string, keep: string[]) {
     await this.docker(["tag", `${name}:current`, `${name}:d-${deploymentId}`]);

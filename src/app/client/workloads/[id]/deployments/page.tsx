@@ -1,14 +1,16 @@
 import { desc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, StatusBadge } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { formatDateTime } from "@/lib/format";
 import { baseUrl } from "@/lib/url";
 import { requireWorkload } from "@/platform/access";
 import Link from "next/link";
+import { githubRepoOf } from "@/lib/github";
+import { getSettings } from "@/lib/settings";
 import { MAX_PREVIEWS, previewsOf, rollbackCandidates } from "@/platform/engine";
-import { deploy, removePreview, rollback, togglePreviews } from "../../../platform-actions";
+import { connectGithub, deploy, disconnectGithubRepo, removePreview, rollback, togglePreviews } from "../../../platform-actions";
 
 export default async function Deployments({ params }: { params: Promise<{ id: string }> }) {
   const { workload: w } = await requireWorkload((await params).id);
@@ -20,6 +22,8 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
     db.select().from(schema.deployments).where(eq(schema.deployments.workloadId, w.id)).orderBy(desc(schema.deployments.createdAt)).limit(30),
     db.select({ deploymentId: schema.jobs.deploymentId, log: schema.jobs.log, error: schema.jobs.error, status: schema.jobs.status }).from(schema.jobs).where(eq(schema.jobs.workloadId, w.id)).orderBy(desc(schema.jobs.createdAt)).limit(60),
   ]);
+  const gh = await getSettings("github");
+  const github = gh.enabled && !!gh.slug && w.environment === "live" && !!githubRepoOf(w.config.repoUrl ?? "");
   const previews = w.environment === "live" ? await previewsOf(w.id) : [];
   const TRIGGER: Record<string, string> = { manual: "Manual", push: "Git push", create: "First deploy", rollback: "Rollback" };
   // The newest kept build is what is live now: rolling back to it would change nothing.
@@ -39,6 +43,21 @@ export default async function Deployments({ params }: { params: Promise<{ id: st
           }
         />
         <div className="space-y-2 p-5 text-sm">
+          {github && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-theme border border-border p-4">
+              {w.githubInstallationId ? (
+                <>
+                  <span><strong className="font-medium">GitHub</strong> · {w.githubRepo} — {t("pushes deploy by themselves, private repositories need no token, and every commit shows the result.")}</span>
+                  <ActionForm action={disconnectGithubRepo} className=""><input type="hidden" name="id" value={w.id} /><SubmitButton size="sm" variant="ghost">{t("Disconnect")}</SubmitButton></ActionForm>
+                </>
+              ) : (
+                <>
+                  <span className="text-muted">{t("Connect the repository on GitHub: no webhook to set up, no access token to keep, and the deploy result next to each commit.")}</span>
+                  <form action={connectGithub}><input type="hidden" name="id" value={w.id} /><Button variant="secondary">{t("Connect GitHub")}</Button></form>
+                </>
+              )}
+            </div>
+          )}
           <p className="text-muted">{t("Deploy on every push: add this URL as a webhook (POST) in your Git provider.")}</p>
           <code className="block overflow-x-auto rounded-theme border border-border bg-subtle p-3 font-mono text-xs select-all">{origin}/api/hooks/deploy/{w.id}/{w.deployHookToken}</code>
         </div>

@@ -8,6 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { BILLING_CYCLES, type WorkloadConfig } from "@/db/schema";
 import { requireAccount } from "@/lib/account";
+import { audit } from "@/lib/audit";
 import { rateLimit } from "@/lib/rate-limit";
 import { isStaff, requireArea } from "@/lib/auth";
 import { BillingError, placeOrder, terminateService } from "@/lib/billing";
@@ -192,6 +193,23 @@ export async function migrate(_: ActionState, form: FormData): Promise<ActionSta
   }
   refresh(workload.id);
   return { ok: "Migration started. A safety backup is taken first." };
+}
+
+export async function connectGithub(form: FormData) {
+  const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
+  if (!canManage) redirect(`/client/workloads/${workload.id}/deployments`);
+  const { installUrl } = await import("@/lib/github");
+  redirect(await installUrl(workload.id, user.id));
+}
+
+export async function disconnectGithubRepo(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, workload, canManage } = await requireWorkload(String(form.get("id")));
+  if (!canManage) return { error: "Only owners and administrators can change this" };
+  const { disconnectGithub } = await import("@/lib/github");
+  await disconnectGithub(workload.id);
+  await audit(user.id, "github.disconnected", "workload", workload.id);
+  refresh(workload.id);
+  return { ok: "Disconnected" };
 }
 
 export async function togglePreviews(_: ActionState, form: FormData): Promise<ActionState> {

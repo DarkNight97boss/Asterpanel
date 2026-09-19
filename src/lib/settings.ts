@@ -144,6 +144,17 @@ export const settingsSchemas = {
       })
       .default({ enabled: false, provider: "", region: "", size: "", maxNodes: 5, workloadsPerNode: 25, minFreeSlots: 0, baseDomainTemplate: "", removeEmptyAfterHours: 0 }),
   }),
+  /** Encrypted: the GitHub App customers install to deploy from their repositories. */
+  github: z.object({
+    enabled: z.boolean().default(false),
+    appId: z.string().default(""),
+    /** The part after github.com/apps/. */
+    slug: z.string().default(""),
+    clientId: z.string().default(""),
+    clientSecret: z.string().default(""),
+    privateKey: z.string().default(""),
+    webhookSecret: z.string().default(""),
+  }),
   registrars: z.object({
     /** Credentials per registrar module id. */
     accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),
@@ -169,7 +180,7 @@ export const settingsSchemas = {
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud", "github"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;

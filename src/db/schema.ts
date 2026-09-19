@@ -532,6 +532,9 @@ export const workloads = pgTable(
     deployHookToken: text("deploy_hook_token").notNull().default(""),
     /** Free-form tags to group services ("client-acme", "to-migrate"). */
     labels: jsonb("labels").$type<string[]>().notNull().default([]),
+    /** GitHub App installation that grants access to `githubRepo` ("owner/name"). */
+    githubInstallationId: text("github_installation_id").notNull().default(""),
+    githubRepo: text("github_repo").notNull().default(""),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
