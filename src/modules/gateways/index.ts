@@ -2,7 +2,10 @@ import "server-only";
 import { createHmac } from "node:crypto";
 import type { schema } from "@/db";
 import { safeEqual } from "@/lib/crypto";
+import { stripeCustomer } from "@/lib/payment-methods";
 import { getSettings, type Settings } from "@/lib/settings";
+import { paypalAmount, paypalCall, type PayPalOrder } from "./paypal";
+import { stripeCall } from "./stripe";
 
 /**
  * Payment gateway contract. `start` either redirects the client to a hosted
@@ -34,41 +37,60 @@ const bankTransfer: PaymentGateway = {
 
 const stripe: PaymentGateway = {
   id: "stripe",
-  name: "Credit / debit card",
+  // Stripe Checkout offers Google Pay and Apple Pay by itself on devices that have them.
+  name: "Card, Google Pay, Apple Pay",
   enabled: (c) => c.stripe.enabled && !!c.stripe.secretKey,
   async start({ invoice, email, returnUrl, label }) {
     const { stripe: cfg } = await getSettings("gateways");
-    const body = new URLSearchParams({
-      mode: "payment",
-      success_url: `${returnUrl}?paid=1`,
-      cancel_url: returnUrl,
-      customer_email: email,
-      client_reference_id: invoice.id,
-      "metadata[invoice_id]": invoice.id,
-      "payment_intent_data[metadata][invoice_id]": invoice.id,
-      "line_items[0][quantity]": "1",
-      "line_items[0][price_data][currency]": invoice.currency.toLowerCase(),
-      "line_items[0][price_data][unit_amount]": String(invoice.total),
-      "line_items[0][price_data][product_data][name]": label,
-    });
-    const res = await fetch("https://api.stripe.com/v1/checkout/sessions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${cfg.secretKey}`,
-        "Content-Type": "application/x-www-form-urlencoded",
-        // A double click must not open two checkout sessions for one invoice state.
-        "Idempotency-Key": `checkout-${invoice.id}-${invoice.total}-${Math.floor(Date.now() / 60_000)}`,
+    // With saved cards on, the payment is tied to the company's customer and the card is kept for renewals.
+    const customer = cfg.saveCards && invoice.companyId ? await stripeCustomer(invoice.companyId, email) : "";
+    const session = await stripeCall<{ url?: string }>(
+      "POST",
+      "/checkout/sessions",
+      {
+        mode: "payment",
+        success_url: `${returnUrl}?paid=1`,
+        cancel_url: returnUrl,
+        ...(customer ? { customer, "payment_intent_data[setup_future_usage]": "off_session" } : { customer_email: email }),
+        client_reference_id: invoice.id,
+        "metadata[invoice_id]": invoice.id,
+        "payment_intent_data[metadata][invoice_id]": invoice.id,
+        "line_items[0][quantity]": "1",
+        "line_items[0][price_data][currency]": invoice.currency.toLowerCase(),
+        "line_items[0][price_data][unit_amount]": String(invoice.total),
+        "line_items[0][price_data][product_data][name]": label,
       },
-      body,
-      signal: AbortSignal.timeout(30_000),
-    });
-    const json = (await res.json()) as { url?: string; error?: { message?: string } };
-    if (!res.ok || !json.url) throw new Error(json.error?.message ?? "Stripe checkout failed");
-    return { kind: "redirect", url: json.url };
+      // A double click must not open two checkout sessions for one invoice state.
+      `checkout-${invoice.id}-${invoice.total}-${Math.floor(Date.now() / 60_000)}`,
+    );
+    if (!session.url) throw new Error("Stripe checkout failed");
+    return { kind: "redirect", url: session.url };
   },
 };
 
-export const gateways: PaymentGateway[] = [stripe, bankTransfer];
+const paypal: PaymentGateway = {
+  id: "paypal",
+  name: "PayPal",
+  enabled: (c) => c.paypal.enabled && !!c.paypal.clientId && !!c.paypal.secret,
+  async start({ invoice, returnUrl, label }) {
+    const origin = new URL(returnUrl).origin;
+    const order = await paypalCall<PayPalOrder>(
+      "POST",
+      "/v2/checkout/orders",
+      {
+        intent: "CAPTURE",
+        purchase_units: [{ reference_id: invoice.id, custom_id: invoice.id, description: label.slice(0, 127), amount: { currency_code: invoice.currency, value: paypalAmount(invoice.total) } }],
+        payment_source: { paypal: { experience_context: { user_action: "PAY_NOW", shipping_preference: "NO_SHIPPING", return_url: `${origin}/api/paypal/return`, cancel_url: returnUrl } } },
+      },
+      `order-${invoice.id}-${invoice.total}-${Math.floor(Date.now() / 60_000)}`,
+    );
+    const approve = order.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href;
+    if (!approve) throw new Error("PayPal checkout failed");
+    return { kind: "redirect", url: approve };
+  },
+};
+
+export const gateways: PaymentGateway[] = [stripe, paypal, bankTransfer];
 
 export async function enabledGateways(): Promise<PaymentGateway[]> {
   const config = await getSettings("gateways");

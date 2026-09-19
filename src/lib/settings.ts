@@ -60,8 +60,20 @@ export const settingsSchemas = {
         enabled: z.boolean().default(false),
         secretKey: z.string().default(""),
         webhookSecret: z.string().default(""),
+        /** Keep the card after a payment and charge renewals on it automatically. */
+        saveCards: z.boolean().default(true),
       })
-      .default({ enabled: false, secretKey: "", webhookSecret: "" }),
+      .default({ enabled: false, secretKey: "", webhookSecret: "", saveCards: true }),
+    paypal: z
+      .object({
+        enabled: z.boolean().default(false),
+        clientId: z.string().default(""),
+        secret: z.string().default(""),
+        /** From the PayPal developer dashboard; needed to verify webhook calls. */
+        webhookId: z.string().default(""),
+        sandbox: z.boolean().default(false),
+      })
+      .default({ enabled: false, clientId: "", secret: "", webhookId: "", sandbox: false }),
   }),
   /** Encrypted at rest: holds the SMTP password. */
   mail: z.object({
