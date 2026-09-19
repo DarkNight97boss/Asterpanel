@@ -88,3 +88,7 @@ export const DOMAIN_RE = /^(?=.{1,253}$)(?!-)([a-z0-9-]{1,63}(?<!-)\.)+[a-z]{2,6
 
 export const displayName = (u: { firstName: string; lastName: string; email: string }) =>
   `${u.firstName} ${u.lastName}`.trim() || u.email;
+
+/** Human invoice number: `INV-2026/0042`, or the bare legacy number for invoices issued before yearly numbering. */
+export const invoiceLabel = (prefix: string, inv: { number: number; fiscalYear: number }) =>
+  inv.fiscalYear ? `${prefix}${inv.fiscalYear}/${String(inv.number).padStart(4, "0")}` : `${prefix}${inv.number}`;

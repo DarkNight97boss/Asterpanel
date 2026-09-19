@@ -1,7 +1,7 @@
 import "server-only";
 import { PDFDocument, StandardFonts, rgb, type PDFFont, type PDFPage, type RGB } from "pdf-lib";
 import { makeT } from "@/i18n/shared";
-import { displayName, formatDate, formatMoney } from "./format";
+import { displayName, formatDate, formatMoney, invoiceLabel } from "./format";
 import type { LoadedInvoice } from "./invoices";
 import { getSettings } from "./settings";
 
@@ -59,7 +59,7 @@ export async function renderInvoicePdf(invoice: LoadedInvoice): Promise<{ filena
   const [general, billing, theme] = await Promise.all([getSettings("general"), getSettings("billing"), getSettings("theme")]);
   const t = makeT(general.locale);
   const locale = general.locale;
-  const number = `${billing.invoicePrefix}${invoice.number}`;
+  const number = invoiceLabel(billing.invoicePrefix, invoice);
   const money = (cents: number) => formatMoney(cents, invoice.currency, locale);
   const brand = hexToRgb(theme.primary);
 

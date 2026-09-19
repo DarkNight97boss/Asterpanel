@@ -52,6 +52,13 @@ export const users = pgTable(
     state: text("state").notNull().default(""),
     country: text("country").notNull().default(""),
     adminNotes: text("admin_notes").notNull().default(""),
+    /** AES-256-GCM encrypted base32 TOTP secret; set while enrolling, trusted once `totpEnabledAt` is set. */
+    totpSecret: text("totp_secret").notNull().default(""),
+    totpEnabledAt: timestamp("totp_enabled_at", { withTimezone: true }),
+    /** Last accepted 30-second step: a code can never be used twice. */
+    totpLastStep: integer("totp_last_step").notNull().default(0),
+    /** SHA-256 hashes of unused one-time recovery codes. */
+    recoveryCodes: jsonb("recovery_codes").$type<string[]>().notNull().default([]),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -277,7 +284,10 @@ export const invoices = pgTable(
   "invoices",
   {
     id: id(),
+    /** Gapless within `fiscalYear`: taken from `counters` inside the inserting transaction. */
     number: serial("number").notNull(),
+    /** 0 = issued before yearly numbering existed. */
+    fiscalYear: integer("fiscal_year").notNull().default(0),
     clientId: uuid("client_id")
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
@@ -295,7 +305,7 @@ export const invoices = pgTable(
     notes: text("notes").notNull().default(""),
     createdAt: createdAt(),
   },
-  (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_status_idx").on(t.status)],
+  (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_status_idx").on(t.status), uniqueIndex("invoices_year_number_idx").on(t.fiscalYear, t.number)],
 );
 
 export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom";
@@ -536,6 +546,24 @@ export const dnsRecords = pgTable(
   (t) => [index("dns_records_zone_idx").on(t.zoneId)],
 );
 
+/** External availability checks of a workload's primary hostname. */
+export const uptimeChecks = pgTable(
+  "uptime_checks",
+  {
+    id: id(),
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    at: timestamp("at", { withTimezone: true }).notNull().defaultNow(),
+    ok: boolean("ok").notNull(),
+    /** HTTP status, or 0 when the request itself failed. */
+    status: integer("status").notNull().default(0),
+    ms: integer("ms").notNull().default(0),
+    error: text("error").notNull().default(""),
+  },
+  (t) => [index("uptime_checks_idx").on(t.workloadId, t.at)],
+);
+
 /** Resource samples reported by agents, one row per workload every few minutes. */
 export const workloadMetrics = pgTable(
   "workload_metrics",
@@ -581,6 +609,12 @@ export const jobs = pgTable(
   },
   (t) => [index("jobs_node_status_idx").on(t.nodeId, t.status), index("jobs_workload_idx").on(t.workloadId)],
 );
+
+/** Named monotonic counters. Incremented inside the caller's transaction, so a rollback leaves no gap. */
+export const counters = pgTable("counters", {
+  key: text("key").primaryKey(),
+  value: integer("value").notNull().default(0),
+});
 
 // ─── Support ─────────────────────────────────────────────────────────────────
 

@@ -67,7 +67,7 @@ test("overdue reminders fire once per threshold and catch up with a single email
   assert.equal(await run(40), 0, "all thresholds used");
 
   assert.equal(outbox.length, 2);
-  assert.match(outbox[0].subject, /^Reminder: invoice INV-1 is overdue/);
+  assert.match(outbox[0].subject, /^Reminder: invoice INV-\d{4}\/0001 is overdue/);
 
   await billing.recordPayment({ invoiceId, gateway: "manual", externalId: "", amount: 1000 });
   await notifyMod.flushNotifications();

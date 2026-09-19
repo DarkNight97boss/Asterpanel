@@ -5,7 +5,7 @@ import { getDb, schema } from "@/db";
 import type { InvoiceStatus } from "@/db/schema";
 import { getLocale, getT } from "@/i18n";
 import { displayName } from "@/lib/auth";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 
 const FILTERS: InvoiceStatus[] = ["unpaid", "paid", "cancelled"];
@@ -41,7 +41,7 @@ export default async function Invoices({ searchParams }: { searchParams: Promise
           <Table head={[t("Invoice"), t("Client"), t("Issued"), t("Due"), t("Total"), t("Status")]}>
             {invoices.map((inv) => (
               <tr key={inv.id}>
-                <Td><Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-link">{billing.invoicePrefix}{inv.number}</Link></Td>
+                <Td><Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-link">{invoiceLabel(billing.invoicePrefix, inv)}</Link></Td>
                 <Td><Link href={`/admin/clients/${inv.clientId}`} className="hover:text-link">{displayName(inv.client)}</Link></Td>
                 <Td>{formatDate(inv.createdAt, locale)}</Td>
                 <Td>{formatDate(inv.dueDate, locale)}</Td>

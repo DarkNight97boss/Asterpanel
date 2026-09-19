@@ -7,7 +7,7 @@ import { Card, CardHeader, EmptyState, Field, Input, PageHeader, Select, StatusB
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { displayName } from "@/lib/auth";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { saveClient } from "../../actions";
 
@@ -83,7 +83,7 @@ export default async function ClientDetail({ params }: { params: Promise<{ id: s
               {invoices.map((inv) => (
                 <tr key={inv.id}>
                   <Td>
-                    <Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-link">{billing.invoicePrefix}{inv.number}</Link>
+                    <Link href={`/admin/invoices/${inv.id}`} className="font-medium hover:text-link">{invoiceLabel(billing.invoicePrefix, inv)}</Link>
                   </Td>
                   <Td>{formatDate(inv.dueDate, locale)}</Td>
                   <Td>{formatMoney(inv.total, inv.currency, locale)}</Td>

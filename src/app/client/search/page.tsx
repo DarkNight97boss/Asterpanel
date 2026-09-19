@@ -1,3 +1,4 @@
+import { invoiceLabel } from "@/lib/format";
 import Link from "next/link";
 import { and, eq, ilike, ne, or, sql } from "drizzle-orm";
 import { Card, EmptyState, PageHeader, StatusBadge } from "@/components/ui";
@@ -37,7 +38,7 @@ export default async function Search({ searchParams }: { searchParams: Promise<{
           <ul className="divide-y divide-border">
             {workloads.filter(({ w }) => mayAccess(account, w)).map(({ w }) => Row({ href: `/client/workloads/${w.id}`, title: w.name, meta: `${t(WORKLOAD_LABEL[w.type].one)} · ${w.slug}`, right: <StatusBadge status={w.status} label={t(w.status)} /> }))}
             {zones.map((z) => Row({ href: `/client/dns/${z.id}`, title: z.name, meta: t("DNS management") }))}
-            {invoices.map((inv) => Row({ href: `/client/invoices/${inv.id}`, title: `${billing.invoicePrefix}${inv.number}`, meta: t("Invoice"), right: <StatusBadge status={inv.status} /> }))}
+            {invoices.map((inv) => Row({ href: `/client/invoices/${inv.id}`, title: invoiceLabel(billing.invoicePrefix, inv), meta: t("Invoice"), right: <StatusBadge status={inv.status} /> }))}
             {tickets.map((tk) => Row({ href: `/client/tickets/${tk.id}`, title: `#${tk.number} · ${tk.subject}`, meta: t("Support") }))}
           </ul>
         ) : (

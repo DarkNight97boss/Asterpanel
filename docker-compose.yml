@@ -41,9 +41,16 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
+        n=0
         while true; do
-          sleep 3600
-          curl -fsS -X POST -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/cron || true
+          sleep 300
+          n=$$((n + 1))
+          # Uptime every 5 minutes; billing, reminders and backups once an hour.
+          if [ $$((n % 12)) -eq 0 ]; then
+            curl -fsS -X POST -H "Authorization: Bearer $$CRON_SECRET" http://app:3000/api/cron || true
+          else
+            curl -fsS -X POST -H "Authorization: Bearer $$CRON_SECRET" "http://app:3000/api/cron?only=uptime" || true
+          fi
         done
 
 volumes:

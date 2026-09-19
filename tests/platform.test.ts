@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, ne } from "drizzle-orm";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.APP_SECRET = "test-secret";
@@ -486,4 +486,29 @@ test("uploads: size-limited, decoded on the node, and their content is scrubbed 
   const read = await engine.runFilesJob(site.id, "read", "wp-content/uploads/logo.png");
   await drain();
   assert.match(String((await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, read)))[0].result.output), /uploaded file, 8 bytes/);
+});
+
+test("uptime: two failures open an incident, one success closes it, simulated nodes are skipped", async () => {
+  const uptime = await import("../src/platform/uptime");
+  const db = await dbm.getDb();
+  const [site] = (await db.select().from(dbm.schema.workloads)).filter((w) => w.name === "Sftp B");
+  let answer: { status: number; ms: number; error?: string } = { status: 200, ms: 120 };
+  const probe = async () => answer;
+  const at = (min: number) => new Date(Date.now() + min * 60_000);
+
+  assert.equal((await uptime.runUptimeChecks(at(0), probe)).checked, 0, "the node reports a simulated driver");
+  await db.update(dbm.schema.nodes).set({ driver: "docker" });
+  await db.update(dbm.schema.workloads).set({ status: "stopped" }).where(ne(dbm.schema.workloads.id, site.id));
+
+  const incidents: number[] = [];
+  for (const [i, a] of [{ status: 200, ms: 100 }, { status: 502, ms: 40 }, { status: 0, ms: 10_000, error: "timeout" }, { status: 503, ms: 30 }, { status: 200, ms: 140 }].entries()) {
+    answer = a;
+    incidents.push((await uptime.runUptimeChecks(at(i * 5), probe)).incidents);
+  }
+  assert.deepEqual(incidents, [0, 0, 1, 0, 0], "one blip is not an incident; a long outage alerts once");
+  const summary = await uptime.uptimeSummary(site.id);
+  assert.equal(summary.checks, 5);
+  assert.equal(summary.percent, 40);
+  assert.equal(summary.last?.ok, true);
+  await db.update(dbm.schema.nodes).set({ driver: "simulated" });
 });

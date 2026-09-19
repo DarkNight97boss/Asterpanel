@@ -4,7 +4,7 @@ import { Card, EmptyState, PageHeader, StatusBadge, Table, Td, STATUS_LABEL } fr
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
-import { formatDate, formatMoney } from "@/lib/format";
+import { formatDate, formatMoney, invoiceLabel } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 
 export default async function ClientInvoices() {
@@ -27,7 +27,7 @@ export default async function ClientInvoices() {
               <tr key={inv.id}>
                 <Td>
                   <Link href={`/client/invoices/${inv.id}`} className="font-medium hover:text-link">
-                    {billing.invoicePrefix}{inv.number}
+                    {invoiceLabel(billing.invoicePrefix, inv)}
                   </Link>
                 </Td>
                 <Td>{formatDate(inv.createdAt, locale)}</Td>
