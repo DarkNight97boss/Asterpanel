@@ -7,7 +7,8 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import type { IncidentStatus } from "@/db/schema";
 import { audit } from "@/lib/audit";
-import { requireArea } from "@/lib/auth";
+import { requireAdmin, requireArea } from "@/lib/auth";
+import { updateSettings } from "@/lib/settings";
 import { parseMoney } from "@/lib/format";
 
 const uuid = z.string().uuid();
@@ -86,4 +87,17 @@ export async function updateIncident(_: ActionState, form: FormData): Promise<Ac
   revalidatePath("/status");
   revalidatePath("/admin/status");
   return { ok: "Published on the status page" };
+}
+
+// ─── Support targets ─────────────────────────────────────────────────────────
+
+export async function saveSla(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const hours = z.coerce.number().int().min(1).max(720);
+  const parsed = z.object({ slaLow: hours, slaMedium: hours, slaHigh: hours }).safeParse(Object.fromEntries(form));
+  if (!parsed.success) return { error: "Enter hours between 1 and 720" };
+  await updateSettings("support", parsed.data);
+  await audit(admin.id, "settings.updated", "settings", "support");
+  revalidatePath("/admin/tickets");
+  return { ok: "Saved" };
 }

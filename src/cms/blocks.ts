@@ -285,6 +285,50 @@ export const BLOCKS: BlockDef[] = [
     defaults: { title: "Frequently asked questions", items: [] },
   },
   {
+    type: "comparison",
+    label: "Comparison table",
+    description: "Plans or products side by side, feature by feature.",
+    fields: [
+      { name: "title", label: "Title", type: "text" },
+      { name: "columns", label: "Columns (comma separated)", type: "text", placeholder: "Starter, Pro, Business" },
+      {
+        name: "rows",
+        label: "Rows",
+        type: "list",
+        itemLabel: "Row",
+        fields: [
+          { name: "feature", label: "Feature", type: "text" },
+          { name: "values", label: "Values (comma separated; yes / no become ✓ / —)", type: "text", placeholder: "yes, yes, yes" },
+        ],
+      },
+    ],
+    defaults: { title: "Compare the plans", columns: "Starter, Pro, Business", rows: [] },
+  },
+  {
+    type: "calculator",
+    label: "Price calculator",
+    description: "Visitors pick quantities and see a monthly estimate.",
+    fields: [
+      { name: "title", label: "Title", type: "text" },
+      { name: "currency", label: "Currency symbol", type: "text", placeholder: "€" },
+      { name: "base", label: "Base price per month", type: "text", placeholder: "9.90" },
+      {
+        name: "items",
+        label: "Options",
+        type: "list",
+        itemLabel: "Option",
+        fields: [
+          { name: "label", label: "Label", type: "text" },
+          { name: "unitPrice", label: "Price per unit, per month", type: "text", placeholder: "2.50" },
+          { name: "max", label: "Maximum quantity", type: "text", placeholder: "10" },
+        ],
+      },
+      { name: "ctaLabel", label: "Button label", type: "text" },
+      { name: "ctaHref", label: "Button link", type: "url" },
+    ],
+    defaults: { title: "Estimate your price", currency: "€", base: "0", items: [], ctaLabel: "", ctaHref: "" },
+  },
+  {
     type: "richtext",
     label: "Rich text",
     description: "Free content written in Markdown.",
