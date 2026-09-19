@@ -150,6 +150,20 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
   };
 }
 
+/**
+ * Spec for a job that clones the repository. When the workload is connected
+ * through the GitHub App, a fresh one-hour token for that repository replaces
+ * any saved one: nothing long-lived has to be stored for private repositories.
+ */
+async function specForBuild(w: Pick<Workload, "id" | "githubInstallationId" | "githubRepo">): Promise<WorkloadSpec> {
+  const spec = await buildSpec(w.id);
+  if (w.githubInstallationId && w.githubRepo && spec.source) {
+    const { installationToken } = await import("@/lib/github");
+    spec.source.accessToken = await installationToken(w.githubInstallationId, w.githubRepo).catch(() => spec.source!.accessToken);
+  }
+  return spec;
+}
+
 async function enqueue<T extends JobType>(
   w: Pick<Workload, "id" | "nodeId">,
   type: T,
@@ -447,7 +461,7 @@ export async function deployWorkload(workloadId: string, trigger: "manual" | "pu
   if (w.status === "suspended") throw new PlatformError("This service is suspended");
   const deploymentId = await newDeployment(w.id, trigger);
   const keepImages = (await rollbackCandidates(w.id)).slice(0, ROLLBACK_DEPTH - 1).map((d) => d.id);
-  await enqueue(w, "workload.deploy", { spec: await buildSpec(w.id), deploymentId, keepImages }, { deploymentId, actorId });
+  await enqueue(w, "workload.deploy", { spec: await specForBuild(w), deploymentId, keepImages }, { deploymentId, actorId });
   return deploymentId;
 }
 
@@ -495,13 +509,13 @@ export async function handlePush(workloadId: string, push: { branch: string; del
   const previewId = await db.transaction(async (tx) => {
     const [w] = await tx
       .insert(schema.workloads)
-      .values({ clientId: live.clientId, companyId: live.companyId, nodeId: live.nodeId, serviceId: live.serviceId, parentId: live.id, type: live.type, environment: "preview", name: `${live.name} (${push.branch.slice(0, 40)})`, slug, config: { ...live.config, branch: push.branch, previews: false, redirects: [] }, secrets: live.secrets })
+      .values({ clientId: live.clientId, companyId: live.companyId, nodeId: live.nodeId, serviceId: live.serviceId, parentId: live.id, type: live.type, environment: "preview", name: `${live.name} (${push.branch.slice(0, 40)})`, slug, config: { ...live.config, branch: push.branch, previews: false, redirects: [] }, secrets: live.secrets, githubInstallationId: live.githubInstallationId, githubRepo: live.githubRepo })
       .returning({ id: schema.workloads.id });
     if (node.baseDomain) await tx.insert(schema.domains).values({ workloadId: w.id, hostname: `${slug}.${node.baseDomain}`, isPrimary: true, isSystem: true });
     return w.id;
   });
   const deploymentId = await newDeployment(previewId, "create");
-  await enqueue({ id: previewId, nodeId: live.nodeId }, "workload.create", { spec: await buildSpec(previewId) }, { deploymentId });
+  await enqueue({ id: previewId, nodeId: live.nodeId }, "workload.create", { spec: await specForBuild({ id: previewId, githubInstallationId: live.githubInstallationId, githubRepo: live.githubRepo }) }, { deploymentId });
   await audit(null, "preview.create", "workload", live.id, { branch: push.branch, previewId });
   return { action: "preview", id: previewId };
 }
@@ -1015,6 +1029,11 @@ async function applyOutcome(job: typeof schema.jobs.$inferSelect, ok: boolean, r
   if (!w) return;
 
   const site = { id: w.id, name: w.name, type: w.type };
+  if (job.deploymentId && result.commitSha && w.githubInstallationId) {
+    const { reportCommitStatus } = await import("@/lib/github");
+    const origin = (process.env.APP_URL || (await getSettings("general")).siteUrl || "").replace(/\/+$/, "");
+    await reportCommitStatus(w, result.commitSha, ok ? "success" : "failure", ok ? `Live on ${w.name}` : error || "Deploy failed", `${origin}/client/workloads/${w.id}/deployments`);
+  }
   if (job.type === "workload.deploy") emitEvent(w.companyId, ok ? "deploy.succeeded" : "deploy.failed", { site, deploymentId: job.deploymentId, commit: result.commitSha ?? "", error });
   else if (job.type === "backup.create") emitEvent(w.companyId, ok ? "backup.completed" : "backup.failed", { site, backupId: job.backupId, sizeBytes: result.sizeBytes ?? 0, error });
   else if (job.type === "workload.migrate") emitEvent(w.companyId, ok ? "migration.succeeded" : "migration.failed", { site, error });

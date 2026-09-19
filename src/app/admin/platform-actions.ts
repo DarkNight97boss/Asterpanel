@@ -271,3 +271,28 @@ export async function saveInfrastructureMode(_: ActionState, form: FormData): Pr
   revalidatePath("/admin/settings/cloud");
   return { ok: "Saved" };
 }
+
+// ─── GitHub App ──────────────────────────────────────────────────────────────
+
+export async function saveGithub(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("github");
+  const keep = (name: string, previous: string) => String(form.get(name) ?? "").trim() || previous;
+  const next = {
+    enabled: form.has("enabled"),
+    appId: String(form.get("appId") ?? "").trim(),
+    slug: String(form.get("slug") ?? "").trim().toLowerCase(),
+    clientId: String(form.get("clientId") ?? "").trim(),
+    clientSecret: keep("clientSecret", current.clientSecret),
+    privateKey: keep("privateKey", current.privateKey).replace(/\r/g, ""),
+    webhookSecret: keep("webhookSecret", current.webhookSecret),
+  };
+  if (next.appId && !/^\d+$/.test(next.appId)) return { error: "The App ID is a number" };
+  if (next.slug && !/^[a-z0-9-]+$/.test(next.slug)) return { error: "The app name is the part after github.com/apps/" };
+  if (next.privateKey && !/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(next.privateKey)) return { error: "Paste the whole .pem private key" };
+  if (next.enabled && (!next.appId || !next.slug || !next.clientId || !next.clientSecret || !next.privateKey || !next.webhookSecret)) return { error: "Every field is needed before switching the integration on" };
+  await updateSettings("github", next);
+  await audit(admin.id, "settings.updated", "settings", "github");
+  revalidatePath("/admin/settings/github");
+  return { ok: "Saved" };
+}
