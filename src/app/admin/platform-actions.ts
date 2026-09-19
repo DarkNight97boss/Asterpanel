@@ -169,7 +169,7 @@ export async function saveEinvoice(_: ActionState, form: FormData): Promise<Acti
   const enabled = form.has("enabled");
   const d = parsed.data;
   if (enabled && (!d.name || !d.vatNumber || !d.address || !d.zip || !d.city)) return { error: "Name, VAT number and full address are required" };
-  await updateSettings("einvoice", { ...d, enabled, vatCountry: "IT" });
+  await updateSettings("einvoice", { ...d, enabled, vatCountry: "IT", bollo: form.has("bollo") });
   await audit(admin.id, "settings.updated", "settings", "einvoice");
   revalidatePath("/admin/settings/einvoice");
   return { ok: "Saved" };

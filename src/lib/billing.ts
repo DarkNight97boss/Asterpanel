@@ -5,6 +5,7 @@ import { makeT } from "@/i18n/shared";
 import type { BillingCycle } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
+import { taxFor } from "./tax";
 import { emitEvent } from "./webhooks";
 import { decryptJson } from "./crypto";
 import { addCycle, CYCLE_LABEL, CYCLE_MONTHS, invoiceLabel } from "./format";
@@ -71,7 +72,8 @@ export async function placeOrder(input: {
   const coupon = code ? await usableCoupon(code) : null;
   const discount = coupon ? Math.min(price + setup, coupon.kind === "percent" ? Math.round(((price + setup) * coupon.value) / 100) : coupon.value) : 0;
   const subtotal = price + setup - discount;
-  const tax = taxOn(subtotal, billing.taxRate);
+  const vat = await taxFor(input.companyId);
+  const tax = taxOn(subtotal, vat.rate);
   const total = subtotal + tax;
 
   const result = await db.transaction(async (tx) => {
@@ -106,7 +108,8 @@ export async function placeOrder(input: {
         companyId: input.companyId ?? null,
         currency: billing.currency,
         subtotal,
-        taxRate: billing.taxRate,
+        taxRate: vat.rate,
+        notes: vat.note,
         tax,
         total,
         dueDate: new Date(),
@@ -288,9 +291,10 @@ export async function changePlan(serviceId: string, productId: string, actorId: 
 
   const billing = await getSettings("billing");
   const t = makeT((await getSettings("general")).locale);
-  const tax = taxOn(prorated, billing.taxRate);
+  const vat = await taxFor(svc.companyId);
+  const tax = taxOn(prorated, vat.rate);
   const invoiceId = await db.transaction(async (tx) => {
-    const [invoice] = await tx.insert(schema.invoices).values({ ...(await nextInvoiceNumber(tx)), clientId: svc.clientId, companyId: svc.companyId, currency: billing.currency, subtotal: prorated, taxRate: billing.taxRate, tax, total: prorated + tax, dueDate: now }).returning({ id: schema.invoices.id });
+    const [invoice] = await tx.insert(schema.invoices).values({ ...(await nextInvoiceNumber(tx)), clientId: svc.clientId, companyId: svc.companyId, currency: billing.currency, subtotal: prorated, taxRate: vat.rate, notes: vat.note, tax, total: prorated + tax, dueDate: now }).returning({ id: schema.invoices.id });
     await tx.insert(schema.invoiceItems).values({ invoiceId: invoice.id, serviceId: svc.id, kind: "upgrade", description: `${t("Upgrade")}: ${svc.product.name} → ${target.name}`, amount: prorated });
     await tx.update(schema.services).set({ moduleData: { ...svc.moduleData, pendingPlan: { productId: target.id, amount: price, invoiceId: invoice.id } } }).where(eq(schema.services.id, svc.id));
     return invoice.id;
@@ -506,13 +510,16 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
   for (const [, list] of byClient) {
     const clientId = list[0].clientId;
     try {
+      // Looked up before the transaction: the embedded database has a single connection, and a query
+      // outside the transaction while it is open would wait for itself forever.
+      const vat = await taxFor(list[0].companyId);
       const invoiceId = await db.transaction(async (tx) => {
         const subtotal = list.reduce((sum, s) => sum + s.amount, 0);
-        const tax = taxOn(subtotal, billing.taxRate);
+        const tax = taxOn(subtotal, vat.rate);
         const dueDate = new Date(Math.min(...list.map((s) => s.nextDueDate!.getTime())));
         const [invoice] = await tx
           .insert(schema.invoices)
-          .values({ ...(await nextInvoiceNumber(tx, now)), clientId, companyId: list[0].companyId, currency: billing.currency, subtotal, taxRate: billing.taxRate, tax, total: subtotal + tax, dueDate })
+          .values({ ...(await nextInvoiceNumber(tx, now)), clientId, companyId: list[0].companyId, currency: billing.currency, subtotal, taxRate: vat.rate, notes: vat.note, tax, total: subtotal + tax, dueDate })
           .returning();
         await tx.insert(schema.invoiceItems).values(
           list.map((s) => ({

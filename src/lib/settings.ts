@@ -109,6 +109,8 @@ export const settingsSchemas = {
     /** Reason for 0% VAT lines, e.g. N2.2 for flat-rate sellers. */
     zeroVatNature: z.string().default("N2.2"),
     zeroVatNote: z.string().default(""),
+    /** €2 virtual stamp duty on invoices without VAT above €77.47 (flat-rate sellers). */
+    bollo: z.boolean().default(false),
     iban: z.string().default(""),
   }),
   /** Encrypted: which SDI intermediary sends the electronic invoices, and its credentials. */

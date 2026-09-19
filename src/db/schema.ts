@@ -126,6 +126,9 @@ export const companies = pgTable("companies", {
   /** Italian e-invoicing: 7-character recipient code and/or certified email. */
   sdiCode: text("sdi_code").notNull().default(""),
   pec: text("pec").notNull().default(""),
+  /** When the VAT number was last confirmed by the EU's VIES service (null = never, or it failed). */
+  vatValidatedAt: timestamp("vat_validated_at", { withTimezone: true }),
+  vatValidatedName: text("vat_validated_name").notNull().default(""),
   /** Customer object at Stripe that holds this company's saved cards. */
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
   /** Charge renewal invoices on the default saved card. */
