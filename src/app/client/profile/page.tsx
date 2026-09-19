@@ -1,6 +1,6 @@
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ProfileFields } from "@/components/profile-fields";
-import { Button, Card, CardHeader, Field, Input, PageHeader } from "@/components/ui";
+import { Alert, Button, Card, CardHeader, Field, Input, PageHeader } from "@/components/ui";
 import QRCode from "qrcode";
 import { getLocale, getT } from "@/i18n";
 import { formatDate, formatDateTime } from "@/lib/format";
@@ -9,7 +9,8 @@ import { otpauthUrl, pendingSecret } from "@/lib/totp";
 import { listSessions, requireUser } from "@/lib/auth";
 import { changePassword, confirmTwoFactor, disableTwoFactor, signOutSession, startTwoFactor, updateProfile } from "../actions";
 
-export default async function Profile() {
+export default async function Profile({ searchParams }: { searchParams: Promise<{ need2fa?: string }> }) {
+  const need2fa = (await searchParams).need2fa === "1";
   const [user, t, locale, general] = await Promise.all([requireUser(), getT(), getLocale(), getSettings("general")]);
   const [secret, sessions] = await Promise.all([pendingSecret(user.id), listSessions(user.id)]);
   // The QR is rendered on the server: the secret never reaches a third-party QR service.
@@ -17,6 +18,7 @@ export default async function Profile() {
   return (
     <>
       <PageHeader title={t("Profile")} description={user.email} />
+      {need2fa && !user.totpEnabledAt && <div className="mb-6"><Alert tone="warning">{t("This company requires two-factor authentication. Set it up below to continue.")}</Alert></div>}
       <div className="space-y-6">
         <Card>
           <CardHeader title={t("Contact & billing details")} description={t("Shown on your invoices.")} />

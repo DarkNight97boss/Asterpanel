@@ -25,7 +25,7 @@ export const roleCan = (role: AccountRole, permission: Permission) => GRANTS[rol
  * is the person invoices and notifications are addressed to. `only` lists the
  * services a restricted developer may touch (null = all).
  */
-export type Account = { id: string; name: string; role: AccountRole; only: string[] | null; ownerUserId: string };
+export type Account = { id: string; name: string; role: AccountRole; only: string[] | null; ownerUserId: string; /** The company demands two-factor authentication from its members. */ require2fa: boolean };
 
 /** True when the member may act on this service (staging follows its live site). */
 export const mayAccess = (account: Pick<Account, "only">, w: { id: string; parentId?: string | null }) =>
@@ -67,5 +67,6 @@ export const listAccounts = cache(async (user: SessionUser): Promise<Account[]> 
     // A restriction only makes sense for people who manage services.
     only: m.role === "developer" && m.workloadIds?.length ? m.workloadIds : null,
     ownerUserId: ownerOf.get(c.id) ?? user.id,
+    require2fa: c.require2fa,
   }));
 });

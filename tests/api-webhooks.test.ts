@@ -80,3 +80,28 @@ test("webhooks: public https only, signed deliveries to subscribers, switched of
   assert.equal(sent.length, before, "a disabled endpoint is left alone");
   await assert.rejects(hooks.testWebhook(otherCompany, id), /not found/);
 });
+
+test("chat webhooks: only the real chat hosts, address encrypted, a readable message in each service's shape", async () => {
+  const db = await dbm.getDb();
+  answer = 200;
+  await assert.rejects(hooks.createWebhook(companyId, { url: "https://evil.example.com/services/T/B/x", events: ["deploy.failed"], format: "slack" }), /does not belong/);
+  await assert.rejects(hooks.createWebhook(companyId, { url: "https://api.telegram.org/botTOKEN/sendMessage", events: ["deploy.failed"], format: "telegram", chatId: "not a chat" }), /Telegram needs/);
+  await assert.rejects(hooks.createWebhook(companyId, { url: "https://api.telegram.org/botTOKEN/deleteWebhook", events: ["deploy.failed"], format: "telegram", chatId: "-100123" }), /Telegram needs/);
+
+  const slack = await hooks.createWebhook(companyId, { url: "https://hooks.slack.com/services/T000/B000/secretpart", events: ["deploy.failed"], format: "slack" });
+  await hooks.createWebhook(companyId, { url: "https://discord.com/api/webhooks/1/tok", events: ["deploy.failed"], format: "discord" });
+  await hooks.createWebhook(companyId, { url: "https://api.telegram.org/bot123:ABC/sendMessage", events: ["deploy.failed"], format: "telegram", chatId: "-100123" });
+  const [row] = await db.select().from(dbm.schema.webhooks).where(eq(dbm.schema.webhooks.id, slack.id));
+  assert.ok(!row.url.includes("secretpart"), "the address is a credential: encrypted at rest");
+  assert.equal(hooks.webhookLabel(row), "slack · hooks.slack.com");
+
+  sent.length = 0;
+  hooks.emitEvent(companyId, "deploy.failed", { site: { name: "Shop" }, error: "npm ERR! missing script" });
+  await hooks.flushWebhooks();
+  const byHost = Object.fromEntries(sent.map((s) => [new URL(s.url).hostname, JSON.parse(s.body)]));
+  assert.deepEqual(byHost["hooks.slack.com"], { text: "❌ Deploy failed: Shop — npm ERR! missing script" });
+  assert.equal(byHost["discord.com"].content, "❌ Deploy failed: Shop — npm ERR! missing script");
+  assert.deepEqual([byHost["api.telegram.org"].chat_id, byHost["api.telegram.org"].text.startsWith("❌")], ["-100123", true]);
+  assert.ok(sent.every((s) => !("X-Aster-Signature" in s.headers)), "chat services get no signature header");
+  assert.equal(hooks.chatMessage("invoice.paid", { total: 1220, currency: "EUR" }), "💶 Invoice paid (12.20 EUR)");
+});

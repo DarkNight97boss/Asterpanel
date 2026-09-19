@@ -131,6 +131,8 @@ export const companies = pgTable("companies", {
   vatValidatedName: text("vat_validated_name").notNull().default(""),
   /** Customer object at Stripe that holds this company's saved cards. */
   stripeCustomerId: text("stripe_customer_id").notNull().default(""),
+  /** Members without two-factor authentication are sent to set it up before anything else. */
+  require2fa: boolean("require_2fa").notNull().default(false),
   /** Charge renewal invoices on the default saved card. */
   autoPay: boolean("auto_pay").notNull().default(true),
   /** Prepaid balance in cents, spent on new invoices before any card is charged. */
@@ -823,6 +825,10 @@ export const webhooks = pgTable(
     /** Encrypted signing secret. */
     secret: text("secret").notNull(),
     events: jsonb("events").$type<string[]>().notNull().default([]),
+    /** `json`: signed event for programs. The others post a readable message to a chat. */
+    format: text("format").$type<"json" | "slack" | "discord" | "telegram">().notNull().default("json"),
+    /** Telegram only: the chat the bot writes to. */
+    chatId: text("chat_id").notNull().default(""),
     enabled: boolean("enabled").notNull().default(true),
     lastStatus: text("last_status").notNull().default(""),
     lastAt: timestamp("last_at", { withTimezone: true }),

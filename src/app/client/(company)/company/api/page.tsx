@@ -7,7 +7,7 @@ import { requireAccount } from "@/lib/account";
 import { listApiKeys } from "@/lib/api-keys";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { baseUrl } from "@/lib/url";
-import { WEBHOOK_EVENTS } from "@/lib/webhooks";
+import { WEBHOOK_EVENTS, webhookLabel } from "@/lib/webhooks";
 import { newApiKey, newWebhook, pingWebhook, removeApiKey, removeWebhook } from "./actions";
 
 export const metadata = { title: "API & webhooks" };
@@ -65,7 +65,7 @@ curl -H "Authorization: Bearer $ASTER_KEY" ${origin}/api/v1/sites`}</pre>
             <Table head={[t("Address"), t("Events"), t("Last delivery"), ""]}>
               {hooks.map((h) => (
                 <tr key={h.id}>
-                  <Td className="max-w-xs truncate font-medium">{h.url}{!h.enabled && <span className="ml-2"><Badge tone="danger">{t("Disabled after repeated failures")}</Badge></span>}</Td>
+                  <Td className="max-w-xs truncate font-medium">{webhookLabel(h)}{!h.enabled && <span className="ml-2"><Badge tone="danger">{t("Disabled after repeated failures")}</Badge></span>}</Td>
                   <Td className="text-xs text-body">{h.events.join(", ")}</Td>
                   <Td className="text-body">{h.lastAt ? `${h.lastStatus} · ${formatDateTime(h.lastAt, locale)}` : "—"}</Td>
                   <Td className="text-right">
@@ -82,7 +82,11 @@ curl -H "Authorization: Bearer $ASTER_KEY" ${origin}/api/v1/sites`}</pre>
           )}
           <div className="border-t border-border p-5">
             <ActionForm action={newWebhook}>
-              <Field label={t("Address")}><Input name="url" type="url" required placeholder="https://example.com/hooks/aster" /></Field>
+              <div className="grid gap-4 sm:grid-cols-[12rem_1fr_12rem]">
+                <Field label={t("Send as")}><Select name="format" defaultValue="json"><option value="json">{t("Signed JSON (for programs)")}</option><option value="slack">Slack</option><option value="discord">Discord</option><option value="telegram">Telegram</option></Select></Field>
+                <Field label={t("Address")} hint={t("Slack: an incoming-webhook URL. Discord: a channel webhook URL. Telegram: https://api.telegram.org/bot<token>/sendMessage")}><Input name="url" type="url" required placeholder="https://example.com/hooks/aster" autoComplete="off" /></Field>
+                <Field label={t("Telegram chat id")}><Input name="chatId" placeholder="-1001234567890" /></Field>
+              </div>
               <fieldset className="grid gap-2 text-sm sm:grid-cols-3">
                 {WEBHOOK_EVENTS.map((e) => <label key={e} className="flex items-center gap-2"><input type="checkbox" name="events" value={e} defaultChecked className="accent-(--accent)" /><code className="font-mono text-xs">{e}</code></label>)}
               </fieldset>

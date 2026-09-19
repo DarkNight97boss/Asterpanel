@@ -2,7 +2,8 @@ import "server-only";
 import { notFound } from "next/navigation";
 import { asc, desc, eq } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import { getAccount, mayAccess, roleCan } from "@/lib/account";
+import { enforceTwoFactor, getAccount, mayAccess, roleCan } from "@/lib/account";
+import { getImpersonator } from "@/lib/impersonation";
 import { staffCan } from "@/lib/staff";
 
 /**
@@ -11,6 +12,7 @@ import { staffCan } from "@/lib/staff";
  */
 export async function requireWorkload(id: string) {
   const { user, account } = await getAccount();
+  if (!(await getImpersonator())) enforceTwoFactor({ user, account });
   if (!/^[0-9a-f-]{36}$/i.test(id)) notFound();
   const db = await getDb();
   const workload = await db.query.workloads.findFirst({
