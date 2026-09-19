@@ -157,6 +157,8 @@ export const settingsSchemas = {
     privateKey: z.string().default(""),
     webhookSecret: z.string().default(""),
   }),
+  /** Hours within which staff should answer a waiting ticket, by priority. */
+  support: z.object({ slaLow: z.number().int().min(1).max(720).default(48), slaMedium: z.number().int().min(1).max(720).default(24), slaHigh: z.number().int().min(1).max(720).default(4) }),
   registrars: z.object({
     /** Credentials per registrar module id. */
     accounts: z.record(z.string(), z.record(z.string(), z.string())).default({}),

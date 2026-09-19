@@ -6,6 +6,7 @@ import { getLocale, getT } from "@/i18n";
 import { CYCLE_SUFFIX, formatMoney, headlineCycle } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { items, safeHref, str, type Block } from "./blocks";
+import { Calculator } from "./calculator";
 import { Markdown } from "./markdown";
 
 const Section = ({ id, className, children }: { id?: string; className?: string; children: React.ReactNode }) => (
@@ -361,6 +362,54 @@ function Faq({ props: p }: { props: Block["props"] }) {
   );
 }
 
+function Comparison({ props: p }: { props: Block["props"] }) {
+  const columns = str(p.columns).split(",").map((c) => c.trim()).filter(Boolean).slice(0, 6);
+  const rows = items(p.rows);
+  if (!columns.length || !rows.length) return null;
+  const cell = (v: string) => (/^(yes|si|sì|✓)$/i.test(v) ? <span className="text-success">✓</span> : /^(no|—|-)$/i.test(v) ? <span className="text-muted">—</span> : v);
+  return (
+    <Section>
+      <Heading title={str(p.title)} />
+      <div className="overflow-x-auto rounded-card border border-border bg-surface">
+        <table className="w-full min-w-[36rem] text-sm">
+          <thead>
+            <tr className="border-b border-border text-left">
+              <th className="px-5 py-4 font-medium" />
+              {columns.map((c) => <th key={c} className="px-5 py-4 text-center font-medium">{c}</th>)}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {rows.map((r, i) => {
+              const values = str(r.values).split(",").map((v) => v.trim());
+              return (
+                <tr key={i}>
+                  <td className="px-5 py-3.5 text-body">{str(r.feature)}</td>
+                  {columns.map((c, n) => <td key={c} className="px-5 py-3.5 text-center">{cell(values[n] ?? "")}</td>)}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
+async function PriceCalculator({ props: p }: { props: Block["props"] }) {
+  const t = await getT();
+  const num = (v: unknown) => Math.max(0, Number(str(v).replace(",", ".")) || 0);
+  const options = items(p.items).map((o) => ({ label: str(o.label), unitPrice: num(o.unitPrice), max: Math.min(1000, Math.max(1, Math.round(num(o.max)) || 10)) })).filter((o) => o.label);
+  if (!options.length) return null;
+  // The shared guard: a block must never turn into a javascript: link.
+  const href = safeHref(str(p.ctaHref));
+  return (
+    <Section>
+      <Heading title={str(p.title)} />
+      <Calculator base={num(p.base)} currency={str(p.currency).slice(0, 3) || "€"} options={options} perMonth={t("per month")} cta={str(p.ctaLabel) && href !== "#" ? { label: str(p.ctaLabel), href } : undefined} />
+    </Section>
+  );
+}
+
 function Cta({ props: p }: { props: Block["props"] }) {
   const strip = p.style === "strip";
   const buttons = (
@@ -424,6 +473,10 @@ export function RenderBlocks({ blocks }: { blocks: Block[] }) {
         return <Testimonials key={b.id} props={b.props} />;
       case "faq":
         return <Faq key={b.id} props={b.props} />;
+      case "comparison":
+        return <Comparison key={b.id} props={b.props} />;
+      case "calculator":
+        return <PriceCalculator key={b.id} props={b.props} />;
       case "cta":
         return <Cta key={b.id} props={b.props} />;
       case "richtext":
