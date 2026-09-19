@@ -516,3 +516,48 @@ test("uptime: two failures open an incident, one success closes it, simulated no
   assert.equal(summary.last?.ok, true);
   await db.update(dbm.schema.nodes).set({ driver: "simulated" });
 });
+
+test("off-site backups: uploaded, restorable without the local copy, failures reported, keys scrubbed from finished jobs", async () => {
+  const db = await dbm.getDb();
+  const { updateSettings } = await import("../src/lib/settings");
+  const { decryptJson } = await import("../src/lib/crypto");
+  const id = await engine.createWorkload({ clientId, type: "database", name: "Offsite DB", config: { engine: "postgres" } });
+  await drain();
+  const base = { keepScheduled: 14, endpoint: "https://s3.example.test", region: "eu", prefix: "/aster/", accessKey: "AKIA-TEST", secretKey: "very-secret", keepLocal: false };
+
+  // Off or incomplete settings: nothing is sent to the node.
+  await updateSettings("backups", { ...base, offsiteEnabled: true, bucket: "" });
+  assert.equal(await engine.offsiteTarget(), undefined);
+  await assert.rejects(engine.testOffsite(nodeId), /Enable off-site backups/);
+
+  await updateSettings("backups", { ...base, offsiteEnabled: true, bucket: "good-bucket" });
+  assert.equal((await engine.offsiteTarget())?.prefix, "aster", "slashes trimmed");
+  const backupId = await engine.createBackup(id, "offsite");
+  assert.equal((await workload(id)).backups[0].offsite, "pending");
+  await drain();
+  assert.deepEqual((await workload(id)).backups.map((b) => [b.status, b.offsite]), [["ready", "uploaded"]]);
+  const jobs = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.backupId, backupId));
+  assert.ok(jobs.every((j) => !JSON.stringify(decryptJson(j.payload, {})).includes("very-secret")), "storage keys do not linger in finished jobs");
+
+  // keepLocal=false removed the node's copy: the restore has to come from the bucket.
+  await engine.restoreBackup(id, backupId);
+  await drain();
+  const restore = (await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.type, "backup.restore"))).at(-1)!;
+  assert.equal(restore.status, "succeeded");
+  assert.match(restore.log, /downloading from s3:\/\/good-bucket\/aster\//);
+
+  // A failed upload keeps the backup usable and says why.
+  await updateSettings("backups", { ...base, offsiteEnabled: true, bucket: "fail-bucket", keepLocal: true });
+  await engine.createBackup(id, "will not upload");
+  await drain();
+  const failed = (await workload(id)).backups.find((b) => b.note === "will not upload")!;
+  assert.deepEqual([failed.status, failed.offsite], ["ready", "failed"]);
+  assert.match(failed.offsiteError, /AccessDenied/);
+
+  const testId = await engine.testOffsite(nodeId);
+  await drain();
+  const [probe] = await db.select().from(dbm.schema.jobs).where(eq(dbm.schema.jobs.id, testId));
+  assert.deepEqual([probe.status, probe.error], ["failed", "AccessDenied: simulated failure"]);
+
+  await updateSettings("backups", { ...base, offsiteEnabled: false, bucket: "good-bucket" });
+});

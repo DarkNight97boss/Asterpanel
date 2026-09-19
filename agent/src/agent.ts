@@ -1,7 +1,7 @@
 import { createPublicKey, verify, type KeyObject } from "node:crypto";
 import os from "node:os";
 import { statfs } from "node:fs/promises";
-import { canonicalJson, PROTOCOL_VERSION, type JobEnvelope, type JobPayloads, type JobReport, type JobResult, type PollRequest, type PollResponse, type SignedJob, type ToolName, type WorkloadSpec } from "../../src/platform/protocol";
+import { canonicalJson, PROTOCOL_VERSION, type JobEnvelope, type JobPayloads, type JobReport, type JobResult, type OffsiteTarget, type PollRequest, type PollResponse, type SignedJob, type ToolName, type WorkloadSpec } from "../../src/platform/protocol";
 import type { Driver, Log } from "./driver";
 
 export const AGENT_VERSION = "0.1.0";
@@ -135,7 +135,7 @@ export class Agent {
   private dispatch(envelope: JobEnvelope, log: Log): Promise<JobResult> {
     const d = this.opts.driver;
     // The signature covers type + payload together, so the shape matches the type.
-    const p = envelope.payload as { spec: WorkloadSpec; from: WorkloadSpec; lines: number; tool: ToolName; args?: Record<string, string>; backupId: string; action: "tables" | "query"; sql?: string; path?: string; content?: string; fileAction: JobPayloads["workload.files"]["action"] };
+    const p = envelope.payload as { spec: WorkloadSpec; from: WorkloadSpec; lines: number; tool: ToolName; args?: Record<string, string>; backupId: string; offsite?: OffsiteTarget; action: "tables" | "query"; sql?: string; path?: string; content?: string; fileAction: JobPayloads["workload.files"]["action"] };
     if (envelope.type === "workload.files") p.fileAction = (envelope.payload as JobPayloads["workload.files"]).action;
     switch (envelope.type) {
       case "workload.create":
@@ -167,11 +167,13 @@ export class Agent {
       case "workload.db":
         return d.db(p.spec, p.action, p.sql ?? "", log);
       case "backup.create":
-        return d.backupCreate(p.spec, p.backupId, log);
+        return d.backupCreate(p.spec, p.backupId, log, p.offsite);
       case "backup.restore":
-        return d.backupRestore(p.spec, p.backupId, log);
+        return d.backupRestore(p.spec, p.backupId, log, p.offsite);
       case "backup.delete":
-        return d.backupDelete(p.spec, p.backupId, log);
+        return d.backupDelete(p.spec, p.backupId, log, p.offsite);
+      case "offsite.test":
+        return d.offsiteTest((envelope.payload as JobPayloads["offsite.test"]).offsite, log);
       default:
         return Promise.reject(new Error(`Unknown job type ${String(envelope.type)}`));
     }

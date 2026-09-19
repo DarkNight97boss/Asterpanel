@@ -1,10 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { randomBytes } from "node:crypto";
-import type { JobPayloads, JobResult, WorkloadSpec } from "../../src/platform/protocol";
+import type { JobPayloads, JobResult, OffsiteTarget, WorkloadSpec } from "../../src/platform/protocol";
 import type { Driver, Log } from "./driver";
 
-type State = { workloads: Record<string, { kind: string; running: boolean; domains: string[]; updated?: string[]; net?: number; files?: Record<string, string> }>; backups: Record<string, number> };
+type State = { offsite?: Record<string, number>; workloads: Record<string, { kind: string; running: boolean; domains: string[]; updated?: string[]; net?: number; files?: Record<string, string> }>; backups: Record<string, number> };
 
 /**
  * Pretends to be a container host. State lives in a JSON file so restarts of
@@ -245,25 +245,51 @@ export class SimulatedDriver implements Driver {
     return { output: JSON.stringify({ columns: ["ID", "post_title", "post_status", "post_date"], rows: [["1", "Hello world!", "publish", "2026-09-19 10:51:02"], ["2", "Sample Page", "publish", "2026-09-19 10:51:02"], ["3", "Privacy Policy", "draft", null]], truncated: false }) };
   }
 
-  async backupCreate(spec: WorkloadSpec, backupId: string, log: Log) {
+  async backupCreate(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
     this.must(spec);
     await this.step(log, "[sim] dumping database");
     await this.step(log, "[sim] archiving files");
     const sizeBytes = 20_000_000 + Math.round(Math.random() * 80_000_000);
     this.write((s) => (s.backups[`${spec.slug}/${backupId}`] = sizeBytes));
-    return { sizeBytes };
+    if (!offsite) return { sizeBytes };
+    await this.step(log, `[sim] uploading to ${this.remote(offsite, spec, backupId)}`);
+    // A bucket named "fail…" stands in for wrong keys or an unreachable endpoint.
+    if (offsite.bucket.startsWith("fail")) return { sizeBytes, offsite: "failed" as const, offsiteError: "AccessDenied: simulated upload failure" };
+    this.write((s) => {
+      (s.offsite ??= {})[`${spec.slug}/${backupId}`] = sizeBytes;
+      if (!offsite.keepLocal) delete s.backups[`${spec.slug}/${backupId}`];
+    });
+    return { sizeBytes, offsite: "uploaded" as const };
   }
 
-  async backupRestore(spec: WorkloadSpec, backupId: string, log: Log) {
-    if (!this.read().backups[`${spec.slug}/${backupId}`]) throw new Error("Backup archive not found on this node");
+  private remote = (o: OffsiteTarget, spec: WorkloadSpec, backupId: string) => `s3://${o.bucket}/${[o.prefix, spec.slug, backupId].filter(Boolean).join("/")}`;
+
+  async offsiteTest(offsite: OffsiteTarget, log: Log) {
+    await this.step(log, `[sim] writing, reading and deleting a probe object in s3://${offsite.bucket}`);
+    if (offsite.bucket.startsWith("fail")) throw new Error("AccessDenied: simulated failure");
+    return { output: "ok" };
+  }
+
+  async backupRestore(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
+    const key = `${spec.slug}/${backupId}`;
+    if (!this.read().backups[key]) {
+      const remote = offsite && this.read().offsite?.[key];
+      if (!remote) throw new Error("Backup archive not found on this node");
+      await this.step(log, `[sim] downloading from ${this.remote(offsite, spec, backupId)}`);
+      this.write((s) => (s.backups[key] = remote));
+    }
     await this.step(log, "[sim] restoring files");
     await this.step(log, "[sim] importing database");
     return {};
   }
 
-  async backupDelete(spec: WorkloadSpec, backupId: string, log: Log) {
+  async backupDelete(spec: WorkloadSpec, backupId: string, log: Log, offsite?: OffsiteTarget) {
     await this.step(log, "[sim] deleting archive");
-    this.write((s) => delete s.backups[`${spec.slug}/${backupId}`]);
+    if (offsite) await this.step(log, `[sim] deleting ${this.remote(offsite, spec, backupId)}`);
+    this.write((s) => {
+      delete s.backups[`${spec.slug}/${backupId}`];
+      if (offsite) delete s.offsite?.[`${spec.slug}/${backupId}`];
+    });
     return {};
   }
 
