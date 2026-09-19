@@ -141,6 +141,13 @@
       "when": 1789825965053,
       "tag": "0019_impersonation",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1789840535297,
+      "tag": "0020_payment_methods",
+      "breakpoints": true
     }
   ]
 }

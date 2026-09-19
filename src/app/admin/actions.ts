@@ -513,6 +513,14 @@ export async function saveGateways(_: ActionState, form: FormData): Promise<Acti
       enabled: checkbox(form, "stripeEnabled"),
       secretKey: secret("stripeSecretKey", current.stripe.secretKey),
       webhookSecret: secret("stripeWebhookSecret", current.stripe.webhookSecret),
+      saveCards: checkbox(form, "stripeSaveCards"),
+    },
+    paypal: {
+      enabled: checkbox(form, "paypalEnabled"),
+      clientId: String(form.get("paypalClientId") ?? "").trim().slice(0, 200),
+      secret: secret("paypalSecret", current.paypal.secret),
+      webhookId: String(form.get("paypalWebhookId") ?? "").trim().slice(0, 100),
+      sandbox: checkbox(form, "paypalSandbox"),
     },
   });
   await audit(admin.id, "settings.updated", "settings", "gateways");

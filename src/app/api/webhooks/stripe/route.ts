@@ -1,4 +1,5 @@
 import { recordPayment } from "@/lib/billing";
+import { rememberStripeCard } from "@/lib/payment-methods";
 import { getSettings } from "@/lib/settings";
 import { verifyStripeSignature } from "@/modules/gateways";
 
@@ -29,6 +30,14 @@ export async function POST(request: Request) {
   if (paid && invoiceId && /^[0-9a-f-]{36}$/i.test(invoiceId)) {
     // Idempotent on (gateway, externalId): Stripe retries are harmless.
     await recordPayment({ invoiceId, gateway: "stripe", externalId: session.payment_intent ?? session.id, amount: session.amount_total });
+    // Keeping the card is a convenience: it must never make the webhook fail.
+    if (session.payment_intent) await rememberStripeCard(session.payment_intent).catch(() => {});
+  }
+  // Automatic charges that finish later (3-D Secure done by the customer, slow networks).
+  if (event.type === "payment_intent.succeeded") {
+    const intent = event.data.object as unknown as { id: string; amount_received: number; metadata?: { invoice_id?: string } };
+    const id = intent.metadata?.invoice_id;
+    if (id && /^[0-9a-f-]{36}$/i.test(id)) await recordPayment({ invoiceId: id, gateway: "stripe", externalId: intent.id, amount: intent.amount_received });
   }
   return Response.json({ received: true });
 }

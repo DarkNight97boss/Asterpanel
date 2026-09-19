@@ -126,6 +126,10 @@ export const companies = pgTable("companies", {
   /** Italian e-invoicing: 7-character recipient code and/or certified email. */
   sdiCode: text("sdi_code").notNull().default(""),
   pec: text("pec").notNull().default(""),
+  /** Customer object at Stripe that holds this company's saved cards. */
+  stripeCustomerId: text("stripe_customer_id").notNull().default(""),
+  /** Charge renewal invoices on the default saved card. */
+  autoPay: boolean("auto_pay").notNull().default(true),
   createdAt: createdAt(),
 });
 
@@ -355,6 +359,10 @@ export const invoices = pgTable(
     paidAt: timestamp("paid_at", { withTimezone: true }),
     /** How many overdue reminders were already emailed (dedupes the cron). */
     remindersSent: integer("reminders_sent").notNull().default(0),
+    /** Automatic charges tried on a saved card, and when the last one was. */
+    chargeAttempts: integer("charge_attempts").notNull().default(0),
+    lastChargeAt: timestamp("last_charge_at", { withTimezone: true }),
+    lastChargeError: text("last_charge_error").notNull().default(""),
     notes: text("notes").notNull().default(""),
     createdAt: createdAt(),
   },
@@ -763,6 +771,26 @@ export const webhooks = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("webhooks_company_idx").on(t.companyId)],
+);
+
+/** A card kept at the gateway; we only hold its reference and what is printed on it. */
+export const paymentMethods = pgTable(
+  "payment_methods",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    gateway: text("gateway").notNull().default("stripe"),
+    externalId: text("external_id").notNull().unique(),
+    brand: text("brand").notNull().default(""),
+    last4: text("last4").notNull().default(""),
+    expMonth: integer("exp_month").notNull().default(0),
+    expYear: integer("exp_year").notNull().default(0),
+    isDefault: boolean("is_default").notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [index("payment_methods_company_idx").on(t.companyId)],
 );
 
 // ─── Coupons, canned replies, incidents ──────────────────────────────────────
