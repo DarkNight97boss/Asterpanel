@@ -90,6 +90,13 @@ export const settingsSchemas = {
     fromEmail: z.string().default(""),
     /** Where staff notifications go; falls back to the support email. */
     staffEmail: z.string().default(""),
+    /** Tickets by email: messages delivered to /api/inbound/mail become tickets and replies. */
+    inboundEnabled: z.boolean().default(false),
+    /** The support mailbox customers write to; replies go to `local+token@domain` when it supports plus addressing. */
+    inboundAddress: z.string().default(""),
+    inboundPlus: z.boolean().default(true),
+    /** Bearer token the mail server presents when it hands a message over. */
+    inboundToken: z.string().default(""),
   }),
   dns: z.object({
     /** Hostnames customers set at their registrar, e.g. ns1.example.com. They must resolve to your nodes. */

@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
   serverExternalPackages: ["@electric-sql/pglite", "postgres", "nodemailer"],
   poweredByHeader: false,
   // File-manager uploads travel through a Server Action (5 MB files + form overhead).
-  experimental: { serverActions: { bodySizeLimit: "8mb" } },
+  // 27 MB: a ticket message may carry five files of 5 MB each.
+  experimental: { serverActions: { bodySizeLimit: "27mb" } },
   async headers() {
     return [
       {

@@ -103,6 +103,9 @@ export function decryptJson<T>(payload: string, fallback: T): T {
 
 // ─── Short-lived signed values (e.g. "password ok, second factor pending") ───
 
+/** Short keyed fingerprint of a value: proves a token was made here, without expiry. */
+export const macOf = (value: string, length = 16) => createHmac("sha256", appKey()).update(`mac:${value}`).digest("hex").slice(0, length);
+
 export function signValue(value: string, ttlMs: number): string {
   const body = `${value}.${Date.now() + ttlMs}`;
   return `${body}.${createHmac("sha256", appKey()).update(body).digest("base64url")}`;

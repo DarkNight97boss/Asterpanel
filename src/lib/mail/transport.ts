@@ -14,6 +14,8 @@ export type OutgoingMail = {
   template: string;
   userId?: string | null;
   attachments?: Attachment[];
+  /** Instead of the support address (ticket mails: the address that threads the answer). */
+  replyTo?: string;
 };
 
 let override: Transporter | undefined;
@@ -51,7 +53,7 @@ export async function sendMail(message: OutgoingMail, { force = false } = {}): P
   try {
     await (override ?? smtp(mail)).sendMail({
       from: { name: mail.fromName || general.siteName, address: mail.fromEmail || "noreply@localhost" },
-      replyTo: general.supportEmail || undefined,
+      replyTo: message.replyTo || general.supportEmail || undefined,
       to: message.to,
       subject: message.subject,
       html: message.html,

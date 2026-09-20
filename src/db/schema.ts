@@ -4,6 +4,7 @@ import {
   index,
   integer,
   jsonb,
+  customType,
   pgTable,
   primaryKey,
   serial,
@@ -20,6 +21,8 @@ import type { Block } from "@/cms/blocks";
  * - Enumerations are plain text columns typed with `$type<>()` so adding a
  *   value never requires a migration.
  */
+
+const bytea = customType<{ data: Buffer }>({ dataType: () => "bytea", fromDriver: (v) => Buffer.from(v as Uint8Array) });
 
 const id = () => uuid("id").primaryKey().defaultRandom();
 const createdAt = () => timestamp("created_at", { withTimezone: true }).notNull().defaultNow();
@@ -1137,9 +1140,31 @@ export const ticketMessages = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: "restrict" }),
     body: text("body").notNull(),
+    /** How it arrived: typed in the panel, or received by email. */
+    via: text("via").$type<"web" | "email">().notNull().default("web"),
     createdAt: createdAt(),
   },
   (t) => [index("ticket_messages_ticket_idx").on(t.ticketId)],
+);
+
+/** Files attached to a ticket message. Kept in the database: they are small, few, and then covered by the same backup. */
+export const ticketAttachments = pgTable(
+  "ticket_attachments",
+  {
+    id: id(),
+    ticketId: uuid("ticket_id")
+      .notNull()
+      .references(() => tickets.id, { onDelete: "cascade" }),
+    messageId: uuid("message_id")
+      .notNull()
+      .references(() => ticketMessages.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mime: text("mime").notNull(),
+    size: integer("size").notNull(),
+    data: bytea("data").notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("ticket_attachments_ticket_idx").on(t.ticketId)],
 );
 
 // ─── Email log ───────────────────────────────────────────────────────────────
