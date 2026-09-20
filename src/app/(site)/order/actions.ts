@@ -7,6 +7,7 @@ import { BILLING_CYCLES } from "@/db/schema";
 import { requireAccount } from "@/lib/account";
 import { requestMeta } from "@/lib/request";
 import { BillingError, placeOrder } from "@/lib/billing";
+import { addProduct, CartError } from "@/lib/cart";
 import { DOMAIN_RE } from "@/lib/format";
 import { pickedFrom } from "@/lib/product-options";
 
@@ -22,6 +23,16 @@ export async function submitOrder(_: ActionState, form: FormData): Promise<Actio
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: "Invalid order" };
   if (parsed.data.domain && !DOMAIN_RE.test(parsed.data.domain)) return { error: "Enter a valid domain, e.g. example.com" };
+
+  if (form.has("cart")) {
+    try {
+      await addProduct(user.id, { ...parsed.data, options: pickedFrom(form) });
+    } catch (err) {
+      if (err instanceof CartError) return { error: err.message };
+      throw err;
+    }
+    redirect("/client/cart");
+  }
 
   let invoiceId: string;
   try {

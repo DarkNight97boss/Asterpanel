@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { addTickedToCart } from "../actions";
 import { Alert, Button, ButtonLink, Card, CardHeader, Input, PageHeader, Table, Td } from "@/components/ui";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
@@ -72,7 +73,7 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
               </tr>
             ))}
           </Table>
-          {hits.filter((h) => h.available).length > 1 && <div className="flex items-center justify-between gap-3 border-t border-border p-4 text-sm text-muted"><span>{t("Tick several names to register them together, on one invoice.")}</span><Button variant="secondary" size="sm">{t("Register the ticked ones")}</Button></div>}
+          {hits.some((h) => h.available) && <div className="flex items-center justify-between gap-3 border-t border-border p-4 text-sm text-muted"><span>{t("Tick several names to register them together, on one invoice.")}</span><span className="flex gap-2"><Button variant="ghost" size="sm" formAction={addTickedToCart} formMethod="post">{t("Add to cart")}</Button><Button variant="secondary" size="sm">{t("Register the ticked ones")}</Button></span></div>}
           </form>
         </Card>
       )}

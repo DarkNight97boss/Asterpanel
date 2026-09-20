@@ -2,7 +2,7 @@ import "server-only";
 import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { makeT } from "@/i18n/shared";
-import type { BillingCycle } from "@/db/schema";
+import type { BillingCycle, ProductAddon } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
 import { OptionError, resolveOptions } from "./product-options";
@@ -42,56 +42,88 @@ async function nextInvoiceNumber(tx: Tx, issuedAt = new Date()): Promise<{ numbe
 
 // ─── Orders ──────────────────────────────────────────────────────────────────
 
-export async function placeOrder(input: {
-  clientId: string;
-  /** The company that owns the order; `clientId` stays the person it is addressed to. */
-  companyId?: string | null;
+/** One thing being ordered. Catalogue lines are priced here; `pricing` lines (domains) come priced by the caller. */
+export type OrderLine = {
   productId: string;
   cycle: BillingCycle;
   domain: string;
-  ip?: string;
   /** Ids of the product's add-ons chosen with the order. */
   addonIds?: string[];
   /** Configurable options picked with the order: option id → choice id, or a quantity. */
   options?: Record<string, string>;
-  /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
-  coupon?: string;
   /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
   pricing?: { first: number; recurring: number; label: string; /** Shown instead of "1 year". */ period?: string };
   /** Module-specific order options, stored as `service.moduleData.request`. */
   request?: Record<string, unknown>;
-}): Promise<{ orderId: string; invoiceId: string; serviceId: string }> {
+};
+
+type PricedLine = { line: OrderLine; product: typeof schema.products.$inferSelect; addons: ProductAddon[]; price: number; setup: number; label: string };
+
+/** What each line costs and how it reads on the invoice. Throws on anything that cannot be ordered. Also what the cart shows. */
+export async function priceLines(lines: OrderLine[], companyId?: string | null): Promise<PricedLine[]> {
+  if (!lines.length || lines.length > 50) throw new BillingError("Nothing to order");
+  const db = await getDb();
+  const t = makeT((await getSettings("general")).locale);
+  // A company's own price list (resellers, agencies) applies to catalogue prices, never to caller-decided ones (domains).
+  const listDiscount = companyId ? ((await db.select({ p: schema.companies.discountPercent }).from(schema.companies).where(eq(schema.companies.id, companyId)))[0]?.p ?? 0) : 0;
+
+  const priced: PricedLine[] = [];
+  for (const line of lines) {
+    const product = await db.query.products.findFirst({ where: eq(schema.products.id, line.productId) });
+    // Hidden products are system entries, only orderable with a price from the caller.
+    if (!product || (product.hidden && !line.pricing)) throw new BillingError("Product not available");
+    const listPrice = line.pricing?.first ?? product.pricing[line.cycle];
+    if (typeof listPrice !== "number") throw new BillingError("Billing cycle not available for this product");
+    // Add-ons are priced per month and billed with the plan's cycle.
+    const fixed = line.pricing ? [] : product.addons.filter((a) => line.addonIds?.includes(a.id));
+    if (fixed.length !== new Set(line.addonIds ?? []).size && !line.pricing) throw new BillingError("An add-on is no longer available");
+    let configured: typeof fixed = [];
+    try {
+      configured = line.pricing ? [] : resolveOptions(product.options, line.options ?? {});
+    } catch (err) {
+      throw new BillingError(err instanceof OptionError ? err.message : "Invalid options");
+    }
+    const addons = [...fixed, ...configured];
+    const months = CYCLE_MONTHS[line.cycle] || 1;
+    const addonsPrice = addons.reduce((sum, a) => sum + a.monthly * months, 0);
+    const discountPercent = line.pricing ? 0 : Math.min(90, Math.max(0, listDiscount));
+    const price = Math.round(((listPrice + addonsPrice) * (100 - discountPercent)) / 100);
+    if (product.requiresDomain && !line.domain) throw new BillingError("A domain is required");
+    const setup = line.pricing ? 0 : (product.pricing.setup ?? 0);
+    const extras = addons.length ? ` + ${addons.map((a) => a.name).join(", ")}` : "";
+    // Invoice lines are a legal record: written once, in the site language.
+    const label = line.pricing ? `${t(line.pricing.label)} — ${line.domain} (${t(line.pricing.period ?? "1 year")})` : `${product.name}${extras}${line.domain ? ` — ${line.domain}` : ""} (${t(CYCLE_LABEL[line.cycle])})`;
+    priced.push({ line, product, addons, price, setup, label });
+  }
+
+  return priced;
+}
+
+/**
+ * One order and one invoice for any number of lines; every line becomes its
+ * own service, provisioned, renewed and cancelled by itself afterwards.
+ * Everything is priced and checked before anything is written.
+ */
+export async function placeLines(input: {
+  clientId: string;
+  /** The company that owns the order; `clientId` stays the person it is addressed to. */
+  companyId?: string | null;
+  ip?: string;
+  /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
+  coupon?: string;
+  lines: OrderLine[];
+}): Promise<{ orderId: string; invoiceId: string; serviceIds: string[] }> {
   const db = await getDb();
   const billing = await getSettings("billing");
   const t = makeT((await getSettings("general")).locale);
+  const priced = await priceLines(input.lines, input.companyId);
 
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
-  // Hidden products are system entries, only orderable with a price from the caller.
-  if (!product || (product.hidden && !input.pricing)) throw new BillingError("Product not available");
-  const listPrice = input.pricing?.first ?? product.pricing[input.cycle];
-  if (typeof listPrice !== "number") throw new BillingError("Billing cycle not available for this product");
-  // Add-ons are priced per month and billed with the plan's cycle.
-  const fixed = input.pricing ? [] : product.addons.filter((a) => input.addonIds?.includes(a.id));
-  if (fixed.length !== new Set(input.addonIds ?? []).size && !input.pricing) throw new BillingError("An add-on is no longer available");
-  let configured: typeof fixed = [];
-  try {
-    configured = input.pricing ? [] : resolveOptions(product.options, input.options ?? {});
-  } catch (err) {
-    throw new BillingError(err instanceof OptionError ? err.message : "Invalid options");
-  }
-  const addons = [...fixed, ...configured];
-  const months = CYCLE_MONTHS[input.cycle] || 1;
-  const addonsPrice = addons.reduce((sum, a) => sum + a.monthly * months, 0);
-  // A company's own price list (resellers, agencies) applies to catalogue prices, never to caller-decided ones (domains).
-  const listDiscount = input.pricing || !input.companyId ? 0 : ((await db.select({ p: schema.companies.discountPercent }).from(schema.companies).where(eq(schema.companies.id, input.companyId)))[0]?.p ?? 0);
-  const price = Math.round(((listPrice + addonsPrice) * (100 - Math.min(90, Math.max(0, listDiscount)))) / 100);
-  if (product.requiresDomain && !input.domain) throw new BillingError("A domain is required");
-
-  const setup = input.pricing ? 0 : (product.pricing.setup ?? 0);
+  const gross = priced.reduce((sum, p) => sum + p.price + p.setup, 0);
   const code = (input.coupon ?? "").trim().toUpperCase();
   const coupon = code ? await usableCoupon(code) : null;
-  const discount = coupon ? Math.min(price + setup, coupon.kind === "percent" ? Math.round(((price + setup) * coupon.value) / 100) : coupon.value) : 0;
-  const subtotal = price + setup - discount;
+  const discount = coupon ? Math.min(gross, coupon.kind === "percent" ? Math.round((gross * coupon.value) / 100) : coupon.value) : 0;
+  const subtotal = gross - discount;
+  // Looked up before the transaction: the embedded database has one connection.
   const vat = await taxFor(input.companyId);
   const tax = taxOn(subtotal, vat.rate);
   const total = subtotal + tax;
@@ -102,55 +134,39 @@ export async function placeOrder(input: {
       const [claimed] = await tx.update(schema.coupons).set({ used: sql`${schema.coupons.used} + 1` }).where(and(eq(schema.coupons.id, coupon.id), or(eq(schema.coupons.maxUses, 0), lt(schema.coupons.used, schema.coupons.maxUses)))).returning({ id: schema.coupons.id });
       if (!claimed) throw new BillingError("This discount code has been used up");
     }
-    const [order] = await tx
-      .insert(schema.orders)
-      .values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" })
-      .returning();
-    const [service] = await tx
-      .insert(schema.services)
-      .values({
-        clientId: input.clientId,
-        companyId: input.companyId ?? null,
-        productId: product.id,
-        orderId: order.id,
-        serverId: product.serverId,
-        domain: input.domain.toLowerCase(),
-        billingCycle: input.cycle,
-        amount: input.pricing?.recurring ?? price,
-        moduleData: { ...(input.request ? { request: input.request } : {}), ...(addons.length ? { addons } : {}) },
-      })
-      .returning();
+    const [order] = await tx.insert(schema.orders).values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" }).returning();
     const [invoice] = await tx
       .insert(schema.invoices)
-      .values({
-        ...(await nextInvoiceNumber(tx)),
-        clientId: input.clientId,
-        companyId: input.companyId ?? null,
-        currency: billing.currency,
-        subtotal,
-        taxRate: vat.rate,
-        notes: vat.note,
-        tax,
-        total,
-        dueDate: new Date(),
-      })
+      .values({ ...(await nextInvoiceNumber(tx)), clientId: input.clientId, companyId: input.companyId ?? null, currency: billing.currency, subtotal, taxRate: vat.rate, notes: vat.note, tax, total, dueDate: new Date() })
       .returning();
-
-    // Invoice lines are a legal record: written once, in the site language.
-    const extras = addons.length ? ` + ${addons.map((a) => a.name).join(", ")}` : "";
-    const label = input.pricing ? `${t(input.pricing.label)} — ${input.domain} (${t(input.pricing.period ?? "1 year")})` : `${product.name}${extras}${input.domain ? ` — ${input.domain}` : ""} (${t(CYCLE_LABEL[input.cycle])})`;
-    await tx.insert(schema.invoiceItems).values([
-      { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: label, amount: price },
-      ...(setup > 0
-        ? [{ invoiceId: invoice.id, serviceId: service.id, kind: "setup" as const, description: `${product.name} — ${t("Setup fee")}`, amount: setup }]
-        : []),
-      ...(discount > 0 ? [{ invoiceId: invoice.id, serviceId: null, kind: "discount" as const, description: `${t("Discount code")} ${coupon!.code}`, amount: -discount }] : []),
-    ]);
+    const serviceIds: string[] = [];
+    for (const p of priced) {
+      const [service] = await tx
+        .insert(schema.services)
+        .values({
+          clientId: input.clientId,
+          companyId: input.companyId ?? null,
+          productId: p.product.id,
+          orderId: order.id,
+          serverId: p.product.serverId,
+          domain: p.line.domain.toLowerCase(),
+          billingCycle: p.line.cycle,
+          amount: p.line.pricing?.recurring ?? p.price,
+          moduleData: { ...(p.line.request ? { request: p.line.request } : {}), ...(p.addons.length ? { addons: p.addons } : {}) },
+        })
+        .returning({ id: schema.services.id });
+      serviceIds.push(service.id);
+      await tx.insert(schema.invoiceItems).values([
+        { invoiceId: invoice.id, serviceId: service.id, kind: "new" as const, description: p.label, amount: p.price },
+        ...(p.setup > 0 ? [{ invoiceId: invoice.id, serviceId: service.id, kind: "setup" as const, description: `${p.product.name} — ${t("Setup fee")}`, amount: p.setup }] : []),
+      ]);
+    }
+    if (discount > 0) await tx.insert(schema.invoiceItems).values({ invoiceId: invoice.id, serviceId: null, kind: "discount", description: `${t("Discount code")} ${coupon!.code}`, amount: -discount });
     await tx.update(schema.orders).set({ invoiceId: invoice.id }).where(eq(schema.orders.id, order.id));
-    return { orderId: order.id, invoiceId: invoice.id, serviceId: service.id };
+    return { orderId: order.id, invoiceId: invoice.id, serviceIds };
   });
 
-  await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total });
+  await audit(input.clientId, "order.placed", "order", result.orderId, { productId: priced[0].product.id, total, lines: priced.length });
   if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
   else {
     await applyCredit(result.invoiceId);
@@ -160,58 +176,16 @@ export async function placeOrder(input: {
   return result;
 }
 
-/**
- * Several caller-priced services of one product on a single order and invoice
- * (a basket of domains). Each line becomes its own service, so every domain
- * is provisioned, renewed and cancelled by itself afterwards.
- */
-export async function placeBundle(input: {
-  clientId: string;
-  companyId?: string | null;
-  productId: string;
-  cycle: BillingCycle;
-  ip?: string;
-  lines: { domain: string; pricing: { first: number; recurring: number; label: string; period?: string }; request?: Record<string, unknown> }[];
-}): Promise<{ orderId: string; invoiceId: string; serviceIds: string[] }> {
-  if (!input.lines.length || input.lines.length > 50) throw new BillingError("Nothing to order");
-  const db = await getDb();
-  const billing = await getSettings("billing");
-  const t = makeT((await getSettings("general")).locale);
-  const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
-  if (!product) throw new BillingError("Product not available");
-  const subtotal = input.lines.reduce((sum, l) => sum + l.pricing.first, 0);
-  // Looked up before the transaction: the embedded database has one connection.
-  const vat = await taxFor(input.companyId);
-  const tax = taxOn(subtotal, vat.rate);
-  const total = subtotal + tax;
+/** A single-line order. */
+export async function placeOrder(input: Omit<OrderLine, never> & { clientId: string; companyId?: string | null; ip?: string; coupon?: string }): Promise<{ orderId: string; invoiceId: string; serviceId: string }> {
+  const { clientId, companyId, ip, coupon, ...line } = input;
+  const { orderId, invoiceId, serviceIds } = await placeLines({ clientId, companyId, ip, coupon, lines: [line] });
+  return { orderId, invoiceId, serviceId: serviceIds[0] };
+}
 
-  const result = await db.transaction(async (tx) => {
-    const [order] = await tx.insert(schema.orders).values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" }).returning();
-    const [invoice] = await tx
-      .insert(schema.invoices)
-      .values({ ...(await nextInvoiceNumber(tx)), clientId: input.clientId, companyId: input.companyId ?? null, currency: billing.currency, subtotal, taxRate: vat.rate, notes: vat.note, tax, total, dueDate: new Date() })
-      .returning();
-    const serviceIds: string[] = [];
-    for (const line of input.lines) {
-      const [service] = await tx
-        .insert(schema.services)
-        .values({ clientId: input.clientId, companyId: input.companyId ?? null, productId: product.id, orderId: order.id, serverId: product.serverId, domain: line.domain.toLowerCase(), billingCycle: input.cycle, amount: line.pricing.recurring, moduleData: line.request ? { request: line.request } : {} })
-        .returning({ id: schema.services.id });
-      serviceIds.push(service.id);
-      await tx.insert(schema.invoiceItems).values({ invoiceId: invoice.id, serviceId: service.id, kind: "new", description: `${t(line.pricing.label)} — ${line.domain} (${t(line.pricing.period ?? "1 year")})`, amount: line.pricing.first });
-    }
-    await tx.update(schema.orders).set({ invoiceId: invoice.id }).where(eq(schema.orders.id, order.id));
-    return { orderId: order.id, invoiceId: invoice.id, serviceIds };
-  });
-
-  await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total, lines: input.lines.length });
-  if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
-  else {
-    await applyCredit(result.invoiceId);
-    notify.invoiceCreated(result.invoiceId);
-  }
-  emitEvent(input.companyId, "invoice.created", { invoiceId: result.invoiceId, total, currency: billing.currency });
-  return result;
+/** Several caller-priced services of one product on a single order and invoice (a basket of domains). */
+export async function placeBundle(input: { clientId: string; companyId?: string | null; productId: string; cycle: BillingCycle; ip?: string; lines: { domain: string; pricing: NonNullable<OrderLine["pricing"]>; request?: Record<string, unknown> }[] }): Promise<{ orderId: string; invoiceId: string; serviceIds: string[] }> {
+  return placeLines({ clientId: input.clientId, companyId: input.companyId, ip: input.ip, lines: input.lines.map((l) => ({ productId: input.productId, cycle: input.cycle, ...l })) });
 }
 
 // ─── Payments ────────────────────────────────────────────────────────────────

@@ -296,3 +296,50 @@ test("bulk transfer lines: domain and code, however separated; a line without a 
   assert.deepEqual(domains.parseTransferLines("a.com  Xy7#kd 92\n\nb.it,aB3$mn55\r\n"), [{ domain: "a.com", action: "transfer", authCode: "Xy7#kd 92" }, { domain: "b.it", action: "transfer", authCode: "aB3$mn55" }]);
   assert.throws(() => domains.parseTransferLines("a.com code\nlonely.com"), /lonely\.com/);
 });
+
+test("the cart: hosting with options and domains on one invoice, priced at checkout, emptied only on success, never shared between companies", async () => {
+  const db = await dbm.getDb();
+  const cart = await import("../src/lib/cart");
+  const { parseOptionLines } = await import("../src/lib/product-options");
+  const [coA, coB] = await db.insert(dbm.schema.companies).values([{ name: "Cart A" }, { name: "Cart B" }]).returning();
+  const [group] = await db.insert(dbm.schema.productGroups).values({ slug: "cart-g", name: "Cart" }).returning();
+  const [plan] = await db.insert(dbm.schema.products).values({ groupId: group.id, name: "Web Start", slug: "web-start", module: "manual", requiresDomain: true, pricing: { monthly: 1000, setup: 500 }, options: parseOptionLines("quantity | Extra disk | 2.00 | 0 | 5") }).returning();
+  await db.insert(dbm.schema.coupons).values({ code: "CART10", kind: "percent", value: 10 });
+
+  await assert.rejects(cart.addProduct(coA.id, { productId: plan.id, cycle: "annually", domain: "cart-site.com" }), /cycle not available/i);
+  await assert.rejects(cart.addProduct(coA.id, { productId: plan.id, cycle: "monthly", domain: "" }), /domain is required/i);
+  await assert.rejects(cart.addProduct(coA.id, { productId: plan.id, cycle: "monthly", domain: "cart-site.com", options: { "extra-disk": "9" } }), /between 0 and 5/);
+  await cart.addProduct(coA.id, { productId: plan.id, cycle: "monthly", domain: "cart-site.com", options: { "extra-disk": "2" } });
+  await assert.rejects(cart.addDomains(coA.id, clientId, [{ domain: "taken.com", action: "register" }]), /no longer available/);
+  await cart.addDomains(coA.id, clientId, [{ domain: "cart-site.com", action: "register" }, { domain: "CART-SITE.com", action: "register" }]);
+
+  let view = await cart.viewCart(coA.id, clientId);
+  assert.deepEqual(view.items.map((i) => [i.kind, i.price, i.setup, i.recurring]), [["product", 1400, 500, 1400], ["domain", 1290, 0, 1490]]);
+  assert.deepEqual([view.subtotal, view.hasDomains, view.tlds], [3190, true, ["com"]]);
+  assert.equal((await cart.viewCart(coB.id, clientId)).items.length, 0, "another company's cart is its own");
+  await assert.rejects(cart.checkoutCart({ companyId: coB.id, clientId, contact }), /empty/);
+
+  // The price list changes while the cart waits: the cart follows.
+  await db.update(dbm.schema.products).set({ pricing: { monthly: 1200, setup: 500 } }).where(eq(dbm.schema.products.id, plan.id));
+  view = await cart.viewCart(coA.id, clientId);
+  assert.equal(view.items[0].price, 1600);
+
+  // A registrant that does not pass keeps the cart as it was.
+  await assert.rejects(cart.checkoutCart({ companyId: coA.id, clientId, contact: { ...contact, email: "nope" } }), /registrant details/);
+  assert.equal(await cart.cartCount(coA.id), 2);
+
+  const { invoiceId } = await cart.checkoutCart({ companyId: coA.id, clientId, contact, coupon: "cart10" });
+  assert.equal(await cart.cartCount(coA.id), 0);
+  const [invoice] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  const items = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, invoiceId));
+  assert.deepEqual(items.map((i) => [i.kind, i.amount]), [["new", 1600], ["setup", 500], ["new", 1290], ["discount", -339]]);
+  assert.equal(invoice.subtotal, 3051);
+  const [domain] = await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.name, "cart-site.com"));
+  assert.equal(domain.status, "pending");
+  assert.equal(items[2].serviceId, domain.serviceId, "the domain is tied to its own line");
+
+  await billing.recordPayment({ invoiceId, gateway: "bank", externalId: "cart-1", amount: invoice.total });
+  assert.equal((await db.select().from(dbm.schema.domainNames).where(eq(dbm.schema.domainNames.id, domain.id)))[0].status, "active");
+  const services = await db.select().from(dbm.schema.services).where(inArray(dbm.schema.services.id, items.flatMap((i) => (i.serviceId ? [i.serviceId] : []))));
+  assert.deepEqual(services.map((s) => s.status).sort(), ["active", "active"]);
+});

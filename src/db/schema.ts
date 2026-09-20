@@ -527,6 +527,24 @@ export const ipLeases = pgTable(
   (t) => [index("ip_leases_pool_idx").on(t.poolId)],
 );
 
+/** What a company has put aside to order together: catalogue products and domains, paid on one invoice. */
+export type CartItemData =
+  | { kind: "product"; productId: string; cycle: BillingCycle; domain: string; addonIds: string[]; options: Record<string, string> }
+  | { kind: "domain"; domain: string; action: "register" | "transfer"; years: number; /** Encrypted transfer code. */ authCode: string };
+
+export const cartItems = pgTable(
+  "cart_items",
+  {
+    id: id(),
+    companyId: uuid("company_id")
+      .notNull()
+      .references(() => companies.id, { onDelete: "cascade" }),
+    data: jsonb("data").$type<CartItemData>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("cart_items_company_idx").on(t.companyId)],
+);
+
 /** WebAuthn credentials: sign in with a fingerprint, a face or a security key instead of the password. */
 export const passkeys = pgTable(
   "passkeys",

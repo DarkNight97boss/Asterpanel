@@ -2104,6 +2104,18 @@ const it: Record<string, string> = {
   "Preview ready": "Anteprima pronta",
   "Imported": "Importato",
   "Forgotten": "Dimenticate",
+  "Cart": "Carrello",
+  "Everything here is ordered together, on one invoice.": "Tutto ciò che è qui viene ordinato insieme, su un'unica fattura.",
+  "Your cart is empty": "Il carrello è vuoto",
+  "Add a hosting plan or a domain, then pay for everything at once.": "Aggiungi un piano hosting o un dominio, poi paga tutto in una volta.",
+  "Item": "Articolo",
+  "Today": "Oggi",
+  "Then": "Poi",
+  "Subtotal, before taxes and discounts": "Subtotale, prima di imposte e sconti",
+  "Remove the items that can no longer be ordered to continue.": "Per continuare rimuovi gli articoli che non possono più essere ordinati.",
+  "Checkout": "Conferma l'ordine",
+  "The registrant is the legal owner of the domains in the cart. These details are sent to the registry, so they must be real and complete.": "L'intestatario è il titolare legale dei domini nel carrello. Questi dati vengono inviati al registro, quindi devono essere reali e completi.",
+  "Add to cart": "Aggiungi al carrello",
 };
 
 export default it;

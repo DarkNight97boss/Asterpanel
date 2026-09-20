@@ -91,6 +91,7 @@ export default async function OrderPage({ params }: { params: Promise<{ slug: st
             <OptionFields options={product.options} money={(c) => formatMoney(c, billing.currency, locale)} perMonth={t("/mo")} />
             <Field label={t("Discount code")}><Input name="coupon" maxLength={40} autoComplete="off" className="uppercase" /></Field>
             <SubmitButton className="w-full">{t("Place order")}</SubmitButton>
+            <SubmitButton name="cart" value="1" variant="secondary" className="w-full">{t("Add to cart")}</SubmitButton>
           </ActionForm>
         )}
       </Card>
