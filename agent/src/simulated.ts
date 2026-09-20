@@ -54,6 +54,9 @@ export class SimulatedDriver implements Driver {
       await this.step(log, "[sim] starting mariadb:11");
       await this.step(log, `[sim] starting wordpress:php${spec.wordpress!.phpVersion}-apache (${spec.resources.memoryMb} MB, ${spec.resources.cpus} CPU)`);
       await this.step(log, `[sim] wp core install --url=https://${spec.domains[0]} --admin_user=${spec.wordpress!.adminUser}`);
+      const bp = spec.wordpress!.blueprint;
+      for (const plugin of bp?.plugins ?? []) await this.step(log, `[sim] wp plugin install ${plugin} --activate`);
+      if (bp?.theme) await this.step(log, `[sim] wp theme install ${bp.theme} --activate`);
     } else if (spec.kind === "database") {
       await this.step(log, `[sim] starting ${spec.database!.engine}:${spec.database!.version || "latest"}`);
     } else {

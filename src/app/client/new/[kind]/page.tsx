@@ -9,7 +9,7 @@ import { isStaff } from "@/lib/auth";
 import { CYCLE_SUFFIX, formatMoney, headlineCycle } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { planType } from "@/modules/provisioning/platform";
-import { nodeIsOnline } from "@/platform/engine";
+import { listBlueprints, nodeIsOnline } from "@/platform/engine";
 import { TYPE_BY_PATH, WORKLOAD_LABEL } from "@/platform/ui";
 import { createFromPlan, seedPlans } from "../../platform-actions";
 
@@ -27,6 +27,7 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
     db.select().from(schema.nodes).where(ne(schema.nodes.status, "disabled")),
     searchParams,
   ]);
+  const blueprints = type === "wordpress" ? await listBlueprints(account.id) : [];
   const plans = products.filter((p) => planType(p.moduleConfig) === type && headlineCycle(p.pricing));
   const regions = [...new Set(nodes.filter(nodeIsOnline).map((n) => n.region).filter(Boolean))];
   const label = WORKLOAD_LABEL[type];
@@ -104,6 +105,14 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
                   <Field label={t("PHP version")}>
                     <Select name="phpVersion" defaultValue="8.3">{["8.4", "8.3", "8.2", "8.1"].map((v) => <option key={v}>{v}</option>)}</Select>
                   </Field>
+                  {blueprints.length > 0 && (
+                    <Field label={t("Blueprint")} hint={t("Plugins, theme and settings installed on the new site. Ignored for a copy.")}>
+                      <Select name="blueprintId" defaultValue="">
+                        <option value="">{t("None")}</option>
+                        {blueprints.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </Select>
+                    </Field>
+                  )}
                   {copyable.length > 0 && (
                     <Field label={t("Start from")} hint={t("A copy has the files, database, users and passwords of the original, on the same server, at its own address.")}>
                       <Select name="cloneFrom" defaultValue="">

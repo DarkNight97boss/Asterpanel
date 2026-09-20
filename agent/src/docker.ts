@@ -410,6 +410,23 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
     return this.docker(["run", "--rm", "--user", "33:33", "--network", net, "--volumes-from", name, ...this.envArgs(env), "wordpress:cli", "wp", ...args], log, { env });
   }
 
+  /**
+   * The starting point chosen for a new site. Only ever called on a fresh
+   * installation. A plugin that does not install is reported and skipped: the
+   * site itself is fine, and the customer can add it later.
+   */
+  private async applyBlueprint(spec: WorkloadSpec, log: Log) {
+    const bp = spec.wordpress?.blueprint;
+    if (!bp) return;
+    const slug = (v: unknown): v is string => typeof v === "string" && /^[a-z0-9][a-z0-9-]{0,79}$/.test(v);
+    const attempt = (what: string, args: string[]) => this.wp(spec, args, log).then(() => true, () => (log(`blueprint: ${what} failed, skipped`), false));
+    for (const plugin of (bp.plugins ?? []).filter(slug).slice(0, 20)) await attempt(`plugin ${plugin}`, ["plugin", "install", plugin, "--activate"]);
+    if (slug(bp.theme)) await attempt(`theme ${bp.theme}`, ["theme", "install", bp.theme, "--activate"]);
+    if (bp.permalinks && /^\/[%a-z_/]{1,60}$/.test(bp.permalinks)) await attempt("permalinks", ["rewrite", "structure", bp.permalinks]);
+    if (bp.timezone && /^[A-Za-z_+\-/]{3,60}$/.test(bp.timezone)) await attempt("time zone", ["option", "update", "timezone_string", bp.timezone]);
+    if (bp.hideFromSearch) await attempt("search engine visibility", ["option", "update", "blog_public", "0"]);
+  }
+
   private async waitForWpDb(spec: WorkloadSpec, log: Log) {
     for (let i = 0; i < 40; i++) {
       if (await this.wp(spec, ["db", "check", "--quiet"], undefined).then(() => true, () => false)) return;
@@ -463,6 +480,7 @@ ${assets ? `  location ~* \\.(css|js|mjs|png|jpe?g|gif|webp|avif|svg|ico|woff2?|
         log,
         { env: { ...this.wpEnv(spec), WP_URL: `https://${spec.domains[0]}`, WP_TITLE: wp.title, WP_USER: wp.adminUser, WP_PASS: wp.adminPassword, WP_EMAIL: wp.adminEmail, WP_LOCALE: wp.locale } },
       );
+      await this.applyBlueprint(spec, log);
     }
     await this.syncSftp(spec, log);
     const version = (await this.wp(spec, ["core", "version"]).catch(() => "")).trim();

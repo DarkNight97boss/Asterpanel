@@ -1,8 +1,9 @@
 import "server-only";
 import { generateKeyPairSync, createPrivateKey, randomBytes, sign, createHash } from "node:crypto";
-import { and, asc, count, desc, eq, gt, inArray, lt, ne, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
-import type { WorkloadConfig, WorkloadType } from "@/db/schema";
+import type { WorkloadConfig, WorkloadType, WpBlueprint } from "@/db/schema";
+import { BlueprintError, cleanBlueprint } from "./blueprints";
 import { audit } from "@/lib/audit";
 import { parseCronLines, type CronJob } from "./cron";
 import { publicHttpsUrl } from "@/lib/net";
@@ -156,6 +157,7 @@ export async function buildSpec(workloadId: string): Promise<WorkloadSpec> {
             php: c.php,
             objectCache: c.objectCache || undefined,
             systemCron: c.systemCron || undefined,
+            blueprint: c.blueprint,
           }
         : undefined,
     database:
@@ -1478,4 +1480,48 @@ export async function activeJobs(workloadId: string) {
     .from(schema.jobs)
     .where(and(eq(schema.jobs.workloadId, workloadId), inArray(schema.jobs.status, ["queued", "running"]), gt(schema.jobs.createdAt, new Date(Date.now() - 2 * JOB_TTL_MS))))
     .orderBy(asc(schema.jobs.createdAt));
+}
+
+/** Blueprints of a company, plus the ones the hosting company offers to everybody. */
+export async function listBlueprints(companyId: string) {
+  const db = await getDb();
+  return db.select().from(schema.wpBlueprints).where(or(eq(schema.wpBlueprints.companyId, companyId), isNull(schema.wpBlueprints.companyId))).orderBy(asc(schema.wpBlueprints.name));
+}
+
+/** `companyId` null = a blueprint of the hosting company, offered to every customer. */
+export async function saveBlueprint(companyId: string | null, input: { id?: string; name: string; spec: Parameters<typeof cleanBlueprint>[0] }, actorId: string | null = null): Promise<string> {
+  const name = input.name.trim().slice(0, 60);
+  if (!name) throw new PlatformError("A name is required");
+  let spec;
+  try {
+    spec = cleanBlueprint(input.spec);
+  } catch (err) {
+    throw new PlatformError(err instanceof BlueprintError ? err.message : "Invalid blueprint");
+  }
+  const db = await getDb();
+  const mine = companyId ? eq(schema.wpBlueprints.companyId, companyId) : isNull(schema.wpBlueprints.companyId);
+  let id = input.id;
+  if (id) {
+    const [row] = await db.update(schema.wpBlueprints).set({ name, spec }).where(and(eq(schema.wpBlueprints.id, id), mine)).returning({ id: schema.wpBlueprints.id });
+    if (!row) throw new PlatformError("Blueprint not found");
+  } else {
+    const [count] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.wpBlueprints).where(mine);
+    if (count.n >= 50) throw new PlatformError("Too many blueprints");
+    [{ id }] = await db.insert(schema.wpBlueprints).values({ companyId, name, spec }).returning({ id: schema.wpBlueprints.id });
+  }
+  await audit(actorId, "blueprint.saved", "wp_blueprint", id, { name, plugins: spec.plugins.length });
+  return id;
+}
+
+export async function deleteBlueprint(companyId: string | null, id: string, actorId: string | null = null) {
+  const db = await getDb();
+  await db.delete(schema.wpBlueprints).where(and(eq(schema.wpBlueprints.id, id), companyId ? eq(schema.wpBlueprints.companyId, companyId) : isNull(schema.wpBlueprints.companyId)));
+  await audit(actorId, "blueprint.deleted", "wp_blueprint", id);
+}
+
+/** The blueprint a company may use (its own or a shared one), as the copy stored on the new site. */
+export async function blueprintFor(companyId: string, id: string): Promise<WpBlueprint> {
+  const row = (await listBlueprints(companyId)).find((b) => b.id === id);
+  if (!row) throw new PlatformError("Blueprint not found");
+  return row.spec;
 }
