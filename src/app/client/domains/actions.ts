@@ -8,7 +8,7 @@ import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { requireAccount } from "@/lib/account";
 import { BillingError } from "@/lib/billing";
-import { domainAuthCode, DomainError, orderDomain, setDomainLock, setDomainNameservers, setDomainPrivacy, syncDomain, updateDomainContact } from "@/lib/domains";
+import { domainAuthCode, DomainError, orderDomains, parseTransferLines, setDomainLock, setDomainNameservers, setDomainPrivacy, syncDomain, updateDomainContact } from "@/lib/domains";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 
@@ -23,16 +23,12 @@ export async function order(_: ActionState, form: FormData): Promise<ActionState
   const f = Object.fromEntries(form);
   let invoiceId: string;
   try {
-    ({ invoiceId } = await orderDomain({
-      clientId: account.ownerUserId,
-      companyId: account.id,
-      domain: String(f.domain ?? ""),
-      action: f.action === "transfer" ? "transfer" : "register",
-      authCode: String(f.authCode ?? ""),
-      years: Number(f.years) || 1,
-      contact: f,
-      ip: (await requestMeta()).ip,
-    }));
+    // One domain, several ticked in the search, or a pasted list of transfers: always one invoice.
+    const names = form.getAll("domain").map(String).filter(Boolean);
+    const transfer = f.action === "transfer";
+    const items = form.has("transfers") ? parseTransferLines(String(f.transfers ?? "").slice(0, 20_000)) : names.map((domain) => ({ domain, action: transfer ? ("transfer" as const) : ("register" as const), authCode: String(f.authCode ?? ""), years: Number(f.years) || 1 }));
+    if (transfer && names.length > 1) throw new DomainError("Use the bulk transfer to move several domains");
+    ({ invoiceId } = await orderDomains({ clientId: account.ownerUserId, companyId: account.id, items, contact: f, ip: (await requestMeta()).ip }));
   } catch (err) {
     return fail(err);
   }

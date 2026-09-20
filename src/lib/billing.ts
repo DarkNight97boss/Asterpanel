@@ -150,6 +150,60 @@ export async function placeOrder(input: {
   return result;
 }
 
+/**
+ * Several caller-priced services of one product on a single order and invoice
+ * (a basket of domains). Each line becomes its own service, so every domain
+ * is provisioned, renewed and cancelled by itself afterwards.
+ */
+export async function placeBundle(input: {
+  clientId: string;
+  companyId?: string | null;
+  productId: string;
+  cycle: BillingCycle;
+  ip?: string;
+  lines: { domain: string; pricing: { first: number; recurring: number; label: string; period?: string }; request?: Record<string, unknown> }[];
+}): Promise<{ orderId: string; invoiceId: string; serviceIds: string[] }> {
+  if (!input.lines.length || input.lines.length > 50) throw new BillingError("Nothing to order");
+  const db = await getDb();
+  const billing = await getSettings("billing");
+  const t = makeT((await getSettings("general")).locale);
+  const product = await db.query.products.findFirst({ where: eq(schema.products.id, input.productId) });
+  if (!product) throw new BillingError("Product not available");
+  const subtotal = input.lines.reduce((sum, l) => sum + l.pricing.first, 0);
+  // Looked up before the transaction: the embedded database has one connection.
+  const vat = await taxFor(input.companyId);
+  const tax = taxOn(subtotal, vat.rate);
+  const total = subtotal + tax;
+
+  const result = await db.transaction(async (tx) => {
+    const [order] = await tx.insert(schema.orders).values({ clientId: input.clientId, companyId: input.companyId ?? null, total, ip: input.ip ?? "" }).returning();
+    const [invoice] = await tx
+      .insert(schema.invoices)
+      .values({ ...(await nextInvoiceNumber(tx)), clientId: input.clientId, companyId: input.companyId ?? null, currency: billing.currency, subtotal, taxRate: vat.rate, notes: vat.note, tax, total, dueDate: new Date() })
+      .returning();
+    const serviceIds: string[] = [];
+    for (const line of input.lines) {
+      const [service] = await tx
+        .insert(schema.services)
+        .values({ clientId: input.clientId, companyId: input.companyId ?? null, productId: product.id, orderId: order.id, serverId: product.serverId, domain: line.domain.toLowerCase(), billingCycle: input.cycle, amount: line.pricing.recurring, moduleData: line.request ? { request: line.request } : {} })
+        .returning({ id: schema.services.id });
+      serviceIds.push(service.id);
+      await tx.insert(schema.invoiceItems).values({ invoiceId: invoice.id, serviceId: service.id, kind: "new", description: `${t(line.pricing.label)} — ${line.domain} (${t(line.pricing.period ?? "1 year")})`, amount: line.pricing.first });
+    }
+    await tx.update(schema.orders).set({ invoiceId: invoice.id }).where(eq(schema.orders.id, order.id));
+    return { orderId: order.id, invoiceId: invoice.id, serviceIds };
+  });
+
+  await audit(input.clientId, "order.placed", "order", result.orderId, { productId: product.id, total, lines: input.lines.length });
+  if (total === 0) await recordPayment({ invoiceId: result.invoiceId, gateway: "free", externalId: "", amount: 0 });
+  else {
+    await applyCredit(result.invoiceId);
+    notify.invoiceCreated(result.invoiceId);
+  }
+  emitEvent(input.companyId, "invoice.created", { invoiceId: result.invoiceId, total, currency: billing.currency });
+  return result;
+}
+
 // ─── Payments ────────────────────────────────────────────────────────────────
 
 /**

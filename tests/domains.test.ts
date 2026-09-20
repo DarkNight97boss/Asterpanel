@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, test } from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 
 process.env.PGLITE_DIR = "memory://";
 process.env.APP_SECRET = "test-secret";
@@ -268,4 +268,31 @@ test("Openprovider: token login, {name, extension} domains, customer handles, nu
 
   await updateSettings("registrars", { ...current, accounts: { ...current.accounts, openprovider: { username: "reseller", password: "wrong", sandbox: "1" } } });
   await assert.rejects(domains.testRegistrar("openprovider"), /Authentication/);
+});
+
+test("a basket: several domains on one invoice, each registered by itself on payment; one bad line refuses it all", async () => {
+  const db = await dbm.getDb();
+  const count = async () => (await db.select().from(dbm.schema.invoices)).length;
+  const before = await count();
+  await assert.rejects(domains.orderDomains({ clientId, companyId: null, contact, items: [{ domain: "basket-one.com", action: "register" }, { domain: "taken.com", action: "register" }] }), /taken\.com: this domain is no longer available/);
+  await assert.rejects(domains.orderDomains({ clientId, companyId: null, contact, items: [{ domain: "basket-one.com", action: "register" }, { domain: "move-me.com", action: "transfer" }] }), /move-me\.com: enter the transfer/);
+  await assert.rejects(domains.orderDomains({ clientId, companyId: null, contact, items: Array.from({ length: 21 }, (_, i) => ({ domain: `many-${i}.com`, action: "register" as const })) }), /At most 20/);
+  assert.equal(await count(), before, "a refused basket leaves no invoice behind");
+
+  const { invoiceId, domainIds } = await domains.orderDomains({ clientId, companyId: null, contact, items: [{ domain: "basket-one.com", action: "register" }, { domain: "Basket-One.com", action: "register" }, { domain: "basket-two.com", action: "register", years: 2 }] });
+  assert.equal(domainIds.length, 2, "the same name twice is one domain");
+  const [invoice] = await db.select().from(dbm.schema.invoices).where(eq(dbm.schema.invoices.id, invoiceId));
+  const items = await db.select().from(dbm.schema.invoiceItems).where(eq(dbm.schema.invoiceItems.invoiceId, invoiceId));
+  assert.equal(items.length, 2);
+  assert.equal(invoice.subtotal, items.reduce((n, i) => n + i.amount, 0));
+  assert.ok(new Set(items.map((i) => i.serviceId)).size === 2, "one service per domain");
+
+  await billing.recordPayment({ invoiceId, gateway: "bank", externalId: "basket-1", amount: invoice.total });
+  const rows = await db.select().from(dbm.schema.domainNames).where(inArray(dbm.schema.domainNames.id, domainIds));
+  assert.deepEqual(rows.map((r) => r.status).sort(), ["active", "active"]);
+});
+
+test("bulk transfer lines: domain and code, however separated; a line without a code is named", () => {
+  assert.deepEqual(domains.parseTransferLines("a.com  Xy7#kd 92\n\nb.it,aB3$mn55\r\n"), [{ domain: "a.com", action: "transfer", authCode: "Xy7#kd 92" }, { domain: "b.it", action: "transfer", authCode: "aB3$mn55" }]);
+  assert.throws(() => domains.parseTransferLines("a.com code\nlonely.com"), /lonely\.com/);
 });
