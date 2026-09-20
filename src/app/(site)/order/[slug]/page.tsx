@@ -1,4 +1,5 @@
 import { notFound, redirect } from "next/navigation";
+import { OptionFields } from "@/components/option-fields";
 import { and, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { ButtonLink, Card, Field, Input } from "@/components/ui";
@@ -87,6 +88,7 @@ export default async function OrderPage({ params }: { params: Promise<{ slug: st
             {billing.taxRate > 0 && (
               <p className="text-xs text-muted">{t("Prices exclude {tax} ({rate}%).", { tax: billing.taxName, rate: billing.taxRate / 100 })}</p>
             )}
+            <OptionFields options={product.options} money={(c) => formatMoney(c, billing.currency, locale)} perMonth={t("/mo")} />
             <Field label={t("Discount code")}><Input name="coupon" maxLength={40} autoComplete="off" className="uppercase" /></Field>
             <SubmitButton className="w-full">{t("Place order")}</SubmitButton>
           </ActionForm>

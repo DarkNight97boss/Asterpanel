@@ -5,6 +5,7 @@ import { makeT } from "@/i18n/shared";
 import type { BillingCycle } from "@/db/schema";
 import { getProvisioningModule, type ProvisionContext } from "@/modules/provisioning";
 import { audit } from "./audit";
+import { OptionError, resolveOptions } from "./product-options";
 import { taxFor } from "./tax";
 import { emitEvent } from "./webhooks";
 import { decryptJson } from "./crypto";
@@ -51,6 +52,8 @@ export async function placeOrder(input: {
   ip?: string;
   /** Ids of the product's add-ons chosen with the order. */
   addonIds?: string[];
+  /** Configurable options picked with the order: option id → choice id, or a quantity. */
+  options?: Record<string, string>;
   /** Discount code for the first invoice. An unusable code refuses the order instead of silently charging full price. */
   coupon?: string;
   /** Price decided by the caller instead of the catalogue (domains: per-TLD register / renew prices). */
@@ -68,8 +71,15 @@ export async function placeOrder(input: {
   const listPrice = input.pricing?.first ?? product.pricing[input.cycle];
   if (typeof listPrice !== "number") throw new BillingError("Billing cycle not available for this product");
   // Add-ons are priced per month and billed with the plan's cycle.
-  const addons = input.pricing ? [] : product.addons.filter((a) => input.addonIds?.includes(a.id));
-  if (addons.length !== new Set(input.addonIds ?? []).size && !input.pricing) throw new BillingError("An add-on is no longer available");
+  const fixed = input.pricing ? [] : product.addons.filter((a) => input.addonIds?.includes(a.id));
+  if (fixed.length !== new Set(input.addonIds ?? []).size && !input.pricing) throw new BillingError("An add-on is no longer available");
+  let configured: typeof fixed = [];
+  try {
+    configured = input.pricing ? [] : resolveOptions(product.options, input.options ?? {});
+  } catch (err) {
+    throw new BillingError(err instanceof OptionError ? err.message : "Invalid options");
+  }
+  const addons = [...fixed, ...configured];
   const months = CYCLE_MONTHS[input.cycle] || 1;
   const addonsPrice = addons.reduce((sum, a) => sum + a.monthly * months, 0);
   // A company's own price list (resellers, agencies) applies to catalogue prices, never to caller-decided ones (domains).

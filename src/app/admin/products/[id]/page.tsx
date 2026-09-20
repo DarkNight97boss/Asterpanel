@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import { formatOptionLines } from "@/lib/product-options";
 import { asc, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
 import { Card, CardHeader, Checkbox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
@@ -50,6 +51,9 @@ export default async function ProductEditor({ params }: { params: Promise<{ id: 
             </Field>
             <Field label={t("Add-ons")} hint={t("One per line: Name | price per month | extra RAM in MB | extra disk in GB (the last two optional).")} className="sm:col-span-2">
               <Textarea name="addons" rows={3} className="font-mono text-xs" defaultValue={(product?.addons ?? []).map((a) => `${a.name} | ${(a.monthly / 100).toFixed(2)} | ${a.memoryMb ?? 0} | ${a.diskGb ?? 0}`).join("\n")} placeholder={"Extra 10 GB disk | 2.00 | 0 | 10\nExtra 1 GB RAM | 4.00 | 1024 | 0"} />
+            </Field>
+            <Field label={t("Configurable options")} hint={t("One per line. choice | Name | Label = price ; Label = price / extra RAM MB / extra disk GB — or — quantity | Name | unit price | min | max | RAM MB per unit | disk GB per unit. Prices are per month.")} className="sm:col-span-2">
+              <Textarea name="options" rows={3} className="font-mono text-xs" spellCheck={false} defaultValue={formatOptionLines(product?.options ?? [])} placeholder={"choice | Backups kept | 7 days = 0 ; 30 days = 3.00 ; 90 days = 8.00\nquantity | Extra disk (10 GB) | 2.00 | 0 | 20 | 0 | 10"} />
             </Field>
             <Field label={t("Sort order")}><Input name="position" type="number" defaultValue={product?.position ?? 0} /></Field>
             <div className="flex flex-wrap items-end gap-x-6 gap-y-2 pb-2">

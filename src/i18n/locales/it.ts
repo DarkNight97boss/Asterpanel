@@ -2050,6 +2050,9 @@ const it: Record<string, string> = {
   "Enter the support mailbox, such as support@example.com": "Inserisci la casella del supporto, ad esempio support@example.com",
   "Attach files (up to 5, 5 MB each)": "Allega file (fino a 5, 5 MB ciascuno)",
   "by email": "via email",
+  "Configurable options": "Opzioni configurabili",
+  "One per line. choice | Name | Label = price ; Label = price / extra RAM MB / extra disk GB — or — quantity | Name | unit price | min | max | RAM MB per unit | disk GB per unit. Prices are per month.": "Una per riga. choice | Nome | Etichetta = prezzo ; Etichetta = prezzo / RAM extra MB / disco extra GB — oppure — quantity | Nome | prezzo unitario | min | max | RAM MB per unità | disco GB per unità. I prezzi sono al mese.",
+  "Invalid options": "Opzioni non valide",
 };
 
 export default it;

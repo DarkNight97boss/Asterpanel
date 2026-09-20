@@ -259,6 +259,12 @@ export type Pricing = Partial<Record<BillingCycle, number>> & { setup?: number }
 
 export type ProductAddon = { id: string; name: string; monthly: number; memoryMb?: number; diskGb?: number };
 
+type OptionEffect = { monthly: number; memoryMb?: number; diskGb?: number };
+/** Something the customer configures when ordering: one of several priced choices, or a quantity priced per unit. */
+export type ProductOption =
+  | { id: string; name: string; kind: "choice"; choices: ({ id: string; name: string } & OptionEffect)[] }
+  | { id: string; name: string; kind: "quantity"; unit: OptionEffect; min: number; max: number };
+
 export const products = pgTable(
   "products",
   {
@@ -279,6 +285,7 @@ export const products = pgTable(
     moduleConfig: jsonb("module_config").$type<Record<string, string>>().notNull().default({}),
     /** Optional extras sold with the plan, priced per month; resource extras are added to the plan's limits. */
     addons: jsonb("addons").$type<ProductAddon[]>().notNull().default([]),
+    options: jsonb("options").$type<ProductOption[]>().notNull().default([]),
     serverId: uuid("server_id").references(() => servers.id, { onDelete: "set null" }),
     featured: boolean("featured").notNull().default(false),
     hidden: boolean("hidden").notNull().default(false),

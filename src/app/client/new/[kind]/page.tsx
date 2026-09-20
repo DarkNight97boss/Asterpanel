@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { and, asc, eq, ne } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { OptionFields } from "@/components/option-fields";
 import { Alert, Button, Card, CardHeader, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
@@ -85,6 +86,13 @@ export default async function NewWorkload({ params, searchParams }: { params: Pr
               })}
               <input type="hidden" name="cycle" value="monthly" />
             </div>
+            {/* Outside the plan cards (a label cannot hold other labels): each plan's options show only while that plan is ticked. */}
+            {plans.filter((p) => p.options.length > 0).map((p) => (
+              <div key={p.id} className={`plan-options-${p.id} hidden gap-4 border-t border-border p-5 sm:grid-cols-2`}>
+                <style>{`form:has(input[name="productId"][value="${p.id}"]:checked) .plan-options-${p.id}{display:grid}`}</style>
+                <OptionFields options={p.options} prefix={`${p.id}:`} money={(c) => formatMoney(c, billing.currency, locale)} perMonth={t(CYCLE_SUFFIX.monthly)} />
+              </div>
+            ))}
           </Card>
 
           <Card>
