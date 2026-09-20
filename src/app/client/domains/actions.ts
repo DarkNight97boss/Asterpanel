@@ -9,6 +9,7 @@ import { getDb, schema } from "@/db";
 import { requireAccount } from "@/lib/account";
 import { BillingError } from "@/lib/billing";
 import { domainAuthCode, DomainError, orderDomains, parseTransferLines, setDomainLock, setDomainNameservers, setDomainPrivacy, syncDomain, updateDomainContact } from "@/lib/domains";
+import { addDomains, CartError } from "@/lib/cart";
 import { rateLimit } from "@/lib/rate-limit";
 import { requestMeta } from "@/lib/request";
 
@@ -108,4 +109,18 @@ export async function refresh(_: ActionState, form: FormData): Promise<ActionSta
     return { error: "The registrar could not be reached" };
   }
   return { ok: "Updated" };
+}
+
+/** Ticked names of a search go to the cart, to be paid together with hosting. The registrant is asked at checkout. */
+export async function addTickedToCart(form: FormData) {
+  const { account } = await requireAccount("manage");
+  const names = form.getAll("domain").map(String).filter(Boolean).slice(0, 20);
+  let failed = "";
+  try {
+    await addDomains(account.id, account.ownerUserId, names.map((domain) => ({ domain, action: "register" as const })));
+  } catch (err) {
+    if (!(err instanceof CartError)) throw err;
+    failed = err.message;
+  }
+  redirect(`/client/cart${failed ? `?error=${encodeURIComponent(failed)}` : ""}`);
 }

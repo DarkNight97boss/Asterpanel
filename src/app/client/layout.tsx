@@ -1,4 +1,5 @@
 import { PanelShell } from "@/components/panel-shell";
+import { cartCount } from "@/lib/cart";
 import { getT } from "@/i18n";
 import { getAccount, roleCan } from "@/lib/account";
 import { endImpersonation } from "@/app/client/(company)/team/actions";
@@ -15,6 +16,7 @@ export default async function ClientLayout({ children }: { children: React.React
   const acting = await getImpersonator();
   const alerts = await accountAlerts(account.id, account.role, undefined, account.only);
   const can = (p: Parameters<typeof roleCan>[1]) => roleCan(account.role, p);
+  const inCart = await cartCount(account.id);
   return (
     <PanelShell
       home="/client"
@@ -29,6 +31,7 @@ export default async function ClientLayout({ children }: { children: React.React
           title: t("Company"),
           items: [
             { href: can("billing") ? "/client/services" : "/client/team", label: t("Company settings"), icon: "⚙" },
+            ...(inCart > 0 ? [{ href: "/client/cart", label: `${t("Cart")} (${inCart})`, icon: "🛒" }] : []),
             { href: "/client/tickets", label: t("Support"), icon: "✉" },
             { href: "/client/profile", label: t("Profile"), icon: "☺" },
           ],

@@ -5,7 +5,7 @@ import { Alert, Card, CardHeader, Field, Input, PageHeader, Select, Textarea } f
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
-import { countryOptions, guessCountry } from "@/lib/countries";
+import { RegistrantFields } from "@/components/registrant-fields";
 import { firstYearPrice, MAX_BASKET, MAX_YEARS, splitDomain } from "@/lib/domains";
 import { formatMoney } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
@@ -30,7 +30,6 @@ export default async function OrderDomain({ searchParams }: { searchParams: Prom
   const renew = wanted.reduce((sum, p) => sum + tldOf(p.tld).renewPrice, 0);
   const needsIt = bulk || wanted.some((p) => p.tld === "it");
   const money = (c: number) => formatMoney(c, billing.currency, locale);
-  const isCompany = co?.orgType === "company";
 
   return (
     <>
@@ -70,24 +69,7 @@ export default async function OrderDomain({ searchParams }: { searchParams: Prom
                 </Select>
               </Field>
             )}
-            <div className="grid gap-4 sm:grid-cols-2">
-              <Field label={t("First name")}><Input name="firstName" required defaultValue={user.firstName} /></Field>
-              <Field label={t("Last name")}><Input name="lastName" required defaultValue={user.lastName} /></Field>
-              <Field label={t("Organization")} hint={t("Leave empty for a private person.")}><Input name="organization" defaultValue={isCompany ? co.billingName || co.name : ""} /></Field>
-              <Field label={t("Tax code")} hint={needsIt ? t("Required for .it: codice fiscale, or VAT number for organizations.") : undefined}><Input name="taxCode" required={needsIt && !bulk} defaultValue={(isCompany ? co?.vatId : co?.taxCode)?.replace(/[^a-z0-9]/gi, "") ?? ""} /></Field>
-              <Field label={t("Email")}><Input name="email" type="email" required defaultValue={user.email} /></Field>
-              <Field label={t("Phone")} hint="+39 06 1234567"><Input name="phone" type="tel" required defaultValue={user.phone} /></Field>
-              <Field label={t("Address")} className="sm:col-span-2"><Input name="address" required defaultValue={co?.address1 || user.address} /></Field>
-              <Field label={t("City")}><Input name="city" required defaultValue={co?.city || user.city} /></Field>
-              <Field label={t("ZIP / Postal code")}><Input name="zip" required defaultValue={co?.zip || user.zip} /></Field>
-              <Field label={t("State / Province")}><Input name="state" defaultValue={co?.state || user.state} /></Field>
-              <Field label={t("Country")}>
-                <Select name="country" required defaultValue={guessCountry(co?.country || user.country, locale)}>
-                  <option value="">—</option>
-                  {countryOptions(locale).map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
-                </Select>
-              </Field>
-            </div>
+            <RegistrantFields user={user} company={co} locale={locale} t={t} requireTaxCode={needsIt && !bulk} itHint={needsIt} />
             <SubmitButton>{t("Continue to payment")}</SubmitButton>
           </ActionForm>
         </div>

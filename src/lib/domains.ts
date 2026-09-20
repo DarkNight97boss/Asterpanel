@@ -180,7 +180,7 @@ export type BasketItem = { domain: string; action: "register" | "transfer"; auth
  * Everything is checked before anything is written: one bad line refuses the
  * whole basket, naming the domain, instead of leaving a half-made order.
  */
-export async function orderDomains(input: { clientId: string; companyId: string | null; items: BasketItem[]; contact: Record<string, unknown>; ip?: string }): Promise<{ invoiceId: string; domainIds: string[] }> {
+export async function prepareDomains(input: { clientId: string; companyId: string | null; items: BasketItem[]; contact: Record<string, unknown>; /** Showing a cart: prices only, the registrars are not asked again. */ offline?: boolean }): Promise<{ lines: import("./billing").OrderLine[]; attach: (serviceIds: string[]) => Promise<string[]> }> {
   if (!input.items.length) throw new DomainError("Choose at least one domain");
   if (input.items.length > MAX_BASKET) throw new DomainError(`At most ${MAX_BASKET} domains per order`);
   const db = await getDb();
@@ -202,7 +202,7 @@ export async function orderDomains(input: { clientId: string; companyId: string 
     lines.push({ name: parts.name, tld, contact, authCode, existing, years, action: item.action });
   }
   // Availability, one call per registrar.
-  for (const registrar of new Set(lines.filter((l) => l.action === "register").map((l) => l.tld.registrar))) {
+  for (const registrar of input.offline ? [] : new Set(lines.filter((l) => l.action === "register").map((l) => l.tld.registrar))) {
     const names = lines.filter((l) => l.action === "register" && l.tld.registrar === registrar).map((l) => l.name);
     const { mod, creds } = await account(registrar);
     const hits = await mod.check(creds, names, http).catch((err) => {
@@ -211,32 +211,41 @@ export async function orderDomains(input: { clientId: string; companyId: string 
     const gone = names.find((n) => !hits.find((h) => h.domain === n)?.available);
     if (gone) throw new DomainError(`${gone}: this domain is no longer available`);
   }
-  for (const registrar of new Set(lines.filter((l) => l.action === "transfer").map((l) => l.tld.registrar))) await account(registrar);
+  for (const registrar of input.offline ? [] : new Set(lines.filter((l) => l.action === "transfer").map((l) => l.tld.registrar))) await account(registrar);
 
-  const { placeBundle } = await import("./billing");
-  const { invoiceId, serviceIds } = await placeBundle({
-    clientId: input.clientId,
-    companyId: input.companyId,
-    productId: await domainProduct(),
-    cycle: "annually",
-    ip: input.ip,
-    lines: lines.map((l) => ({
-      domain: l.name,
-      // The promotion covers the first year; further years are at the renewal price.
-      pricing: { first: l.action === "register" ? firstYearPrice(l.tld) + (l.years - 1) * l.tld.renewPrice : l.tld.transferPrice, recurring: l.tld.renewPrice, label: l.action === "register" ? "Domain registration" : "Domain transfer", period: l.years > 1 ? `${l.years} years` : undefined },
-      // The transfer code is a secret of the customer's: encrypted until used.
-      request: { action: l.action, years: l.years, authCode: l.authCode ? encryptJson(l.authCode) : "" },
-    })),
-  });
-  const domainIds: string[] = [];
-  for (const [i, l] of lines.entries()) {
-    const row = { companyId: input.companyId, clientId: input.clientId, serviceId: serviceIds[i], registrar: l.tld.registrar, status: "pending" as const, statusMessage: "", contact: l.contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
-    const [domain] = l.existing
-      ? await db.update(schema.domainNames).set(row).where(eq(schema.domainNames.id, l.existing.id)).returning({ id: schema.domainNames.id })
-      : await db.insert(schema.domainNames).values({ ...row, name: l.name }).returning({ id: schema.domainNames.id });
-    domainIds.push(domain.id);
-  }
-  return { invoiceId, domainIds };
+  const productId = await domainProduct();
+  const orderLines = lines.map((l) => ({
+    productId,
+    cycle: "annually" as const,
+    domain: l.name,
+    // The promotion covers the first year; further years are at the renewal price.
+    pricing: { first: l.action === "register" ? firstYearPrice(l.tld) + (l.years - 1) * l.tld.renewPrice : l.tld.transferPrice, recurring: l.tld.renewPrice, label: l.action === "register" ? "Domain registration" : "Domain transfer", period: l.years > 1 ? `${l.years} years` : undefined },
+    // The transfer code is a secret of the customer's: encrypted until used.
+    request: { action: l.action, years: l.years, authCode: l.authCode ? encryptJson(l.authCode) : "" },
+  }));
+  /** Once the order exists: the domain rows, one per service, in the same order as the lines. */
+  const attach = async (serviceIds: string[]) => {
+    const domainIds: string[] = [];
+    for (const [i, l] of lines.entries()) {
+      const row = { companyId: input.companyId, clientId: input.clientId, serviceId: serviceIds[i], registrar: l.tld.registrar, status: "pending" as const, statusMessage: "", contact: l.contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
+      const [domain] = l.existing
+        ? await db.update(schema.domainNames).set(row).where(eq(schema.domainNames.id, l.existing.id)).returning({ id: schema.domainNames.id })
+        : await db.insert(schema.domainNames).values({ ...row, name: l.name }).returning({ id: schema.domainNames.id });
+      domainIds.push(domain.id);
+    }
+    return domainIds;
+  };
+  return { lines: orderLines, attach };
+}
+
+/**
+ * One or more domains on a single invoice, all for the same registrant.
+ */
+export async function orderDomains(input: { clientId: string; companyId: string | null; items: BasketItem[]; contact: Record<string, unknown>; ip?: string }): Promise<{ invoiceId: string; domainIds: string[] }> {
+  const { lines, attach } = await prepareDomains(input);
+  const { placeLines } = await import("./billing");
+  const { invoiceId, serviceIds } = await placeLines({ clientId: input.clientId, companyId: input.companyId, ip: input.ip, lines });
+  return { invoiceId, domainIds: await attach(serviceIds) };
 }
 
 export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string; years?: number }): Promise<{ invoiceId: string; domainId: string }> {
