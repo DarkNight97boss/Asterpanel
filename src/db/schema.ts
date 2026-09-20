@@ -384,6 +384,8 @@ export const invoices = pgTable(
     /** Automatic charges tried on a saved card, and when the last one was. */
     chargeAttempts: integer("charge_attempts").notNull().default(0),
     lastChargeAt: timestamp("last_charge_at", { withTimezone: true }),
+    /** A bank debit (SEPA) was started and has not settled yet: the payment intent. Nothing else is charged meanwhile. */
+    chargePendingRef: text("charge_pending_ref").notNull().default(""),
     lastChargeError: text("last_charge_error").notNull().default(""),
     /** Electronic invoice: which intermediary has it, under what id, and what the SDI answered. */
     sdiProvider: text("sdi_provider").notNull().default(""),

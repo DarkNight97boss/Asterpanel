@@ -25,5 +25,6 @@ export async function stripeCall<T>(method: "GET" | "POST", path: string, params
   return json;
 }
 
-export type StripeCard = { id: string; card?: { brand: string; last4: string; exp_month: number; exp_year: number } };
+/** A saved payment method: a card, or a SEPA direct debit mandate. */
+export type StripeCard = { id: string; card?: { brand: string; last4: string; exp_month: number; exp_year: number }; sepa_debit?: { last4: string; country?: string } };
 export type StripeIntent = { id: string; status: string; amount_received: number; amount: number; currency: string; customer: string | null; metadata?: { invoice_id?: string }; payment_method: string | StripeCard | null; last_payment_error?: { message?: string } };

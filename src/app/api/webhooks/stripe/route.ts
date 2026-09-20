@@ -1,5 +1,5 @@
 import { recordPayment } from "@/lib/billing";
-import { rememberStripeCard } from "@/lib/payment-methods";
+import { debitFailed, rememberStripeCard } from "@/lib/payment-methods";
 import { getSettings } from "@/lib/settings";
 import { verifyStripeSignature } from "@/modules/gateways";
 
@@ -38,6 +38,11 @@ export async function POST(request: Request) {
     const intent = event.data.object as unknown as { id: string; amount_received: number; metadata?: { invoice_id?: string } };
     const id = intent.metadata?.invoice_id;
     if (id && /^[0-9a-f-]{36}$/i.test(id)) await recordPayment({ invoiceId: id, gateway: "stripe", externalId: intent.id, amount: intent.amount_received });
+  }
+  // A SEPA debit refused by the bank, days after it was started.
+  if (event.type === "payment_intent.payment_failed") {
+    const intent = event.data.object as unknown as { id: string; last_payment_error?: { message?: string } };
+    if (/^pi_\w+$/.test(intent.id)) await debitFailed(intent.id, intent.last_payment_error?.message ?? "");
   }
   return Response.json({ received: true });
 }

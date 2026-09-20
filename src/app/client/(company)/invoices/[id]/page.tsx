@@ -33,7 +33,9 @@ export default async function ClientInvoice({
       {invoice.status === "unpaid" && (
         <Card className="h-fit p-5">
           <h2 className="mb-3 font-semibold">{t("Pay this invoice")}</h2>
-          {gateways.length ? (
+          {invoice.chargePendingRef ? (
+            <p className="text-sm text-muted">{t("A direct debit for this invoice is on its way to your bank. It can take a few working days: there is nothing to pay in the meantime.")}</p>
+          ) : gateways.length ? (
             <div className="space-y-3">
               {gateways.map((g) => (
                 <ActionForm key={g.id} action={payInvoice}>

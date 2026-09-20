@@ -27,6 +27,7 @@ export async function payInvoice(_: ActionState, form: FormData): Promise<Action
     where: and(eq(schema.invoices.id, String(form.get("invoiceId"))), eq(schema.invoices.companyId, user.id)),
   });
   if (!invoice || invoice.status !== "unpaid") return { error: "This invoice cannot be paid" };
+  if (invoice.chargePendingRef) return { error: "A direct debit for this invoice is already on its way to your bank" };
 
   const gateway = (await enabledGateways()).find((g) => g.id === form.get("gateway"));
   if (!gateway) return { error: "Payment method not available" };

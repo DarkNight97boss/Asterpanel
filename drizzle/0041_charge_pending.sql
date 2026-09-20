@@ -1,0 +1,1 @@
+ALTER TABLE "invoices" ADD COLUMN "charge_pending_ref" text DEFAULT '' NOT NULL;
