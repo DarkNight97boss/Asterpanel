@@ -25,6 +25,8 @@ export default async function GeneralSettings() {
             <Field label={t("Site URL")} hint={t("Used for links in emails.")} className="sm:col-span-2">
               <Input name="siteUrl" type="url" defaultValue={s.siteUrl} placeholder="https://example.com" />
             </Field>
+            <Field label={t("Help centre address")} hint={t("Pages under it are searchable, suggested while a ticket is written, and voted on. Example: help/")}><Input name="helpPrefix" defaultValue={s.helpPrefix} placeholder="help/" /></Field>
+            <Field label={t("Announcements address")} hint={t("Pages under it are shown to customers on their dashboard. Example: news/")}><Input name="newsPrefix" defaultValue={s.newsPrefix} placeholder="news/" /></Field>
             <Field label={t("Support email")}><Input name="supportEmail" type="email" defaultValue={s.supportEmail} /></Field>
             <Field label={t("Company name")}><Input name="companyName" defaultValue={s.companyName} /></Field>
             <Field label={t("Company VAT ID")}><Input name="companyVatId" defaultValue={s.companyVatId} /></Field>

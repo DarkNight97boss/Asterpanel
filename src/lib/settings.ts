@@ -25,6 +25,10 @@ export const settingsSchemas = {
     allowRegistration: z.boolean().default(true),
     /** Public origin used for links in emails (no request to read it from). */
     siteUrl: z.string().default(""),
+    /** Pages under this address are the help centre: searchable, suggested while a ticket is written, voted on. Empty = none. */
+    helpPrefix: z.string().max(60).regex(/^([a-z0-9-]+\/)*$/).default("help/"),
+    /** Pages under this address are announcements, shown to customers on their dashboard. Empty = none. */
+    newsPrefix: z.string().max(60).regex(/^([a-z0-9-]+\/)*$/).default("news/"),
   }),
   theme: z.object({
     logoUrl: z.string().default(""),

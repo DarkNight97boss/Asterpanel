@@ -449,7 +449,7 @@ export async function savePage(_: ActionState, form: FormData): Promise<ActionSt
     })
     .safeParse(fields(form));
   if (!parsed.success) return { error: firstIssue(parsed.error) };
-  if (/^(admin|client|api|login|register|install|order|forgot-password|reset-password|invite|agent)(\/|$)/.test(parsed.data.slug)) return { error: "This slug is reserved" };
+  if (/^(admin|client|api|login|register|install|order|search|status|forgot-password|reset-password|invite|agent)(\/|$)/.test(parsed.data.slug)) return { error: "This slug is reserved" };
 
   let blocks: unknown;
   try {

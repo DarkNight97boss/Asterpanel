@@ -7,6 +7,7 @@ import { WORKLOAD_TYPES } from "@/db/schema";
 import { getLocale, getT } from "@/i18n";
 import { mayAccess, requireAccount } from "@/lib/account";
 import { formatDate, formatMoney } from "@/lib/format";
+import { listPagesByPrefix } from "@/lib/pages";
 import { getSettings } from "@/lib/settings";
 import { WORKLOAD_LABEL } from "@/platform/ui";
 
@@ -40,6 +41,8 @@ export default async function ClientDashboard() {
   ]);
   const myIds = (await db.select({ id: schema.workloads.id, name: schema.workloads.name, parentId: schema.workloads.parentId }).from(schema.workloads).where(eq(schema.workloads.companyId, user.id))).filter((w) => mayAccess(user, w));
   const names = new Map(myIds.map((w) => [w.id, w.name]));
+  const { newsPrefix } = await getSettings("general");
+  const news = newsPrefix ? await listPagesByPrefix(newsPrefix, 3) : [];
   const [activity, invoices, answered] = await Promise.all([
     myIds.length
       ? db.select().from(schema.jobs).where(and(inArray(schema.jobs.workloadId, myIds.map((w) => w.id)), ne(schema.jobs.type, "workload.logs"))).orderBy(desc(schema.jobs.createdAt)).limit(6)
@@ -83,6 +86,20 @@ export default async function ClientDashboard() {
           );
         })}
       </div>
+      {news.length > 0 && (
+        <Card className="mb-8">
+          <CardHeader title={t("Announcements")} />
+          <ul className="divide-y divide-border">
+            {news.map((n) => (
+              <li key={n.slug} className="px-5 py-3 text-sm">
+                <a href={`/${n.slug}`} target="_blank" rel="noopener" className="font-medium hover:text-link">{n.title}</a>
+                <span className="ml-2 text-xs text-muted">{formatDate(n.createdAt, locale)}</span>
+                {n.excerpt && <p className="mt-0.5 text-body">{n.excerpt}</p>}
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
       <div className="mb-8 grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader title={t("Recent activity")} />
