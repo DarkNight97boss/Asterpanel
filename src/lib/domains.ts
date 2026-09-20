@@ -162,7 +162,7 @@ export async function suggestDomains(query: string): Promise<SearchHit[]> {
 // ─── Ordering ────────────────────────────────────────────────────────────────
 
 /** The hidden catalogue entry every domain service hangs off. */
-async function domainProduct(): Promise<string> {
+export async function domainProduct(): Promise<string> {
   const db = await getDb();
   const [existing] = await db.select({ id: schema.products.id }).from(schema.products).where(eq(schema.products.slug, "domain-name"));
   if (existing) return existing.id;

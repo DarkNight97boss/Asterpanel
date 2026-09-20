@@ -188,6 +188,13 @@ export const settingsSchemas = {
     /** Company name written on letters of authorisation. */
     companyName: z.string().default(""),
   }),
+  /** Encrypted: access to the WHMCS being imported from, and what the last run found. */
+  whmcs: z.object({
+    url: z.string().default(""),
+    identifier: z.string().default(""),
+    secret: z.string().default(""),
+    lastReport: z.string().default(""),
+  }),
   /** Hours within which staff should answer a waiting ticket, by priority. */
   support: z.object({ slaLow: z.number().int().min(1).max(720).default(48), slaMedium: z.number().int().min(1).max(720).default(24), slaHigh: z.number().int().min(1).max(720).default(4) }),
   registrars: z.object({
@@ -217,7 +224,7 @@ export const settingsSchemas = {
   }),
 } as const;
 
-const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud", "github", "ipxo"]);
+const ENCRYPTED: ReadonlySet<SettingsGroup> = new Set(["gateways", "mail", "platform", "backups", "registrars", "sdi", "cloud", "github", "ipxo", "whmcs"]);
 
 export type SettingsGroup = keyof typeof settingsSchemas;
 export type Settings<G extends SettingsGroup> = z.infer<(typeof settingsSchemas)[G]>;
