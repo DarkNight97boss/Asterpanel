@@ -211,6 +211,9 @@ export const pages = pgTable(
     seoDescription: text("seo_description").notNull().default(""),
     /** Shown where pages are listed (blog, help centre). */
     excerpt: text("excerpt").notNull().default(""),
+    /** Help articles: answers to "Was this helpful?". */
+    helpfulYes: integer("helpful_yes").notNull().default(0),
+    helpfulNo: integer("helpful_no").notNull().default(0),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },

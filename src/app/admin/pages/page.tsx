@@ -29,7 +29,7 @@ export default async function Pages() {
             {pages.map((p) => (
               <tr key={p.id}>
                 <Td><Link href={`/admin/pages/${p.id}`} className="font-medium hover:text-link">{p.title}</Link></Td>
-                <Td className="font-mono text-xs">/{p.slug}</Td>
+                <Td className="font-mono text-xs">/{p.slug}{p.helpfulYes + p.helpfulNo > 0 && <span className="ml-2 font-sans text-muted" title={t("Was this article helpful?")}>👍 {p.helpfulYes} · 👎 {p.helpfulNo}</span>}</Td>
                 <Td>{formatDateTime(p.updatedAt, locale)}</Td>
                 <Td><StatusBadge status={p.status} label={t(STATUS_LABEL[p.status])} /></Td>
               </tr>

@@ -1,4 +1,5 @@
 import { ActionForm, SubmitButton } from "@/components/action-form";
+import { SuggestedArticles } from "@/components/help-widgets";
 import { Card, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { getT } from "@/i18n";
 import { openTicket } from "../../actions";
@@ -13,6 +14,7 @@ export default async function NewTicket() {
           <Field label={t("Subject")}>
             <Input name="subject" required minLength={3} maxLength={200} />
           </Field>
+          <SuggestedArticles inputName="subject" heading={t("These articles may already have the answer")} />
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label={t("Department")}>
               <Select name="department" defaultValue="support">

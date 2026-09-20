@@ -2068,6 +2068,17 @@ const it: Record<string, string> = {
   "0 = never. Added once per invoice.": "0 = mai. Aggiunta una sola volta per fattura.",
   "Late fee: fixed amount": "Mora: importo fisso",
   "Late fee: % of the invoice": "Mora: % della fattura",
+  "Search the help centre": "Cerca nel centro assistenza",
+  "What do you need help with?": "Di cosa hai bisogno?",
+  "Nothing found. Try other words, or open a ticket: we are glad to help.": "Nessun risultato. Prova con altre parole, oppure apri un ticket: ti aiutiamo volentieri.",
+  "Was this article helpful?": "Questo articolo ti è stato utile?",
+  "Thanks for letting us know.": "Grazie per avercelo fatto sapere.",
+  "These articles may already have the answer": "Questi articoli potrebbero già avere la risposta",
+  "Announcements": "Annunci",
+  "Help centre address": "Indirizzo del centro assistenza",
+  "Pages under it are searchable, suggested while a ticket is written, and voted on. Example: help/": "Le pagine sotto questo indirizzo sono ricercabili, suggerite mentre si scrive un ticket e votabili. Esempio: help/",
+  "Announcements address": "Indirizzo degli annunci",
+  "Pages under it are shown to customers on their dashboard. Example: news/": "Le pagine sotto questo indirizzo sono mostrate ai clienti nella dashboard. Esempio: news/",
 };
 
 export default it;

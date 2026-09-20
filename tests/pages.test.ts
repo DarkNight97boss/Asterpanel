@@ -22,3 +22,34 @@ test("page lists: only published pages under a real prefix, newest first", async
   assert.deepEqual((await listPagesByPrefix("blog/", 1)).map((p) => p.title), ["Second"]);
   for (const bad of ["", "/", "blog", "%", "blog/%", "../admin/", "b_g/"]) assert.deepEqual(await listPagesByPrefix(bad), [], JSON.stringify(bad));
 });
+
+test("help search: every word must match, titles outrank bodies, drafts and other sections stay out", async () => {
+  const dbm = await import("../src/db");
+  const pages = await import("../src/lib/pages");
+  const db = await dbm.getDb();
+  const text = (t: string) => [{ id: "b", type: "text", props: { body: t } }];
+  await db.insert(dbm.schema.pages).values([
+    { slug: "help/email-setup", title: "Set up email on your phone", status: "published", excerpt: "IMAP and SMTP settings", blocks: text("Use port 993.") },
+    { slug: "help/dns", title: "Point your domain", status: "published", blocks: text("Create an A record. For email see the MX record.") },
+    { slug: "help/draft", title: "Email secrets", status: "draft", blocks: [] },
+    { slug: "blog/email", title: "Email news", status: "published", blocks: [] },
+  ]);
+  assert.deepEqual((await pages.searchPages("help/", "email")).map((p) => p.slug), ["help/email-setup", "help/dns"]);
+  assert.deepEqual((await pages.searchPages("help/", "EMAIL record!")).map((p) => p.slug), ["help/dns"]);
+  assert.deepEqual(await pages.searchPages("help/", "to a of"), [], "only short words: nothing to search");
+  assert.deepEqual(await pages.searchPages("", "email"), [], "no section, no search");
+  assert.deepEqual(await pages.searchPages("help/", "100% _wild_"), []);
+  assert.deepEqual(pages.searchTerms("Il mio sito è lento, lento!"), ["mio", "sito", "lento"]);
+});
+
+test("votes: counted on published help articles only", async () => {
+  const dbm = await import("../src/db");
+  const pages = await import("../src/lib/pages");
+  const { eq } = await import("drizzle-orm");
+  assert.equal(await pages.votePage("help/", "help/dns", true), true);
+  assert.equal(await pages.votePage("help/", "help/dns", false), true);
+  assert.equal(await pages.votePage("help/", "help/draft", true), false);
+  assert.equal(await pages.votePage("help/", "blog/email", true), false);
+  const [row] = await (await dbm.getDb()).select().from(dbm.schema.pages).where(eq(dbm.schema.pages.slug, "help/dns"));
+  assert.deepEqual([row.helpfulYes, row.helpfulNo], [1, 1]);
+});
