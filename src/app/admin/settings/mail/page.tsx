@@ -6,11 +6,13 @@ import { getLocale, getT } from "@/i18n";
 import { requireAdmin } from "@/lib/auth";
 import { formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
-import { saveMail, sendTestEmail } from "../../actions";
+import { baseUrl } from "@/lib/url";
+import { saveInboundMail, saveMail, sendTestEmail } from "../../actions";
 
 export default async function MailSettings() {
   const admin = await requireAdmin();
   const db = await getDb();
+  const origin = await baseUrl();
   const [t, locale, s, general, log] = await Promise.all([
     getT(),
     getLocale(),
@@ -61,6 +63,24 @@ export default async function MailSettings() {
               </div>
               <SubmitButton>{t("Save")}</SubmitButton>
             </ActionForm>
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title={t("Tickets by email")} description={t("Customers answer the notification emails, or write to the support mailbox, and it lands on the ticket. Only messages from addresses of active customers (or of support staff, for replies) are accepted.")} />
+          <div className="space-y-4 p-5">
+            <ActionForm action={saveInboundMail}>
+              <Checkbox name="inboundEnabled" defaultChecked={s.inboundEnabled} label={t("Accept tickets and replies by email")} />
+              <Field label={t("Support mailbox")} className="max-w-md"><Input name="inboundAddress" type="email" defaultValue={s.inboundAddress} placeholder="support@example.com" /></Field>
+              <Checkbox name="inboundPlus" defaultChecked={s.inboundPlus} label={t("The mailbox accepts plus addresses (support+anything@…): replies are matched by a signed address instead of the subject")} />
+              <div className="flex flex-wrap gap-3"><SubmitButton>{t("Save")}</SubmitButton>{s.inboundToken && <SubmitButton name="rotate" value="1" variant="ghost">{t("New token")}</SubmitButton>}</div>
+            </ActionForm>
+            {s.inboundEnabled && s.inboundToken && (
+              <div className="space-y-2 text-sm">
+                <p className="text-muted">{t("Have your mail server hand each message for that mailbox to this address, as the raw message, with the token. With Postfix or Exim, a pipe like this is enough:")}</p>
+                <pre className="overflow-x-auto rounded-theme border border-border bg-paper p-3 text-xs select-all">{`curl -sS --max-time 60 --data-binary @- -H "Content-Type: message/rfc822" -H "Authorization: Bearer ${s.inboundToken}" ${origin}/api/inbound/mail`}</pre>
+                <p className="text-xs text-muted">{t("Mailgun routes (field body-mime) and SendGrid Inbound Parse with the raw option (field email) work too, if they can send the Authorization header.")}</p>
+              </div>
+            )}
           </div>
         </Card>
 

@@ -8,6 +8,7 @@ import { loadInvoice } from "./invoices";
 import { renderMail, type MailContent } from "./mail/layout";
 import { composeTemplate, templateDef } from "./mail/templates";
 import { mailConfigured, sendMail, type Attachment } from "./mail/transport";
+import { ticketReplyAddress } from "./ticket-address";
 import { getSettings, type Settings } from "./settings";
 
 /**
@@ -53,6 +54,7 @@ type Ctx = {
     structure?: Structure;
     attachments?: Attachment[];
     logAs?: string;
+    replyTo?: string;
   }) => Promise<SendResult>;
 };
 
@@ -76,7 +78,7 @@ async function context(): Promise<Ctx | null> {
     general,
     billing,
     origin,
-    async send({ id, to, userId, vars, structure = {}, attachments, logAs }) {
+    async send({ id, to, userId, vars, structure = {}, attachments, logAs, replyTo }) {
       const def = templateDef(id);
       if (!def) throw new Error(`Unknown email template: ${id}`);
       const db = await getDb();
@@ -86,7 +88,7 @@ async function context(): Promise<Ctx | null> {
 
       const { extraParagraphs = [], ...rest } = structure;
       const content: MailContent = { ...wording, ...rest, paragraphs: [...wording.paragraphs, ...extraParagraphs] };
-      return sendMail({ to, userId, template: logAs ?? id, subject: content.subject, attachments, ...renderMail(content, { general, theme, origin }) });
+      return sendMail({ to, userId, template: logAs ?? id, subject: content.subject, attachments, replyTo, ...renderMail(content, { general, theme, origin }) });
     },
   };
 }
@@ -198,6 +200,8 @@ async function ticketMail(ticketId: string, id: "ticket.opened" | "ticket.client
     id,
     to,
     userId: toClient ? ticket.clientId : null,
+    // Answering the email answers the ticket.
+    replyTo: ticketReplyAddress(await getSettings("mail"), ticket) ?? undefined,
     vars: { name, number: String(ticket.number), subject: ticket.subject, client: displayName(ticket.client) },
     structure: {
       greeting: toClient ? t("Hi {name},", { name }) : undefined,

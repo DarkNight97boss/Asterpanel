@@ -52,6 +52,7 @@ export default async function AdminTicket({ params }: { params: Promise<{ id: st
           <input type="hidden" name="ticketId" value={ticket.id} />
           <CannedPicker target="reply-body" replies={canned} placeholder={t("Insert a canned reply…")} />
           <Textarea id="reply-body" name="body" rows={6} required placeholder={t("Write a reply…")} />
+          <label className="block text-xs text-muted">{t("Attach files (up to 5, 5 MB each)")}<input type="file" name="files" multiple className="mt-1 block w-full text-sm file:mr-3 file:rounded-theme file:border file:border-border file:bg-surface file:px-3 file:py-1.5 file:text-sm" /></label>
           <SubmitButton>{t("Send reply")}</SubmitButton>
         </ActionForm>
       </Card>

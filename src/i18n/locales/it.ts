@@ -2040,6 +2040,16 @@ const it: Record<string, string> = {
   "Cancelled, or no passkey was chosen.": "Annullato, o nessuna passkey scelta.",
   "The passkey did not work. Try again.": "La passkey non ha funzionato. Riprova.",
   "Sign in with a passkey": "Accedi con una passkey",
+  "Tickets by email": "Ticket via email",
+  "Customers answer the notification emails, or write to the support mailbox, and it lands on the ticket. Only messages from addresses of active customers (or of support staff, for replies) are accepted.": "I clienti rispondono alle email di notifica, o scrivono alla casella del supporto, e il messaggio arriva sul ticket. Sono accettati solo i messaggi da indirizzi di clienti attivi (o dello staff di supporto, per le risposte).",
+  "Accept tickets and replies by email": "Accetta ticket e risposte via email",
+  "Support mailbox": "Casella del supporto",
+  "The mailbox accepts plus addresses (support+anything@…): replies are matched by a signed address instead of the subject": "La casella accetta indirizzi con il più (support+qualcosa@…): le risposte sono abbinate da un indirizzo firmato invece che dall'oggetto",
+  "Have your mail server hand each message for that mailbox to this address, as the raw message, with the token. With Postfix or Exim, a pipe like this is enough:": "Fai consegnare dal tuo server di posta ogni messaggio di quella casella a questo indirizzo, come messaggio grezzo, con il token. Con Postfix o Exim basta una pipe come questa:",
+  "Mailgun routes (field body-mime) and SendGrid Inbound Parse with the raw option (field email) work too, if they can send the Authorization header.": "Funzionano anche le route di Mailgun (campo body-mime) e SendGrid Inbound Parse con l'opzione raw (campo email), se possono inviare l'header Authorization.",
+  "Enter the support mailbox, such as support@example.com": "Inserisci la casella del supporto, ad esempio support@example.com",
+  "Attach files (up to 5, 5 MB each)": "Allega file (fino a 5, 5 MB ciascuno)",
+  "by email": "via email",
 };
 
 export default it;

@@ -11,6 +11,7 @@ import { audit } from "@/lib/audit";
 import { BillingError, changePlan } from "@/lib/billing";
 import { requireAccount } from "@/lib/account";
 import { removePasskey } from "@/lib/passkeys";
+import { attach, TicketError, uploadsFrom, type Upload } from "@/lib/tickets";
 import { createSession, destroyAllSessions, forbidWhileImpersonating, requireUser, revokeSession } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { notify } from "@/lib/notify";
@@ -61,12 +62,20 @@ export async function openTicket(_: ActionState, form: FormData): Promise<Action
     })
     .safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
+  let files: Upload[];
+  try {
+    files = await uploadsFrom(form);
+  } catch (err) {
+    if (err instanceof TicketError) return { error: err.message };
+    throw err;
+  }
 
   const db = await getDb();
   const { body, ...ticket } = parsed.data;
   const id = await db.transaction(async (tx) => {
     const [row] = await tx.insert(schema.tickets).values({ ...ticket, clientId: account.ownerUserId, companyId: account.id }).returning();
-    await tx.insert(schema.ticketMessages).values({ ticketId: row.id, authorId: user.id, body });
+    const [message] = await tx.insert(schema.ticketMessages).values({ ticketId: row.id, authorId: user.id, body }).returning({ id: schema.ticketMessages.id });
+    if (files.length) await tx.insert(schema.ticketAttachments).values(files.map((f) => ({ ticketId: row.id, messageId: message.id, name: f.name, mime: f.mime, size: f.data.length, data: f.data })));
     return row.id;
   });
   notify.ticketOpened(id, body);
@@ -83,8 +92,16 @@ export async function replyTicket(_: ActionState, form: FormData): Promise<Actio
     where: and(eq(schema.tickets.id, String(form.get("ticketId"))), eq(schema.tickets.companyId, account.id)),
   });
   if (!ticket) return { error: "Ticket not found" };
+  let files: Upload[];
+  try {
+    files = await uploadsFrom(form);
+  } catch (err) {
+    if (err instanceof TicketError) return { error: err.message };
+    throw err;
+  }
 
-  await db.insert(schema.ticketMessages).values({ ticketId: ticket.id, authorId: user.id, body });
+  const [message] = await db.insert(schema.ticketMessages).values({ ticketId: ticket.id, authorId: user.id, body }).returning({ id: schema.ticketMessages.id });
+  await attach(ticket.id, message.id, files);
   await db.update(schema.tickets).set({ status: "customer_reply", lastReplyAt: new Date() }).where(eq(schema.tickets.id, ticket.id));
   notify.ticketClientReply(ticket.id, body);
   revalidatePath(`/client/tickets/${ticket.id}`);

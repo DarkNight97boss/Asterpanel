@@ -1,5 +1,6 @@
 "use server";
 
+import { attach, TicketError, uploadsFrom } from "@/lib/tickets";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { eq, sql } from "drizzle-orm";
@@ -11,7 +12,7 @@ import { BILLING_CYCLES, type Pricing, type ProductAddon } from "@/db/schema";
 import { audit } from "@/lib/audit";
 import { requireAdmin, requireArea, startImpersonation } from "@/lib/auth";
 import { activateService, adjustCredit, BillingError, issueCreditNote, recordPayment, runAutomation, suspendService, terminateService, unsuspendService } from "@/lib/billing";
-import { decryptJson, encryptJson } from "@/lib/crypto";
+import { decryptJson, encryptJson, randomToken } from "@/lib/crypto";
 import { parseMoney, slugify } from "@/lib/format";
 import { platformHomeBlocks, seedFooterColumns, seedPlatformPlans } from "@/lib/install";
 import { templateDef } from "@/lib/mail/templates";
@@ -219,7 +220,15 @@ export async function staffReply(_: ActionState, form: FormData): Promise<Action
   const parsed = z.object({ ticketId: uuid, body: z.string().trim().min(2).max(20_000) }).safeParse(fields(form));
   if (!parsed.success) return { error: "Message is empty" };
   const db = await getDb();
-  await db.insert(schema.ticketMessages).values({ ticketId: parsed.data.ticketId, authorId: staff.id, body: parsed.data.body });
+  let files;
+  try {
+    files = await uploadsFrom(form);
+  } catch (err) {
+    if (err instanceof TicketError) return { error: err.message };
+    throw err;
+  }
+  const [message] = await db.insert(schema.ticketMessages).values({ ticketId: parsed.data.ticketId, authorId: staff.id, body: parsed.data.body }).returning({ id: schema.ticketMessages.id });
+  await attach(parsed.data.ticketId, message.id, files);
   await db.update(schema.tickets).set({ status: "answered", lastReplyAt: new Date() }).where(eq(schema.tickets.id, parsed.data.ticketId));
   notify.ticketStaffReply(parsed.data.ticketId, parsed.data.body);
   revalidatePath(`/admin/tickets/${parsed.data.ticketId}`);
@@ -605,6 +614,21 @@ export async function saveMail(_: ActionState, form: FormData): Promise<ActionSt
 
   await updateSettings("mail", { ...parsed.data, enabled, password: String(f.password ?? "") || current.password });
   await audit(admin.id, "settings.updated", "settings", "mail");
+  return { ok: "Saved" };
+}
+
+/** Tickets by email. Switching it on mints the token the mail server presents; "new token" replaces it. */
+export async function saveInboundMail(_: ActionState, form: FormData): Promise<ActionState> {
+  const admin = await requireAdmin();
+  const current = await getSettings("mail");
+  const enabled = checkbox(form, "inboundEnabled");
+  const address = String(form.get("inboundAddress") ?? "").trim().toLowerCase();
+  if (address && !z.string().email().safeParse(address).success) return { error: "Enter the support mailbox, such as support@example.com" };
+  if (enabled && !address) return { error: "Enter the support mailbox, such as support@example.com" };
+  const inboundToken = form.has("rotate") || (enabled && !current.inboundToken) ? randomToken(32) : current.inboundToken;
+  await updateSettings("mail", { inboundEnabled: enabled, inboundAddress: address, inboundPlus: checkbox(form, "inboundPlus"), inboundToken });
+  await audit(admin.id, "settings.updated", "settings", "mail.inbound");
+  revalidatePath("/admin/settings/mail");
   return { ok: "Saved" };
 }
 
