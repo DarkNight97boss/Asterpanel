@@ -1,5 +1,7 @@
 "use server";
 
+import { OptionError, parseOptionLines } from "@/lib/product-options";
+import type { ProductOption } from "@/db/schema";
 import { attach, TicketError, uploadsFrom } from "@/lib/tickets";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -314,6 +316,14 @@ export async function saveProduct(_: ActionState, form: FormData): Promise<Actio
   }
   if (addons.length > 10 || new Set(addons.map((a) => a.id)).size !== addons.length) return { error: "Up to 10 add-ons, each with its own name" };
 
+  let options: ProductOption[];
+  try {
+    options = parseOptionLines(String(form.get("options") ?? "").slice(0, 10_000));
+  } catch (err) {
+    if (err instanceof OptionError) return { error: err.message };
+    throw err;
+  }
+
   const { id, features, serverId, ...rest } = parsed.data;
   const data = {
     ...rest,
@@ -323,6 +333,7 @@ export async function saveProduct(_: ActionState, form: FormData): Promise<Actio
     pricing,
     moduleConfig,
     addons,
+    options,
     requiresDomain: form.has("requiresDomain"),
     featured: form.has("featured"),
     hidden: form.has("hidden"),

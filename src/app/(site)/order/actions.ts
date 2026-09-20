@@ -8,6 +8,7 @@ import { requireAccount } from "@/lib/account";
 import { requestMeta } from "@/lib/request";
 import { BillingError, placeOrder } from "@/lib/billing";
 import { DOMAIN_RE } from "@/lib/format";
+import { pickedFrom } from "@/lib/product-options";
 
 export async function submitOrder(_: ActionState, form: FormData): Promise<ActionState> {
   const { account: user } = await requireAccount("manage");
@@ -24,7 +25,7 @@ export async function submitOrder(_: ActionState, form: FormData): Promise<Actio
 
   let invoiceId: string;
   try {
-    ({ invoiceId } = await placeOrder({ clientId: user.ownerUserId, companyId: user.id, ...parsed.data, ip: (await requestMeta()).ip }));
+    ({ invoiceId } = await placeOrder({ clientId: user.ownerUserId, companyId: user.id, ...parsed.data, options: pickedFrom(form), ip: (await requestMeta()).ip }));
   } catch (err) {
     if (err instanceof BillingError) return { error: err.message };
     throw err;
