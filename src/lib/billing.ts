@@ -585,9 +585,59 @@ export const suspendService = (id: string, reason: string, actorId: string | nul
 export const unsuspendService = (id: string, actorId: string | null = null) => lifecycle(id, "unsuspend", actorId);
 export const terminateService = (id: string, actorId: string | null = null) => lifecycle(id, "terminate", actorId);
 
+// ─── Cancellation requests ───────────────────────────────────────────────────
+
+/**
+ * The customer stops a service at the end of what is already paid. Nothing is
+ * switched off now; the renewal is simply not invoiced, and a renewal invoice
+ * that was already issued and is still untouched loses this service's line
+ * (or is cancelled when nothing else is on it).
+ */
+export async function requestCancellation(serviceId: string, reason: string, actorId: string | null = null) {
+  const db = await getDb();
+  const [svc] = await db.select().from(schema.services).where(eq(schema.services.id, serviceId));
+  if (!svc || !["active", "suspended"].includes(svc.status)) throw new BillingError("This service cannot be cancelled");
+  if (svc.cancelAtPeriodEnd) return;
+  await db.update(schema.services).set({ cancelAtPeriodEnd: true, cancelRequestedAt: new Date(), cancelReason: reason.trim().slice(0, 1000) }).where(eq(schema.services.id, svc.id));
+
+  const lines = await db
+    .select({ item: schema.invoiceItems, invoice: schema.invoices })
+    .from(schema.invoiceItems)
+    .innerJoin(schema.invoices, eq(schema.invoices.id, schema.invoiceItems.invoiceId))
+    .where(and(eq(schema.invoiceItems.serviceId, svc.id), eq(schema.invoiceItems.kind, "renewal"), eq(schema.invoices.status, "unpaid"), eq(schema.invoices.sdiId, ""), eq(schema.invoices.chargePendingRef, "")));
+  for (const { item, invoice } of lines) {
+    // Partly paid invoices are left to staff: money has moved.
+    const [paid] = await db.select({ id: schema.transactions.id }).from(schema.transactions).where(eq(schema.transactions.invoiceId, invoice.id)).limit(1);
+    if (paid) continue;
+    await db.transaction(async (tx) => {
+      await tx.delete(schema.invoiceItems).where(eq(schema.invoiceItems.id, item.id));
+      const rest = await tx.select({ amount: schema.invoiceItems.amount }).from(schema.invoiceItems).where(eq(schema.invoiceItems.invoiceId, invoice.id));
+      const subtotal = rest.reduce((sum, r) => sum + r.amount, 0);
+      if (!rest.length || subtotal <= 0) await tx.update(schema.invoices).set({ status: "cancelled" }).where(eq(schema.invoices.id, invoice.id));
+      else {
+        const tax = taxOn(subtotal, invoice.taxRate);
+        await tx.update(schema.invoices).set({ subtotal, tax, total: subtotal + tax }).where(eq(schema.invoices.id, invoice.id));
+      }
+    });
+  }
+  await audit(actorId, "service.cancel_requested", "service", svc.id, { reason: reason.trim().slice(0, 200) });
+  emitEvent(svc.companyId, "service.cancel_requested", { serviceId: svc.id, endsAt: svc.nextDueDate });
+}
+
+/** Changed their mind before the end: the service renews as usual (the cron issues the renewal again when due). */
+export async function undoCancellation(serviceId: string, actorId: string | null = null) {
+  const db = await getDb();
+  const [svc] = await db.update(schema.services).set({ cancelAtPeriodEnd: false, cancelRequestedAt: null, cancelReason: "" }).where(and(eq(schema.services.id, serviceId), eq(schema.services.cancelAtPeriodEnd, true), inArray(schema.services.status, ["active", "suspended"]))).returning({ id: schema.services.id });
+  if (!svc) return;
+  // The renewal line was taken off its invoice: let the cron issue it again. If a line is still there (a partly paid invoice), it stands.
+  const [still] = await db.select({ id: schema.invoiceItems.id }).from(schema.invoiceItems).innerJoin(schema.invoices, eq(schema.invoices.id, schema.invoiceItems.invoiceId)).where(and(eq(schema.invoiceItems.serviceId, svc.id), eq(schema.invoiceItems.kind, "renewal"), eq(schema.invoices.status, "unpaid"))).limit(1);
+  if (!still) await db.update(schema.services).set({ renewalInvoicedFor: null }).where(eq(schema.services.id, svc.id));
+  await audit(actorId, "service.cancel_undone", "service", svc.id);
+}
+
 // ─── Automation (cron) ───────────────────────────────────────────────────────
 
-export type AutomationReport = { invoiced: number; reminded: number; suspended: number; terminated: number; errors: string[] };
+export type AutomationReport = { invoiced: number; reminded: number; suspended: number; terminated: number; cancelled: number; lateFees: number; errors: string[] };
 
 /**
  * Daily billing run. Idempotent: running it twice in a row is a no-op the
@@ -596,13 +646,15 @@ export type AutomationReport = { invoiced: number; reminded: number; suspended: 
 export async function runAutomation(now = new Date()): Promise<AutomationReport> {
   const db = await getDb();
   const billing = await getSettings("billing");
-  const report: AutomationReport = { invoiced: 0, reminded: 0, suspended: 0, terminated: 0, errors: [] };
+  const report: AutomationReport = { invoiced: 0, reminded: 0, suspended: 0, terminated: 0, cancelled: 0, lateFees: 0, errors: [] };
 
   // 1. Renewal invoices — one per client, grouping everything coming due.
   const horizon = new Date(now.getTime() + billing.invoiceDaysBeforeDue * DAY);
   const due = await db.query.services.findMany({
     where: and(
       inArray(schema.services.status, ["active", "suspended"]),
+      // A service the customer is leaving is not invoiced again.
+      eq(schema.services.cancelAtPeriodEnd, false),
       lte(schema.services.nextDueDate, horizon),
       or(isNull(schema.services.renewalInvoicedFor), lt(schema.services.renewalInvoicedFor, schema.services.nextDueDate)),
     ),
@@ -711,6 +763,37 @@ export async function runAutomation(now = new Date()): Promise<AutomationReport>
       } catch (err) {
         report.errors.push(`terminate ${id}: ${err instanceof Error ? err.message : err}`);
       }
+    }
+  }
+
+  // 5. Cancellations asked by customers: the paid period is over.
+  const leaving = await db.select({ id: schema.services.id }).from(schema.services).where(and(inArray(schema.services.status, ["active", "suspended"]), eq(schema.services.cancelAtPeriodEnd, true), lte(schema.services.nextDueDate, now)));
+  for (const { id } of leaving) {
+    try {
+      await terminateService(id);
+      report.cancelled++;
+    } catch (err) {
+      report.errors.push(`cancel ${id}: ${err instanceof Error ? err.message : err}`);
+    }
+  }
+
+  // 6. Late fees: once per invoice, never on one already sent to the tax authority's exchange.
+  if (billing.lateFeeDays > 0 && (billing.lateFeeFixed > 0 || billing.lateFeePercent > 0)) {
+    const t = makeT((await getSettings("general")).locale);
+    const late = await db.select().from(schema.invoices).where(and(eq(schema.invoices.status, "unpaid"), eq(schema.invoices.kind, "invoice"), isNull(schema.invoices.lateFeeAt), eq(schema.invoices.sdiId, ""), eq(schema.invoices.chargePendingRef, ""), lt(schema.invoices.dueDate, new Date(now.getTime() - billing.lateFeeDays * DAY))));
+    for (const inv of late) {
+      const fee = billing.lateFeeFixed + Math.round((inv.subtotal * billing.lateFeePercent) / 100);
+      if (fee <= 0 || inv.subtotal <= 0) continue;
+      await db.transaction(async (tx) => {
+        // Claimed first: two overlapping runs cannot both add it.
+        const [mine] = await tx.update(schema.invoices).set({ lateFeeAt: now }).where(and(eq(schema.invoices.id, inv.id), isNull(schema.invoices.lateFeeAt), eq(schema.invoices.status, "unpaid"))).returning({ id: schema.invoices.id });
+        if (!mine) return;
+        const subtotal = inv.subtotal + fee;
+        const tax = taxOn(subtotal, inv.taxRate);
+        await tx.insert(schema.invoiceItems).values({ invoiceId: inv.id, kind: "late_fee", description: t("Late payment fee"), amount: fee });
+        await tx.update(schema.invoices).set({ subtotal, tax, total: subtotal + tax }).where(eq(schema.invoices.id, inv.id));
+        report.lateFees++;
+      });
     }
   }
 

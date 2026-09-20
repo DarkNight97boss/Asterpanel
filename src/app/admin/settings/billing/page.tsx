@@ -26,6 +26,9 @@ export default async function BillingSettings() {
             <Field label={t("Referral commission (%)")} hint={t("Share of each paid invoice credited to who brought the customer. 0 = programme off.")}><Input name="referralPercent" type="number" min={0} max={50} defaultValue={s.referralPercent} /></Field>
             <Field label={t("Commission lasts (months)")}><Input name="referralMonths" type="number" min={1} max={60} defaultValue={s.referralMonths} /></Field>
             <Field label={t("Terminate (days after due)")} hint={t("0 = never")}><Input name="terminateDaysAfterDue" type="number" min={0} max={365} defaultValue={s.terminateDaysAfterDue} /></Field>
+            <Field label={t("Late fee after (days overdue)")} hint={t("0 = never. Added once per invoice.")}><Input name="lateFeeDays" type="number" min={0} max={365} defaultValue={s.lateFeeDays} /></Field>
+            <Field label={t("Late fee: fixed amount")}><Input name="lateFeeFixed" inputMode="decimal" defaultValue={(s.lateFeeFixed / 100).toFixed(2)} /></Field>
+            <Field label={t("Late fee: % of the invoice")}><Input name="lateFeePercent" inputMode="decimal" defaultValue={s.lateFeePercent} /></Field>
           </div>
           <Field label={t("Bank transfer instructions")} hint={t("Shown to clients who choose to pay by bank transfer.")}>
             <Textarea name="bankTransferInstructions" defaultValue={s.bankTransferInstructions} rows={4} />

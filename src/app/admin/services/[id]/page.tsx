@@ -41,6 +41,7 @@ export default async function ServiceDetail({ params }: { params: Promise<{ id: 
         description={
           <>
             <StatusBadge status={service.status} label={t(STATUS_LABEL[service.status])} />{" "}
+            {service.cancelAtPeriodEnd && <span className="ml-2 rounded-full bg-warning/15 px-2.5 py-0.5 text-xs font-medium text-warning" title={service.cancelReason}>{t("Cancellation requested")}{service.cancelReason ? `: ${service.cancelReason.slice(0, 80)}` : ""}</span>}
             <Link href={`/admin/clients/${service.clientId}`} className="hover:text-link">{displayName(service.client)}</Link>
             {service.suspendReason && <> · {service.suspendReason}</>}
           </>

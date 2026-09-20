@@ -11,7 +11,7 @@ import { publicHttpsUrl } from "./net";
  * Deliveries never block or fail the operation that caused them.
  */
 
-export const WEBHOOK_EVENTS = ["deploy.succeeded", "deploy.failed", "backup.completed", "backup.failed", "migration.succeeded", "migration.failed", "invoice.created", "invoice.paid", "domain.registered"] as const;
+export const WEBHOOK_EVENTS = ["deploy.succeeded", "deploy.failed", "backup.completed", "backup.failed", "migration.succeeded", "migration.failed", "invoice.created", "invoice.paid", "domain.registered", "service.cancel_requested"] as const;
 export type WebhookEvent = (typeof WEBHOOK_EVENTS)[number];
 
 const MAX_FAILURES = 20;
@@ -47,6 +47,7 @@ export function chatMessage(event: string, data: Record<string, unknown>): strin
     "invoice.created": `🧾 New invoice${money}`,
     "invoice.paid": `💶 Invoice paid${money}`,
     "domain.registered": `🌐 Domain registered: ${String(data.domain ?? "")}`,
+    "service.cancel_requested": `👋 Cancellation requested for service ${String(data.serviceId ?? "")}`,
     ping: "👋 It works.",
   };
   return text[event] ?? event;

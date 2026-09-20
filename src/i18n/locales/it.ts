@@ -2053,6 +2053,21 @@ const it: Record<string, string> = {
   "Configurable options": "Opzioni configurabili",
   "One per line. choice | Name | Label = price ; Label = price / extra RAM MB / extra disk GB — or — quantity | Name | unit price | min | max | RAM MB per unit | disk GB per unit. Prices are per month.": "Una per riga. choice | Nome | Etichetta = prezzo ; Etichetta = prezzo / RAM extra MB / disco extra GB — oppure — quantity | Nome | prezzo unitario | min | max | RAM MB per unità | disco GB per unità. I prezzi sono al mese.",
   "Invalid options": "Opzioni non valide",
+  "Cancellation requested": "Cancellazione richiesta",
+  "This service stays on until {date} and is not renewed after that.": "Questo servizio resta attivo fino al {date} e poi non viene rinnovato.",
+  "Keep the service": "Mantieni il servizio",
+  "Cancel this service": "Cancella questo servizio",
+  "The service keeps working until {date}, the end of what you have already paid, and is not renewed. You can change your mind until then.": "Il servizio continua a funzionare fino al {date}, la fine del periodo già pagato, e non viene rinnovato. Fino ad allora puoi cambiare idea.",
+  "Why are you leaving? (optional)": "Perché te ne vai? (facoltativo)",
+  "I want to cancel this service at the end of the period": "Voglio cancellare questo servizio a fine periodo",
+  "Request cancellation": "Richiedi la cancellazione",
+  "Tick the box to confirm": "Spunta la casella per confermare",
+  "This service cannot be cancelled": "Questo servizio non può essere cancellato",
+  "Late payment fee": "Mora per ritardato pagamento",
+  "Late fee after (days overdue)": "Mora dopo (giorni di ritardo)",
+  "0 = never. Added once per invoice.": "0 = mai. Aggiunta una sola volta per fattura.",
+  "Late fee: fixed amount": "Mora: importo fisso",
+  "Late fee: % of the invoice": "Mora: % della fattura",
 };
 
 export default it;

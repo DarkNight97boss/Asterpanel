@@ -1,14 +1,14 @@
 import { notFound } from "next/navigation";
 import { and, eq } from "drizzle-orm";
 import { ActionForm, SubmitButton } from "@/components/action-form";
-import { Alert, ButtonLink, Card, CardHeader, PageHeader, StatusBadge, STATUS_LABEL } from "@/components/ui";
+import { Alert, ButtonLink, Card, CardHeader, Checkbox, Field, PageHeader, StatusBadge, STATUS_LABEL, Textarea } from "@/components/ui";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
 import { CYCLE_LABEL, formatDate, formatMoney } from "@/lib/format";
 import { planOptions, remainingFraction } from "@/lib/billing";
 import { getSettings } from "@/lib/settings";
-import { switchPlan } from "@/app/client/actions";
+import { cancelService, switchPlan } from "@/app/client/actions";
 import { getProvisioningModule } from "@/modules/provisioning";
 
 export default async function ClientService({ params }: { params: Promise<{ id: string }> }) {
@@ -88,6 +88,31 @@ export default async function ClientService({ params }: { params: Promise<{ id: 
               );
             })}
           </ul>
+        </Card>
+      )}
+      {(service.status === "active" || service.status === "suspended") && (
+        <Card className="mt-6">
+          {service.cancelAtPeriodEnd ? (
+            <>
+              <CardHeader title={t("Cancellation requested")} description={t("This service stays on until {date} and is not renewed after that.", { date: formatDate(service.nextDueDate, locale) })} />
+              <ActionForm action={cancelService} className="p-5 pt-0">
+                <input type="hidden" name="serviceId" value={service.id} />
+                <input type="hidden" name="undo" value="1" />
+                <SubmitButton variant="secondary">{t("Keep the service")}</SubmitButton>
+              </ActionForm>
+            </>
+          ) : (
+            <details>
+              <summary className="cursor-pointer px-5 py-4 text-sm font-medium text-body">{t("Cancel this service")}</summary>
+              <ActionForm action={cancelService} className="space-y-4 p-5 pt-0">
+                <input type="hidden" name="serviceId" value={service.id} />
+                <p className="text-sm text-muted">{t("The service keeps working until {date}, the end of what you have already paid, and is not renewed. You can change your mind until then.", { date: formatDate(service.nextDueDate, locale) })}</p>
+                <Field label={t("Why are you leaving? (optional)")}><Textarea name="reason" rows={3} maxLength={1000} /></Field>
+                <Checkbox name="confirm" label={t("I want to cancel this service at the end of the period")} />
+                <SubmitButton variant="danger">{t("Request cancellation")}</SubmitButton>
+              </ActionForm>
+            </details>
+          )}
         </Card>
       )}
     </>

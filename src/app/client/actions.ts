@@ -8,7 +8,7 @@ import { z } from "zod";
 import type { ActionState } from "@/components/action-form";
 import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
-import { BillingError, changePlan } from "@/lib/billing";
+import { BillingError, changePlan, requestCancellation, undoCancellation } from "@/lib/billing";
 import { requireAccount } from "@/lib/account";
 import { removePasskey } from "@/lib/passkeys";
 import { attach, TicketError, uploadsFrom, type Upload } from "@/lib/tickets";
@@ -161,6 +161,26 @@ export async function changePassword(_: ActionState, form: FormData): Promise<Ac
   await audit(user.id, "auth.password.changed", "user", user.id);
   notify.passwordChanged(user.id);
   return { ok: "Password updated" };
+}
+
+/** Stop a service at the end of the paid period, or take that back. */
+export async function cancelService(_: ActionState, form: FormData): Promise<ActionState> {
+  const { user, account } = await requireAccount("billing");
+  const db = await getDb();
+  const [svc] = await db.select({ id: schema.services.id }).from(schema.services).where(and(eq(schema.services.id, String(form.get("serviceId"))), eq(schema.services.companyId, account.id)));
+  if (!svc) return { error: "Service not found" };
+  try {
+    if (form.has("undo")) await undoCancellation(svc.id, user.id);
+    else {
+      if (!form.has("confirm")) return { error: "Tick the box to confirm" };
+      await requestCancellation(svc.id, String(form.get("reason") ?? ""), user.id);
+    }
+  } catch (err) {
+    if (err instanceof BillingError) return { error: err.message };
+    throw err;
+  }
+  revalidatePath(`/client/services/${svc.id}`);
+  return { ok: "Saved" };
 }
 
 // ─── Two-factor authentication ───────────────────────────────────────────────
