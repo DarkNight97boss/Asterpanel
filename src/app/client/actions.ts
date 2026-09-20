@@ -10,6 +10,7 @@ import { getDb, schema } from "@/db";
 import { audit } from "@/lib/audit";
 import { BillingError, changePlan } from "@/lib/billing";
 import { requireAccount } from "@/lib/account";
+import { removePasskey } from "@/lib/passkeys";
 import { createSession, destroyAllSessions, forbidWhileImpersonating, requireUser, revokeSession } from "@/lib/auth";
 import { hashPassword, verifyPassword } from "@/lib/crypto";
 import { notify } from "@/lib/notify";
@@ -169,6 +170,13 @@ export async function signOutSession(form: FormData) {
   const user = await requireUser();
   await revokeSession(user.id, String(form.get("handle") ?? ""));
   await audit(user.id, "session.revoked", "user", user.id);
+  revalidatePath("/client/profile");
+}
+
+export async function deletePasskey(form: FormData) {
+  const user = await requireUser();
+  if (await forbidWhileImpersonating()) return;
+  await removePasskey(user.id, z.string().uuid().parse(form.get("id")));
   revalidatePath("/client/profile");
 }
 

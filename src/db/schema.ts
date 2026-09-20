@@ -508,6 +508,27 @@ export const ipLeases = pgTable(
   (t) => [index("ip_leases_pool_idx").on(t.poolId)],
 );
 
+/** WebAuthn credentials: sign in with a fingerprint, a face or a security key instead of the password. */
+export const passkeys = pgTable(
+  "passkeys",
+  {
+    id: id(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    /** base64url, as the browser reports it. */
+    credentialId: text("credential_id").notNull().unique(),
+    /** COSE public key, base64url. */
+    publicKey: text("public_key").notNull(),
+    counter: integer("counter").notNull().default(0),
+    transports: jsonb("transports").$type<string[]>().notNull().default([]),
+    name: text("name").notNull().default(""),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (t) => [index("passkeys_user_idx").on(t.userId)],
+);
+
 /** Address blocks leased on a marketplace (IPXO): what the company pays for, its LOA, and the pool that hands it out. */
 export const ipBlocks = pgTable("ip_blocks", {
   id: id(),
