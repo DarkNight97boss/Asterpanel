@@ -67,6 +67,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
                   { href: "/admin/settings/registrars", label: t("Domain registrars"), icon: "◍" },
                   { href: "/admin/settings/backups", label: t("Backups"), icon: "⛁" },
                   { href: "/admin/staff", label: t("Staff"), icon: "⚇" },
+                  { href: "/admin/import", label: t("Import"), icon: "⇲" },
                 ]
               : []),
           ],
