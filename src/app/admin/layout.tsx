@@ -23,7 +23,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
           items: [
             ...(can("platform") ? [{ href: "/admin/workloads", label: t("Workloads"), icon: "▣" }] : []),
             ...(admin ? [{ href: "/admin/nodes", label: t("Nodes"), icon: "▥" }] : []),
-            ...(can("platform") ? [{ href: "/admin/jobs", label: t("Jobs"), icon: "⟳" }, { href: "/admin/status", label: t("Status page"), icon: "◉" }] : []),
+            ...(can("platform") ? [{ href: "/admin/jobs", label: t("Jobs"), icon: "⟳" }, { href: "/admin/status", label: t("Status page"), icon: "◉" }, { href: "/admin/blueprints", label: t("WordPress blueprints"), icon: "❏" }] : []),
             ...(admin ? [{ href: "/admin/dns", label: "DNS", icon: "⇄" }] : []),
           ],
         },

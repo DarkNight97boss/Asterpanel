@@ -13,7 +13,7 @@ export default async function CompanyLayout({ children }: { children: React.Reac
   const sections = [
     ...(billing ? [{ href: "/client/services", label: t("My plan") }, { href: "/client/invoices", label: t("Invoices") }, { href: "/client/quotes", label: t("Quotes") }, ...(referrals ? [{ href: "/client/company/referrals", label: t("Referrals") }] : []), { href: "/client/company/payment-methods", label: t("Payment methods") }, { href: "/client/company/details", label: t("Billing details") }] : []),
     { href: "/client/team", label: t("Users") },
-    ...(roleCan(account.role, "manage") ? [{ href: "/client/company/api", label: t("API & webhooks") }, { href: "/client/company/variables", label: t("Variable groups") }] : []),
+    ...(roleCan(account.role, "manage") ? [{ href: "/client/company/api", label: t("API & webhooks") }, { href: "/client/company/variables", label: t("Variable groups") }, { href: "/client/company/blueprints", label: t("WordPress blueprints") }] : []),
     { href: "/client/company/activity", label: t("User activity") },
   ];
   return (

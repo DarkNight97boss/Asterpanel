@@ -44,6 +44,8 @@ export type WorkloadSpec = {
     objectCache?: boolean;
     /** WP-Cron is triggered by the node every five minutes instead of by visitors. */
     systemCron?: boolean;
+    /** Applied once, right after a fresh installation: plugins and theme from wordpress.org, a few settings. */
+    blueprint?: { plugins: string[]; theme?: string; permalinks?: string; timezone?: string; hideFromSearch?: boolean };
   };
   database?: { engine: "mysql" | "postgres" | "redis"; version: string; name: string; user: string; password: string };
   source?: { repoUrl: string; branch: string; accessToken?: string; buildCommand?: string; outputDir?: string; port?: number; /** Run this public image instead of building. */ image?: string; /** Must answer 2xx/3xx before the new version gets traffic. */ healthPath?: string };

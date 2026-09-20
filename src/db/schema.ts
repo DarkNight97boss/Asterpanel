@@ -562,6 +562,8 @@ export type WorkloadConfig = {
   healthPath?: string;
   /** Shared variable groups attached to this service. */
   envGroupIds?: string[];
+  /** WordPress: what the blueprint chosen at creation installs, copied so later edits of the blueprint change nothing here. */
+  blueprint?: WpBlueprint;
   /** Apps: how many copies serve traffic (1-5), extra background processes, and folders that survive deploys. */
   instances?: number;
   workers?: { name: string; command: string }[];
@@ -876,6 +878,22 @@ export const domainNames = pgTable(
 );
 
 /** Environment variables shared by several services of a company (e.g. one database URL for three apps). */
+/** What a fresh WordPress gets right after its installation. */
+export type WpBlueprint = { plugins: string[]; theme?: string; permalinks?: string; timezone?: string; hideFromSearch?: boolean };
+
+/** Reusable starting points for new WordPress sites. No company = offered to every customer by the hosting company. */
+export const wpBlueprints = pgTable(
+  "wp_blueprints",
+  {
+    id: id(),
+    companyId: uuid("company_id").references(() => companies.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    spec: jsonb("spec").$type<WpBlueprint>().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [index("wp_blueprints_company_idx").on(t.companyId)],
+);
+
 export const envGroups = pgTable(
   "env_groups",
   {

@@ -69,6 +69,8 @@ export async function createFromPlan(_: ActionState, form: FormData): Promise<Ac
       const wp = z.object({ phpVersion: z.enum(["8.1", "8.2", "8.3", "8.4"]), adminEmail: z.string().trim().email(), adminUser: z.string().trim().regex(/^[\w.@-]{3,40}$/, "Invalid admin username").default("admin") }).safeParse(f);
       if (!wp.success) return { error: wp.error.issues[0].message };
       config = wp.data;
+      // Stored as a copy: editing or deleting the blueprint later changes nothing on this site.
+      if (f.blueprintId && !f.cloneFrom) config.blueprint = await engine.blueprintFor(account.id, String(f.blueprintId));
     } else if (type === "database") {
       const d = z.object({ engine: z.enum(["mysql", "postgres", "redis"]), version: z.string().trim().regex(/^[\w.]{0,10}$/).default("") }).safeParse(f);
       if (!d.success) return { error: d.error.issues[0].message };
