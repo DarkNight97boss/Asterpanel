@@ -49,6 +49,10 @@ export const settingsSchemas = {
     terminateDaysAfterDue: z.number().int().min(0).max(365).default(30),
     /** Days after the due date on which an overdue reminder is emailed. */
     overdueReminderDays: z.array(z.number().int().min(1).max(365)).max(10).default([3, 7, 14]),
+    /** Late fee, added once to an invoice this many days overdue (0 = never): a fixed amount plus a share of the invoice. */
+    lateFeeDays: z.number().int().min(0).max(365).default(0),
+    lateFeeFixed: z.number().int().min(0).max(1_000_000).default(0),
+    lateFeePercent: z.number().min(0).max(50).default(0),
     invoicePrefix: z.string().max(10).default("INV-"),
     bankTransferInstructions: z.string().default(""),
     /** Referral programme: share of each paid invoice of a referred company credited to who referred it, for a number of months. */

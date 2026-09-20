@@ -354,6 +354,10 @@ export const services = pgTable(
     nextDueDate: timestamp("next_due_date", { withTimezone: true }),
     /** The `nextDueDate` a renewal invoice was already issued for (dedupes the cron). */
     renewalInvoicedFor: timestamp("renewal_invoiced_for", { withTimezone: true }),
+    /** The customer asked to stop at the end of the paid period: no renewal is invoiced, and the service ends on `nextDueDate`. */
+    cancelAtPeriodEnd: boolean("cancel_at_period_end").notNull().default(false),
+    cancelRequestedAt: timestamp("cancel_requested_at", { withTimezone: true }),
+    cancelReason: text("cancel_reason").notNull().default(""),
     suspendReason: text("suspend_reason").notNull().default(""),
     /** Opaque state owned by the provisioning module. */
     moduleData: jsonb("module_data").$type<Record<string, unknown>>().notNull().default({}),
@@ -397,6 +401,8 @@ export const invoices = pgTable(
     /** A bank debit (SEPA) was started and has not settled yet: the payment intent. Nothing else is charged meanwhile. */
     chargePendingRef: text("charge_pending_ref").notNull().default(""),
     lastChargeError: text("last_charge_error").notNull().default(""),
+    /** When the late fee was added. Once per invoice. */
+    lateFeeAt: timestamp("late_fee_at", { withTimezone: true }),
     /** Electronic invoice: which intermediary has it, under what id, and what the SDI answered. */
     sdiProvider: text("sdi_provider").notNull().default(""),
     sdiId: text("sdi_id").notNull().default(""),
@@ -409,7 +415,7 @@ export const invoices = pgTable(
   (t) => [index("invoices_client_idx").on(t.clientId), index("invoices_status_idx").on(t.status), uniqueIndex("invoices_year_number_idx").on(t.fiscalYear, t.number)],
 );
 
-export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom" | "discount" | "upgrade";
+export type InvoiceItemKind = "new" | "renewal" | "setup" | "custom" | "discount" | "upgrade" | "late_fee";
 
 export const invoiceItems = pgTable(
   "invoice_items",
