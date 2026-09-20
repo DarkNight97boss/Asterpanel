@@ -5,6 +5,7 @@ import {
   integer,
   jsonb,
   pgTable,
+  primaryKey,
   serial,
   text,
   timestamp,
@@ -681,6 +682,23 @@ export const backups = pgTable(
     createdAt: createdAt(),
   },
   (t) => [index("backups_workload_idx").on(t.workloadId)],
+);
+
+/** One row per site and day: the raw checks are only kept a week, monthly reports need longer. */
+export const uptimeDaily = pgTable(
+  "uptime_daily",
+  {
+    workloadId: uuid("workload_id")
+      .notNull()
+      .references(() => workloads.id, { onDelete: "cascade" }),
+    /** UTC day, `YYYY-MM-DD`. */
+    day: text("day").notNull(),
+    checks: integer("checks").notNull().default(0),
+    up: integer("up").notNull().default(0),
+    /** Sum of the response times of the successful checks. */
+    msSum: integer("ms_sum").notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.workloadId, t.day] })],
 );
 
 export type DeploymentStatus = "queued" | "building" | "live" | "failed";

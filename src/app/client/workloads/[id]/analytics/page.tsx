@@ -1,5 +1,6 @@
 import { and, asc, eq, gte } from "drizzle-orm";
-import { Card, EmptyState, PageHeader } from "@/components/ui";
+import { Button, Card, CardHeader, EmptyState, PageHeader, Select } from "@/components/ui";
+import { recentMonths } from "@/lib/site-report";
 import { getDb, schema } from "@/db";
 import { getLocale, getT } from "@/i18n";
 import { requireWorkload } from "@/platform/access";
@@ -91,6 +92,17 @@ export default async function Analytics({ params, searchParams }: { params: Prom
               {c.points.length > 1 ? <Chart points={c.points} unit={c.unit} max={c.max} /> : <p className="py-10 text-center text-sm text-muted">—</p>}
             </Card>
           ))}
+        </div>
+      )}
+      {w.type !== "database" && (
+        <div className="mt-6">
+          <Card>
+            <CardHeader title={t("Monthly report")} description={t("A PDF with the month's availability, backups, deployments and security, ready to hand to your customer.")} />
+            <form method="get" action={`/client/workloads/${w.id}/report`} className="flex flex-wrap items-center gap-3 p-5 pt-0">
+              <Select name="month" className="w-auto">{recentMonths(12).map((m) => <option key={m} value={m}>{m}</option>)}</Select>
+              <Button variant="secondary">{t("Download PDF")}</Button>
+            </form>
+          </Card>
         </div>
       )}
     </>
