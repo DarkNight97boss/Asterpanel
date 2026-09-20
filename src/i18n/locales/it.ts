@@ -2016,6 +2016,10 @@ const it: Record<string, string> = {
   "Generated on": "Generato il",
   "The month looks like 2026-08": "Il mese ha la forma 2026-08",
   "No data for this month": "Nessun dato per questo mese",
+  "SEPA direct debit": "Addebito diretto SEPA",
+  "A direct debit for this invoice is on its way to your bank. It can take a few working days: there is nothing to pay in the meantime.": "Un addebito diretto per questa fattura è in viaggio verso la tua banca. Può richiedere alcuni giorni lavorativi: nel frattempo non c'è nulla da pagare.",
+  "A direct debit for this invoice is already on its way to your bank": "Un addebito diretto per questa fattura è già in viaggio verso la tua banca",
+  "The bank refused the debit": "La banca ha rifiutato l'addebito",
 };
 
 export default it;

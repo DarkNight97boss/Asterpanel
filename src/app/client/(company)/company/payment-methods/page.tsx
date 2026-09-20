@@ -37,8 +37,8 @@ export default async function PaymentMethods() {
             <Table head={[t("Card"), t("Expires"), "", ""]}>
               {cards.map((c) => (
                 <tr key={c.id}>
-                  <Td className="font-medium capitalize">{c.brand} •••• {c.last4}</Td>
-                  <Td className="text-body">{String(c.expMonth).padStart(2, "0")}/{c.expYear}</Td>
+                  <Td className="font-medium capitalize">{c.brand === "sepa" ? t("SEPA direct debit") : c.brand} •••• {c.last4}</Td>
+                  <Td className="text-body">{c.expYear ? `${String(c.expMonth).padStart(2, "0")}/${c.expYear}` : "—"}</Td>
                   <Td>{c.isDefault && <Badge tone="success">{t("Default")}</Badge>}</Td>
                   <Td className="text-right">
                     <div className="flex justify-end gap-1">

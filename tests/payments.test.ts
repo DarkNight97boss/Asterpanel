@@ -14,6 +14,7 @@ let clientId: string, companyId: string, productId: string;
 
 const calls: { method: string; url: string; params: Record<string, string>; json?: Record<string, unknown>; headers: Record<string, string> }[] = [];
 let decline = false;
+let processing = false;
 let captureAmount = "";
 const fake = (async (url: string, init: RequestInit = {}) => {
   const headers = init.headers as Record<string, string>;
@@ -24,6 +25,8 @@ const fake = (async (url: string, init: RequestInit = {}) => {
   if (url.endsWith("/v1/customers")) return ok({ id: "cus_1" });
   if (url.endsWith("/v1/checkout/sessions")) return ok({ url: "https://checkout.stripe.com/c/pay_1" });
   if (url.includes("/v1/payment_intents/pi_checkout")) return ok({ id: "pi_checkout", customer: "cus_1", payment_method: { id: "pm_1", card: { brand: "visa", last4: "4242", exp_month: 12, exp_year: 2030 } } });
+  if (url.includes("/v1/payment_intents/pi_sepa")) return ok({ id: "pi_sepa", customer: "cus_1", payment_method: { id: "pm_sepa", sepa_debit: { last4: "3000", country: "IT" } } });
+  if (url.endsWith("/v1/payment_intents") && processing) return ok({ id: "pi_debit_1", status: "processing", amount_received: 0 });
   if (url.endsWith("/v1/payment_intents")) return decline ? ok({ error: { message: "Your card was declined.", decline_code: "insufficient_funds" } }, 402) : ok({ id: `pi_auto_${call.headers["Idempotency-Key"]}`, status: "succeeded", amount_received: Number(call.params.amount) });
   if (url.endsWith("/detach")) return ok({});
   if (url.endsWith("/v1/oauth2/token")) return ok({ access_token: "tok" });
@@ -117,6 +120,38 @@ test("a declined card is retried on day 3 and 5, then left to the customer; opti
   assert.ok(calls.some((c) => c.url.endsWith("/payment_methods/pm_1/detach")));
   assert.equal(await pm.chargeInvoice(invoiceId), "skipped", "no card, no charge");
   assert.equal((await invoiceOf(invoiceId)).chargeAttempts, 0, "a skipped charge does not use up an attempt");
+});
+
+test("SEPA: the mandate is kept like a card; a debit on its way is never charged twice, and the bank's answer settles it", async () => {
+  const db = await dbm.getDb();
+  await pm.rememberStripeCard("pi_sepa");
+  const [mandate] = await pm.listPaymentMethods(companyId);
+  assert.deepEqual([mandate.brand, mandate.last4, mandate.expYear, mandate.isDefault], ["sepa", "3000", 0, true]);
+
+  const { invoiceId } = await billing.placeOrder({ clientId, companyId, productId, cycle: "monthly", domain: "" });
+  processing = true;
+  const before = calls.length;
+  assert.equal(await pm.chargeInvoice(invoiceId), "pending");
+  let inv = await invoiceOf(invoiceId);
+  assert.deepEqual([inv.status, inv.chargePendingRef, inv.chargeAttempts], ["unpaid", "pi_debit_1", 1]);
+  // Days pass without an answer from the bank: nothing is charged again, by the cron or by hand.
+  const posts = () => calls.slice(before).filter((c) => c.url.endsWith("/v1/payment_intents") && c.params["metadata[invoice_id]"] === invoiceId).length;
+  await pm.runAutoCharges(new Date(Date.now() + 4 * 86_400_000));
+  assert.equal(await pm.chargeInvoice(invoiceId), "skipped");
+  assert.equal(posts(), 1);
+
+  // The bank refuses: the invoice is free again, with the reason on it.
+  await pm.debitFailed("pi_debit_1", "Insufficient funds");
+  inv = await invoiceOf(invoiceId);
+  assert.deepEqual([inv.chargePendingRef, inv.lastChargeError], ["", "Insufficient funds"]);
+  await pm.debitFailed("pi_unknown", "x"); // an intent that is not ours changes nothing
+
+  // Second debit goes through: the webhook records it.
+  await db.update(dbm.schema.invoices).set({ lastChargeAt: null }).where(eq(dbm.schema.invoices.id, invoiceId));
+  assert.equal(await pm.chargeInvoice(invoiceId), "pending");
+  await billing.recordPayment({ invoiceId, gateway: "stripe", externalId: "pi_debit_1", amount: inv.total });
+  assert.equal((await invoiceOf(invoiceId)).status, "paid");
+  processing = false;
 });
 
 test("PayPal: the order carries the invoice, and only PayPal's capture answer decides what was paid", async () => {
