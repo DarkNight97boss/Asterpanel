@@ -172,47 +172,89 @@ async function domainProduct(): Promise<string> {
   return product.id;
 }
 
-export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string; /** Registrations only: 1 to 5 years paid up front. */ years?: number }): Promise<{ invoiceId: string; domainId: string }> {
+export const MAX_BASKET = 20;
+export type BasketItem = { domain: string; action: "register" | "transfer"; authCode?: string; /** Registrations only: 1 to 5 years paid up front. */ years?: number };
+
+/**
+ * One or more domains on a single invoice, all for the same registrant.
+ * Everything is checked before anything is written: one bad line refuses the
+ * whole basket, naming the domain, instead of leaving a half-made order.
+ */
+export async function orderDomains(input: { clientId: string; companyId: string | null; items: BasketItem[]; contact: Record<string, unknown>; ip?: string }): Promise<{ invoiceId: string; domainIds: string[] }> {
+  if (!input.items.length) throw new DomainError("Choose at least one domain");
+  if (input.items.length > MAX_BASKET) throw new DomainError(`At most ${MAX_BASKET} domains per order`);
   const db = await getDb();
   const tlds = await db.select().from(schema.domainTlds).where(eq(schema.domainTlds.enabled, true));
-  const parts = splitDomain(input.domain, tlds.map((t) => t.tld));
-  if (!parts) throw new DomainError("This extension is not on sale");
-  const tld = tlds.find((t) => t.tld === parts.tld)!;
-  const contact = cleanContact(input.contact, parts.name);
-  const authCode = String(input.authCode ?? "").trim();
-  if (input.action === "transfer" && (!authCode || authCode.length > 100)) throw new DomainError("Enter the transfer (EPP / auth) code given by the current registrar");
+  const settings = await getSettings("registrars");
 
-  const [existing] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.name, parts.name));
-  if (existing && !["failed", "cancelled", "expired"].includes(existing.status)) throw new DomainError("This domain is already in an account");
-  const { mod, creds } = await account(tld.registrar);
-  if (input.action === "register") {
-    const [hit] = await mod.check(creds, [parts.name], http).catch((err) => {
+  const lines: { name: string; tld: (typeof tlds)[number]; contact: ReturnType<typeof cleanContact>; authCode: string; existing: typeof schema.domainNames.$inferSelect | undefined; years: number; action: BasketItem["action"] }[] = [];
+  for (const item of input.items) {
+    const parts = splitDomain(item.domain, tlds.map((t) => t.tld));
+    if (!parts) throw new DomainError(`${String(item.domain).slice(0, 80)}: this extension is not on sale`);
+    if (lines.some((l) => l.name === parts.name)) continue; // the same name twice is one domain
+    const tld = tlds.find((t) => t.tld === parts.tld)!;
+    const contact = cleanContact(input.contact, parts.name);
+    const authCode = String(item.authCode ?? "").trim();
+    if (item.action === "transfer" && (!authCode || authCode.length > 100)) throw new DomainError(`${parts.name}: enter the transfer (EPP / auth) code given by the current registrar`);
+    const [existing] = await db.select().from(schema.domainNames).where(eq(schema.domainNames.name, parts.name));
+    if (existing && !["failed", "cancelled", "expired"].includes(existing.status)) throw new DomainError(`${parts.name}: this domain is already in an account`);
+    const years = item.action === "register" ? Math.min(MAX_YEARS, Math.max(1, Math.round(item.years ?? 1))) : 1;
+    lines.push({ name: parts.name, tld, contact, authCode, existing, years, action: item.action });
+  }
+  // Availability, one call per registrar.
+  for (const registrar of new Set(lines.filter((l) => l.action === "register").map((l) => l.tld.registrar))) {
+    const names = lines.filter((l) => l.action === "register" && l.tld.registrar === registrar).map((l) => l.name);
+    const { mod, creds } = await account(registrar);
+    const hits = await mod.check(creds, names, http).catch((err) => {
       throw new DomainError(readable(err));
     });
-    if (!hit?.available) throw new DomainError("This domain is no longer available");
+    const gone = names.find((n) => !hits.find((h) => h.domain === n)?.available);
+    if (gone) throw new DomainError(`${gone}: this domain is no longer available`);
   }
+  for (const registrar of new Set(lines.filter((l) => l.action === "transfer").map((l) => l.tld.registrar))) await account(registrar);
 
-  const settings = await getSettings("registrars");
-  const { placeOrder } = await import("./billing");
-  const years = input.action === "register" ? Math.min(MAX_YEARS, Math.max(1, Math.round(input.years ?? 1))) : 1;
-  // The promotion covers the first year; further years are at the renewal price.
-  const first = input.action === "register" ? firstYearPrice(tld) + (years - 1) * tld.renewPrice : tld.transferPrice;
-  const { invoiceId, serviceId } = await placeOrder({
+  const { placeBundle } = await import("./billing");
+  const { invoiceId, serviceIds } = await placeBundle({
     clientId: input.clientId,
     companyId: input.companyId,
     productId: await domainProduct(),
     cycle: "annually",
-    domain: parts.name,
     ip: input.ip,
-    pricing: { first, recurring: tld.renewPrice, label: input.action === "register" ? "Domain registration" : "Domain transfer", period: years > 1 ? `${years} years` : undefined },
-    // The transfer code is a secret of the customer's: encrypted until used.
-    request: { action: input.action, years, authCode: authCode ? encryptJson(authCode) : "" },
+    lines: lines.map((l) => ({
+      domain: l.name,
+      // The promotion covers the first year; further years are at the renewal price.
+      pricing: { first: l.action === "register" ? firstYearPrice(l.tld) + (l.years - 1) * l.tld.renewPrice : l.tld.transferPrice, recurring: l.tld.renewPrice, label: l.action === "register" ? "Domain registration" : "Domain transfer", period: l.years > 1 ? `${l.years} years` : undefined },
+      // The transfer code is a secret of the customer's: encrypted until used.
+      request: { action: l.action, years: l.years, authCode: l.authCode ? encryptJson(l.authCode) : "" },
+    })),
   });
-  const row = { companyId: input.companyId, clientId: input.clientId, serviceId, registrar: tld.registrar, status: "pending" as const, statusMessage: "", contact: contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
-  const [domain] = existing
-    ? await db.update(schema.domainNames).set(row).where(eq(schema.domainNames.id, existing.id)).returning({ id: schema.domainNames.id })
-    : await db.insert(schema.domainNames).values({ ...row, name: parts.name }).returning({ id: schema.domainNames.id });
-  return { invoiceId, domainId: domain.id };
+  const domainIds: string[] = [];
+  for (const [i, l] of lines.entries()) {
+    const row = { companyId: input.companyId, clientId: input.clientId, serviceId: serviceIds[i], registrar: l.tld.registrar, status: "pending" as const, statusMessage: "", contact: l.contact as unknown as Record<string, string>, nameservers: settings.nameservers, expiresAt: null };
+    const [domain] = l.existing
+      ? await db.update(schema.domainNames).set(row).where(eq(schema.domainNames.id, l.existing.id)).returning({ id: schema.domainNames.id })
+      : await db.insert(schema.domainNames).values({ ...row, name: l.name }).returning({ id: schema.domainNames.id });
+    domainIds.push(domain.id);
+  }
+  return { invoiceId, domainIds };
+}
+
+export async function orderDomain(input: { clientId: string; companyId: string | null; domain: string; action: "register" | "transfer"; authCode?: string; contact: Record<string, unknown>; ip?: string; years?: number }): Promise<{ invoiceId: string; domainId: string }> {
+  const { invoiceId, domainIds } = await orderDomains({ clientId: input.clientId, companyId: input.companyId, contact: input.contact, ip: input.ip, items: [{ domain: input.domain, action: input.action, authCode: input.authCode, years: input.years }] });
+  return { invoiceId, domainId: domainIds[0] };
+}
+
+/** `domain code` lines of a bulk transfer. */
+export function parseTransferLines(text: string): BasketItem[] {
+  const items: BasketItem[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) continue;
+    const m = /^(\S+)[\s,;]+(\S.*)$/.exec(line);
+    if (!m) throw new DomainError(`“${line.slice(0, 60)}”: write the domain, a space, then its transfer code`);
+    items.push({ domain: m[1], action: "transfer", authCode: m[2].trim() });
+  }
+  return items;
 }
 
 // ─── Called by the provisioning module when invoices are paid ────────────────

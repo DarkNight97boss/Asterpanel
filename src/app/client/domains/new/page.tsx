@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Alert, Button, ButtonLink, Card, CardHeader, Input, PageHeader, Table, Td } from "@/components/ui";
 import { getLocale, getT } from "@/i18n";
 import { requireAccount } from "@/lib/account";
@@ -41,6 +42,7 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
         </form>
       </Card>
       {error && <Alert tone="danger">{t(error)}</Alert>}
+      {!q && <p className="mb-6 text-sm text-muted">{t("Moving several domains?")} <Link href="/client/domains/order?bulk=1" className="font-medium text-accent hover:underline">{t("Bulk transfer")}</Link></p>}
       {suggestions.length > 0 && (
         <Card className="mb-6">
           <CardHeader title={t("Still free")} description={t("Close to what you searched for.")} />
@@ -56,10 +58,11 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
       )}
       {hits.length > 0 && (
         <Card>
+          <form action="/client/domains/order" method="get">
           <Table head={[t("Domain"), t("Availability"), t("First year"), t("Renewal"), ""]}>
             {hits.map((h) => (
               <tr key={h.domain}>
-                <Td className="font-medium">{h.domain}</Td>
+                <Td className="font-medium"><label className="flex items-center gap-2.5">{h.available && <input type="checkbox" name="domain" value={h.domain} className="accent-(--accent)" />}{h.domain}</label></Td>
                 <Td>{h.available === null ? <span className="text-muted">{t("Could not check")}</span> : h.available ? <span className="text-success">● {t("Available")}</span> : <span className="text-muted">{t("Already registered")}</span>}</Td>
                 <Td>{money(h.available === false ? h.transferPrice : h.registerPrice)}{h.available !== false && h.listPrice && <span className="ml-2 text-xs text-muted line-through">{money(h.listPrice)}</span>}</Td>
                 <Td className="text-body">{money(h.renewPrice)} / {t("year")}</Td>
@@ -69,6 +72,8 @@ export default async function NewDomain({ searchParams }: { searchParams: Promis
               </tr>
             ))}
           </Table>
+          {hits.filter((h) => h.available).length > 1 && <div className="flex items-center justify-between gap-3 border-t border-border p-4 text-sm text-muted"><span>{t("Tick several names to register them together, on one invoice.")}</span><Button variant="secondary" size="sm">{t("Register the ticked ones")}</Button></div>}
+          </form>
         </Card>
       )}
     </>

@@ -2020,6 +2020,17 @@ const it: Record<string, string> = {
   "A direct debit for this invoice is on its way to your bank. It can take a few working days: there is nothing to pay in the meantime.": "Un addebito diretto per questa fattura è in viaggio verso la tua banca. Può richiedere alcuni giorni lavorativi: nel frattempo non c'è nulla da pagare.",
   "A direct debit for this invoice is already on its way to your bank": "Un addebito diretto per questa fattura è già in viaggio verso la tua banca",
   "The bank refused the debit": "La banca ha rifiutato l'addebito",
+  "Bulk transfer": "Trasferimento in blocco",
+  "Register {n} domains": "Registra {n} domini",
+  "Move several domains here at once: one invoice, one registrant. Each transfer costs the transfer price of its extension and adds a year.": "Sposta qui più domini in una volta: una fattura, un intestatario. Ogni trasferimento costa il prezzo di trasferimento della sua estensione e aggiunge un anno.",
+  "Domains and transfer codes": "Domini e codici di trasferimento",
+  "One per line: the domain, a space, its transfer code. Up to {n}.": "Uno per riga: il dominio, uno spazio, il suo codice di trasferimento. Fino a {n}.",
+  "Tick several names to register them together, on one invoice.": "Spunta più nomi per registrarli insieme, su un'unica fattura.",
+  "Register the ticked ones": "Registra quelli spuntati",
+  "Moving several domains?": "Devi spostare più domini?",
+  "Choose at least one domain": "Scegli almeno un dominio",
+  "Use the bulk transfer to move several domains": "Usa il trasferimento in blocco per spostare più domini",
+  "Nothing to order": "Niente da ordinare",
 };
 
 export default it;
