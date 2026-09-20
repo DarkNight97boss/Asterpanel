@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq, inArray, lt } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, sql } from "drizzle-orm";
 import { getDb, schema } from "@/db";
 import { notify } from "@/lib/notify";
 
@@ -28,6 +28,11 @@ export async function runUptimeChecks(now = new Date(), probe: (url: string) => 
       const ok = !result.error && result.status > 0 && result.status < 500;
       const previous = await db.select().from(schema.uptimeChecks).where(eq(schema.uptimeChecks.workloadId, w.id)).orderBy(desc(schema.uptimeChecks.at)).limit(2);
       await db.insert(schema.uptimeChecks).values({ workloadId: w.id, at: now, ok, status: result.status, ms: result.ms, error: (result.error ?? "").slice(0, 200) });
+      const tally = { checks: 1, up: ok ? 1 : 0, msSum: ok ? result.ms : 0 };
+      await db
+        .insert(schema.uptimeDaily)
+        .values({ workloadId: w.id, day: now.toISOString().slice(0, 10), ...tally })
+        .onConflictDoUpdate({ target: [schema.uptimeDaily.workloadId, schema.uptimeDaily.day], set: { checks: sql`${schema.uptimeDaily.checks} + 1`, up: sql`${schema.uptimeDaily.up} + ${tally.up}`, msSum: sql`${schema.uptimeDaily.msSum} + ${tally.msSum}` } });
       checked++;
 
       const wasDown = previous.length >= 2 && !previous[0].ok && !previous[1].ok;

@@ -26,7 +26,7 @@ const STATUS: Record<string, { label: string; color: RGB }> = {
   draft: { label: "Draft", color: MUTED },
 };
 
-function hexToRgb(hex: string): RGB {
+export function hexToRgb(hex: string): RGB {
   const n = parseInt(hex.slice(1), 16);
   return rgb(((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255);
 }
@@ -40,7 +40,7 @@ const REPLACEMENTS: [RegExp, string][] = [
 ];
 
 /** Makes a string drawable with a WinAnsi standard font. */
-function encodable(font: PDFFont, input: string): string {
+export function encodable(font: PDFFont, input: string): string {
   let text = input.normalize("NFC");
   for (const [re, to] of REPLACEMENTS) text = text.replace(re, to);
   const supported = new Set(font.getCharacterSet());
