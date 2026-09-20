@@ -2031,6 +2031,15 @@ const it: Record<string, string> = {
   "Choose at least one domain": "Scegli almeno un dominio",
   "Use the bulk transfer to move several domains": "Usa il trasferimento in blocco per spostare più domini",
   "Nothing to order": "Niente da ordinare",
+  "Passkeys": "Passkey",
+  "Sign in with your fingerprint, face or a security key instead of the password. A passkey cannot be phished or guessed, and asks for no code.": "Accedi con l'impronta, il volto o una chiave di sicurezza al posto della password. Una passkey non può essere rubata con il phishing né indovinata, e non chiede codici.",
+  "added {date}": "aggiunta il {date}",
+  "last used {date}": "ultimo uso {date}",
+  "Add a passkey": "Aggiungi una passkey",
+  "Name, e.g. MacBook": "Nome, es. MacBook",
+  "Cancelled, or no passkey was chosen.": "Annullato, o nessuna passkey scelta.",
+  "The passkey did not work. Try again.": "La passkey non ha funzionato. Riprova.",
+  "Sign in with a passkey": "Accedi con una passkey",
 };
 
 export default it;

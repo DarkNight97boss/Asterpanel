@@ -7,12 +7,14 @@ import { formatDate, formatDateTime } from "@/lib/format";
 import { getSettings } from "@/lib/settings";
 import { otpauthUrl, pendingSecret } from "@/lib/totp";
 import { listSessions, requireUser } from "@/lib/auth";
-import { changePassword, confirmTwoFactor, disableTwoFactor, signOutSession, startTwoFactor, updateProfile } from "../actions";
+import { listPasskeys } from "@/lib/passkeys";
+import { PasskeyAdd } from "@/components/passkey-buttons";
+import { changePassword, confirmTwoFactor, deletePasskey, disableTwoFactor, signOutSession, startTwoFactor, updateProfile } from "../actions";
 
 export default async function Profile({ searchParams }: { searchParams: Promise<{ need2fa?: string }> }) {
   const need2fa = (await searchParams).need2fa === "1";
   const [user, t, locale, general] = await Promise.all([requireUser(), getT(), getLocale(), getSettings("general")]);
-  const [secret, sessions] = await Promise.all([pendingSecret(user.id), listSessions(user.id)]);
+  const [secret, sessions, passkeys] = await Promise.all([pendingSecret(user.id), listSessions(user.id), listPasskeys(user.id)]);
   // The QR is rendered on the server: the secret never reaches a third-party QR service.
   const enrolling = secret ? { secret, qr: await QRCode.toString(otpauthUrl(general.siteName, user.email, secret), { type: "svg", margin: 0 }) } : null;
   return (
@@ -69,6 +71,22 @@ export default async function Profile({ searchParams }: { searchParams: Promise<
             ) : (
               <form action={startTwoFactor}><Button>{t("Set up two-factor authentication")}</Button></form>
             )}
+          </div>
+        </Card>
+        <Card>
+          <CardHeader title={t("Passkeys")} description={t("Sign in with your fingerprint, face or a security key instead of the password. A passkey cannot be phished or guessed, and asks for no code.")} />
+          <div className="space-y-4 p-5 pt-0">
+            {passkeys.length > 0 && (
+              <ul className="divide-y divide-border rounded-theme border border-border text-sm">
+                {passkeys.map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5">
+                    <span><span className="font-medium">{p.name}</span> <span className="text-muted">· {t("added {date}", { date: formatDate(p.createdAt, locale) })}{p.lastUsedAt ? ` · ${t("last used {date}", { date: formatDate(p.lastUsedAt, locale) })}` : ""}</span></span>
+                    <form action={deletePasskey}><input type="hidden" name="id" value={p.id} /><Button size="sm" variant="ghost">{t("Remove")}</Button></form>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <PasskeyAdd labels={{ signIn: "", add: t("Add a passkey"), name: t("Name, e.g. MacBook"), cancelled: t("Cancelled, or no passkey was chosen."), failed: t("The passkey did not work. Try again.") }} />
           </div>
         </Card>
         <Card>

@@ -6,6 +6,7 @@ import { getT } from "@/i18n";
 import { getUser, isStaff, safeNext } from "@/lib/auth";
 import { ensureInstalled } from "@/lib/install";
 import { getSettings } from "@/lib/settings";
+import { PasskeySignIn } from "@/components/passkey-buttons";
 import { login } from "../actions";
 
 export const metadata = { title: "Sign in" };
@@ -39,6 +40,10 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         </p>
         <SubmitButton className="w-full">{t("Sign in")}</SubmitButton>
       </ActionForm>
+
+      <div className="mt-3">
+        <PasskeySignIn next={next ?? ""} labels={{ signIn: t("Sign in with a passkey"), add: "", name: "", cancelled: t("Cancelled, or no passkey was chosen."), failed: t("The passkey did not work. Try again.") }} />
+      </div>
 
       <div aria-hidden className="my-7 h-px bg-gradient-to-r from-transparent via-border-strong to-transparent" />
 
